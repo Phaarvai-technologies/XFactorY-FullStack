@@ -4,7 +4,9 @@ sqlalchemy[asyncio]==2.0.43
 asyncpg==0.30.0
 pydantic-settings==2.10.1
 PyJWT[crypto]==2.10.1
-svix==1.75.0
 httpx==0.28.1
+python-multipart==0.0.20
 pytest==8.4.1
+pytest-asyncio==1.1.0
+svix
 
