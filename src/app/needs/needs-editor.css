@@ -1,0 +1,308 @@
+/* Requirement Editor + AI Structuring — scoped under .req-editor.
+   Reuses project/collaboration visual tokens; does not alter homepage theme. */
+
+.req-editor {
+  padding: 40px 0 96px;
+  background: var(--white);
+}
+
+.req-editor .re-header-actions {
+  flex-wrap: wrap;
+}
+
+.req-editor .re-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 20px 18px;
+}
+
+.req-editor .re-summary-grid h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink-soft);
+}
+
+.req-editor .re-version-card,
+.req-editor .re-save-card {
+  background: var(--white);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.req-editor .re-version-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.req-editor .re-version-top h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.req-editor .re-change-copy {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.req-editor .re-category-stack {
+  display: grid;
+  gap: 22px;
+}
+
+.req-editor .re-category-head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.req-editor .re-category-head p {
+  margin: 6px 0 12px;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+}
+
+.req-editor .re-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.req-editor .re-item-card {
+  background: var(--white);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.req-editor .re-item-conflict {
+  border-color: #f0ddaf;
+  background: #fffdf8;
+}
+
+.req-editor .re-item-missing {
+  border-color: #f0ddaf;
+}
+
+.req-editor .re-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.req-editor .re-item-top h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--navy);
+  font-family: var(--font-display);
+}
+
+.req-editor .re-item-value {
+  margin: 12px 0 8px;
+}
+
+.req-editor .re-item-value span {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+.req-editor .re-item-value p {
+  margin: 0;
+  color: var(--navy);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.req-editor .re-inline-alert {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--amber-bg);
+  border: 1px solid #f0ddaf;
+  color: var(--amber);
+  font-size: 13.5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.req-editor .re-final-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.req-editor .re-classify-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.req-editor .re-classify-option {
+  border: 1.5px solid var(--blueprint-line);
+  background: var(--white);
+  border-radius: 10px;
+  padding: 12px 10px;
+  font: inherit;
+  font-weight: 650;
+  color: var(--navy);
+  cursor: pointer;
+}
+
+.req-editor .re-classify-option.active {
+  border-color: var(--blue-bright);
+  background: var(--blue-pale);
+  color: var(--blue-deep);
+}
+
+.req-editor .pc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.req-editor .pc-field input,
+.req-editor .pc-field textarea,
+.req-editor .pc-field select {
+  width: 100%;
+  border: 1px solid #dce6f5;
+  border-radius: 8px;
+  padding: 11px 12px;
+  font: inherit;
+  font-weight: 400;
+  color: var(--navy);
+  background: var(--white);
+}
+
+.req-editor .pc-field input:focus,
+.req-editor .pc-field textarea:focus,
+.req-editor .pc-field select:focus {
+  outline: none;
+  border-color: var(--blue-bright);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.14);
+}
+
+.req-editor .pc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(11, 37, 69, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.req-editor .pc-modal {
+  width: min(520px, 100%);
+  max-height: min(90vh, 840px);
+  overflow: auto;
+  background: var(--white);
+  border: 1px solid var(--blueprint-line);
+  border-radius: 14px;
+  padding: 22px 20px;
+  box-shadow: 0 16px 40px rgba(11, 37, 69, 0.16);
+}
+
+.req-editor .pc-modal h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.req-editor .pc-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.req-editor .pc-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+.req-editor .pc-back {
+  margin-bottom: 12px;
+}
+
+.req-editor .pc-related {
+  margin: 6px 0 0;
+  color: var(--blue-deep);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.req-editor .pc-thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.req-editor .pc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+@media (max-width: 960px) {
+  .req-editor .re-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .req-editor .pp-header {
+    flex-direction: column;
+  }
+
+  .req-editor .pp-header-actions {
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .req-editor {
+    padding: 28px 0 72px;
+  }
+
+  .req-editor .re-summary-grid,
+  .req-editor .re-classify-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .req-editor .re-final-actions .btn,
+  .req-editor .pc-thread-actions .btn {
+    width: 100%;
+  }
+}

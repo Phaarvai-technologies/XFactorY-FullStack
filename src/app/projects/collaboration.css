@@ -1,0 +1,339 @@
+/* Private Collaboration — scoped under .project-collab.
+   Reuses project-profile tokens/classes; does not alter homepage theme. */
+
+.project-collab {
+  padding: 40px 0 96px;
+  background: var(--white);
+}
+
+.project-collab .pc-back {
+  margin-bottom: 12px;
+}
+
+.project-collab .pc-header {
+  margin-bottom: 36px;
+}
+
+.project-collab .pc-header-actions {
+  flex-wrap: wrap;
+}
+
+.project-collab .pc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.project-collab .pc-empty strong {
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.project-collab .pc-empty p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.project-collab .pc-collab-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.project-collab .pc-collab-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.project-collab .pc-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--blue-pale);
+  color: var(--blue-deep);
+  border: 1px solid var(--blueprint-line);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-display);
+}
+
+.project-collab .pc-collab-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-collab .pc-collab-name {
+  font-weight: 650;
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.project-collab .pc-ext-tag {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid #f0ddaf;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.project-collab .pc-unresolved-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.project-collab .pc-unresolved-list li {
+  background: var(--white);
+  border: 1px solid var(--blueprint-line);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.project-collab .pc-unresolved-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  font-weight: 650;
+  color: var(--navy);
+  font-size: 14.5px;
+}
+
+.project-collab .pc-thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.project-collab .pc-thread {
+  background: var(--white);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 20px 18px;
+}
+
+.project-collab .pc-thread-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.project-collab .pc-thread-head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.project-collab .pc-thread-meta,
+.project-collab .pc-related {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+}
+
+.project-collab .pc-related {
+  color: var(--blue-deep);
+  font-weight: 550;
+}
+
+.project-collab .pc-thread-body {
+  margin: 14px 0 0;
+  color: var(--navy);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.project-collab .pc-replies {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.project-collab .pc-replies li {
+  background: var(--card-bg);
+  border: 1px solid var(--blueprint-line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.project-collab .pc-reply-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.project-collab .pc-reply-meta strong {
+  color: var(--navy);
+}
+
+.project-collab .pc-replies p {
+  margin: 0;
+  color: var(--navy);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.project-collab .pc-no-replies {
+  margin-top: 12px;
+}
+
+.project-collab .pc-thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.project-collab .pc-decision-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.project-collab .pc-decision-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.project-collab .pc-decision-card h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.project-collab .pc-decision-card p {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.project-collab .pc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(11, 37, 69, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.project-collab .pc-modal {
+  width: min(480px, 100%);
+  background: var(--white);
+  border: 1px solid var(--blueprint-line);
+  border-radius: 14px;
+  padding: 22px 20px;
+  box-shadow: 0 16px 40px rgba(11, 37, 69, 0.16);
+}
+
+.project-collab .pc-modal h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.project-collab .pc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.project-collab .pc-field input,
+.project-collab .pc-field textarea,
+.project-collab .pc-field select {
+  width: 100%;
+  border: 1px solid #dce6f5;
+  border-radius: 8px;
+  padding: 11px 12px;
+  font: inherit;
+  font-weight: 400;
+  color: var(--navy);
+  background: var(--white);
+}
+
+.project-collab .pc-field input:focus,
+.project-collab .pc-field textarea:focus,
+.project-collab .pc-field select:focus {
+  outline: none;
+  border-color: var(--blue-bright);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.14);
+}
+
+.project-collab .pc-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+.project-collab .pc-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+@media (max-width: 860px) {
+  .project-collab .pc-collab-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-collab .pc-header {
+    flex-direction: column;
+  }
+
+  .project-collab .pc-header-actions {
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .project-collab {
+    padding: 28px 0 72px;
+  }
+
+  .project-collab .pc-thread-actions .btn {
+    width: 100%;
+  }
+}
