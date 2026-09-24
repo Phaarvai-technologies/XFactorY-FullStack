@@ -105,7 +105,14 @@ type ProfileWizardProps = {
   onExit: () => void;
   onFinish: () => void;
   showToast: (message: string) => void;
+  /**
+   * Saves one step to the backend. `data` is null when only the position is saved
+   * (Skip). Resolves true when saved; the wizard moves on only then.
+   */
+  onSaveStep: (step: number, data: ProfileWizardData | null, progress: StepSave) => Promise<boolean>;
 };
+
+export type StepSave = { completed: boolean; nextStep: number };
 
 const EPIC2_TOTAL = 5;
 
@@ -129,8 +136,11 @@ export function ProfileWizard({
   onExit,
   onFinish,
   showToast,
+  onSaveStep,
 }: ProfileWizardProps) {
   const [step, setStep] = useState(initialStep);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [company, setCompany] = useState(data.company);
   const [location, setLocation] = useState(data.location);
   const [certifications, setCertifications] = useState(data.certifications);
@@ -200,9 +210,24 @@ export function ProfileWizard({
     return true;
   }
 
-  function goNext() {
-    if (!validateStep(step)) return;
+  /** Save the step first; move only when the backend confirmed (no double submit). */
+  async function saveStep(data: ProfileWizardData | null, progress: StepSave): Promise<boolean> {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      return await onSaveStep(step, data, progress);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function goNext() {
+    if (savingRef.current || !validateStep(step)) return;
     const nextData: ProfileWizardData = { company, location, certifications, infra, faqs };
+    const saved = await saveStep(nextData, { completed: true, nextStep: Math.min(step + 1, EPIC2_TOTAL) });
+    if (!saved) return;
     persist(nextData);
     if (step < EPIC2_TOTAL) {
       setStep(step + 1);
@@ -213,7 +238,10 @@ export function ProfileWizard({
     }
   }
 
-  function skip() {
+  async function skip() {
+    // Skip: this step's edits are not saved; only the position is.
+    const saved = await saveStep(null, { completed: false, nextStep: Math.min(step + 1, EPIC2_TOTAL) });
+    if (!saved) return;
     if (step < EPIC2_TOTAL) {
       setStep(step + 1);
     } else {
@@ -223,11 +251,15 @@ export function ProfileWizard({
     }
   }
 
-  function handleBack() {
+  async function handleBack() {
+    const current: ProfileWizardData = { company, location, certifications, infra, faqs };
+    // Keep what was typed on this step (not marked complete) before leaving it.
+    const saved = await saveStep(current, { completed: false, nextStep: Math.max(step - 1, 1) });
+    if (!saved) return;
+    persist(current);
     if (step > 1) {
       setStep(step - 1);
     } else {
-      persist();
       onExit();
       showToast("Progress saved — pick up where you left off any time.");
     }
@@ -334,9 +366,10 @@ export function ProfileWizard({
       footer={
         <WizardFooter
           showPrevious
-          onPrevious={handleBack}
-          onSkip={skip}
-          onNext={goNext}
+          onPrevious={() => void handleBack()}
+          onSkip={() => void skip()}
+          onNext={() => void goNext()}
+          busy={saving}
           nextLabel={
             step === 1 ? "Get started" : step === EPIC2_TOTAL ? "Finish" : "Save & Next"
           }

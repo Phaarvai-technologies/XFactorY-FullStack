@@ -22,6 +22,7 @@ import {
 import { RecurringModal } from "@/components/manufacturer/RecurringModal";
 import { CheckIcon } from "@/components/manufacturer/icons";
 import { api, ApiError } from "@/lib/api";
+import { diffFields, diffProfile } from "@/lib/manufacturer/profilePatch";
 import {
   isManufacturerAccountPath,
   isManufacturerDashboardPath,
@@ -52,7 +53,36 @@ type ServerSnapshot = {
     bookings: (Omit<BookingRequest, "id"> & { id: string })[];
   };
   profileData: ProfileWizardData;
+  /** Company Profile wizard progress, computed by the backend from saved data. */
+  profileProgress: ProfileProgress;
+  /** Unfinished machinery wizard to continue, or null. */
+  machineryDraft: ServerMachineryDraft | null;
 };
+
+type ProfileProgress = {
+  status: "draft" | "completed";
+  currentStep: number;
+  completedSteps: number[];
+  resumeStep: number;
+  percentage: number;
+  checklist: {
+    companyDetailsDone: boolean;
+    locationDone: boolean;
+    certsDone: boolean;
+    infraDone: boolean;
+    faqDone: boolean;
+  };
+};
+
+type ServerMachineryDraft = {
+  id: string;
+  data: MachineryDraft;
+  currentStep: number;
+  completedSteps: number[];
+  resumeStep: number;
+};
+
+type StepProgress = { completed: boolean; nextStep: number };
 
 const SAVE_DELAY_MS = 700;
 
@@ -130,6 +160,25 @@ export function ManufacturerApp() {
   const ids = useRef({ toServer: new Map<number, string>(), toLocal: new Map<string, number>(), next: 1 });
   const profileSaveTimer = useRef<number | null>(null);
   const pendingProfile = useRef<ProfileWizardData | null>(null);
+  /** Profile as last loaded from / saved to the database: the PATCH diff baseline. */
+  const savedProfile = useRef<ProfileWizardData | null>(null);
+  /** Profile saves run one after another, in order. */
+  const profileSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  /** Progress numbers from the backend (dashboard checklist, percentage, resume step). */
+  const [profileProgress, setProfileProgress] = useState<ProfileProgress | null>(null);
+  /** Machinery wizard: saved-but-unfinished draft, and the open wizard's session. */
+  const [machineryDraft, setMachineryDraft] = useState<ServerMachineryDraft | null>(null);
+  const machinerySession = useRef<{ id: string | null; clientKey: string; saved: MachineryDraft | null }>({
+    id: null,
+    clientKey: "",
+    saved: null,
+  });
+  const [machineryStart, setMachineryStart] = useState<{ draft: MachineryDraft | null; step: number }>({
+    draft: null,
+    step: 1,
+  });
+  /** One availability save at a time (recurring / capacity buttons). */
+  const availabilitySaving = useRef(false);
   const availabilityTimer = useRef<number | null>(null);
   const availabilityDirty = useRef(false);
 
@@ -192,9 +241,23 @@ export function ManufacturerApp() {
         bookings: toLocalBookings(snapshot.state.bookings),
       });
       setProfileData(snapshot.profileData);
+      savedProfile.current = snapshot.profileData;
+      setProfileProgress(snapshot.profileProgress);
+      setMachineryDraft(snapshot.machineryDraft);
     },
     [toLocalBookings, toLocalMachinery],
   );
+
+  /** Show the record the backend saved and read back (requirement: latest DB values). */
+  const applySavedProfile = useCallback((snapshot: ServerSnapshot) => {
+    setProfileData(snapshot.profileData);
+    setState((current) => ({
+      ...current,
+      epic2: snapshot.state.epic2,
+      serviceableAreas: snapshot.state.serviceableAreas,
+    }));
+    setProfileProgress(snapshot.profileProgress);
+  }, []);
 
   /** Re-read everything after a failed mutation so the UI never shows unsaved data. */
   const resync = useCallback(async () => {
@@ -258,15 +321,15 @@ export function ManufacturerApp() {
     };
   }, [applySnapshot, checked, isLoaded, isSignedIn, request, screen, showToast, userId]);
 
-  const flags = {
-    companyDetailsDone: profileData.company.name.trim() !== "" && state.epic2.companyDetailsDone,
-    locationDone: state.epic2.locationDone,
-    certsDone: profileData.certifications.length > 0,
-    infraDone: state.epic2.infraDone,
-    faqDone: profileData.faqs.length > 0,
+  // Dashboard progress comes from the backend (computed from saved data).
+  const flags = profileProgress?.checklist ?? {
+    companyDetailsDone: false,
+    locationDone: false,
+    certsDone: false,
+    infraDone: false,
+    faqDone: false,
   };
-  const doneCount = Object.values(flags).filter(Boolean).length;
-  const pct = Math.round(15 + (doneCount / 5) * 85);
+  const pct = profileProgress?.percentage ?? 15;
 
   async function handleAccountCreated(submission: AccountSubmission) {
     let snapshot: ServerSnapshot;
@@ -288,20 +351,10 @@ export function ManufacturerApp() {
   }
 
   function handleOpenProfileWizard(jumpToNextIncomplete: boolean) {
-    if (jumpToNextIncomplete) {
-      const order: (keyof typeof flags)[] = [
-        "companyDetailsDone",
-        "locationDone",
-        "certsDone",
-        "infraDone",
-        "faqDone",
-      ];
-      const idx = order.findIndex((key) => !flags[key]);
-      const step = idx === -1 ? 1 : idx + 2;
-      setProfileWizardStep(step > 5 ? 1 : step);
-    } else {
-      setProfileWizardStep(1);
-    }
+    // Continue from the last incomplete step saved in the backend.
+    setProfileWizardStep(jumpToNextIncomplete ? (profileProgress?.resumeStep ?? 1) : 1);
+    // The wizard starts from exactly these values, so changes are measured from them.
+    savedProfile.current = profileData;
     setProfileWizardOpen(true);
   }
 
@@ -313,13 +366,59 @@ export function ManufacturerApp() {
     const data = pendingProfile.current;
     if (!data) return;
     pendingProfile.current = null;
-    request<ServerSnapshot>("/manufacturer/profile", {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }).catch((error: unknown) => {
-      showToast(`Profile not saved — ${errorMessage(error)}`);
+
+    profileSaveQueue.current = profileSaveQueue.current.then(async () => {
+      // Send only what changed since the last successful save (PATCH): fields the
+      // user didn't touch are never sent, so they can't overwrite saved values.
+      const baseline = savedProfile.current ?? createBlankProfileData();
+      const changes = diffProfile(baseline, data);
+      if (!changes) return;
+      try {
+        const snapshot = await request<ServerSnapshot>("/manufacturer/profile", {
+          method: "PATCH",
+          body: JSON.stringify(changes),
+        });
+        savedProfile.current = data;
+        // Newer edits waiting? Then they win; otherwise show the saved record.
+        if (!pendingProfile.current) applySavedProfile(snapshot);
+      } catch (error: unknown) {
+        // Baseline is unchanged, so these fields are sent again with the next save.
+        showToast(`Profile not saved — ${errorMessage(error)}`);
+      }
     });
-  }, [request, showToast]);
+  }, [applySavedProfile, request, showToast]);
+
+  /**
+   * "Save & Next" / Skip / Previous in the profile wizard: PATCH the changed fields
+   * of this step plus its progress, and resolve true only when the backend saved it.
+   */
+  const saveProfileStep = useCallback(
+    (step: number, data: ProfileWizardData | null, progress: StepProgress): Promise<boolean> => {
+      const task = async (): Promise<boolean> => {
+        const changes = data ? diffProfile(savedProfile.current ?? createBlankProfileData(), data) : null;
+        try {
+          const snapshot = await request<ServerSnapshot>("/manufacturer/profile", {
+            method: "PATCH",
+            body: JSON.stringify({ ...(changes ?? {}), progress: { step, ...progress } }),
+          });
+          if (data) {
+            savedProfile.current = data;
+            pendingProfile.current = null;
+          }
+          applySavedProfile(snapshot);
+          return true;
+        } catch (error: unknown) {
+          showToast(`Couldn’t save this step — ${errorMessage(error)}`);
+          return false;
+        }
+      };
+      // Runs after any save already in progress (strict order, no overlap).
+      const result = profileSaveQueue.current.then(task);
+      profileSaveQueue.current = result.then(() => undefined);
+      return result;
+    },
+    [applySavedProfile, request, showToast],
+  );
 
   function handleProfileChange(data: ProfileWizardData) {
     setProfileData(data);
@@ -337,42 +436,78 @@ export function ManufacturerApp() {
       },
       serviceableAreas: data.location.serviceableAreas,
     }));
-    // Save to the backend (batched so quick successive edits send one request).
+    // Saved by the step buttons; remembered here so closing the wizard keeps it too.
     pendingProfile.current = data;
-    if (profileSaveTimer.current !== null) window.clearTimeout(profileSaveTimer.current);
-    profileSaveTimer.current = window.setTimeout(flushProfileSave, SAVE_DELAY_MS);
   }
 
-  function handleMachineryPublish(draft: MachineryDraft, status: "Draft" | "Published") {
-    const tempId = ids.current.next++;
-    setState((current) => ({
-      ...current,
-      machinery: [
-        {
-          ...draft,
-          id: tempId,
-          status,
-        },
-        ...current.machinery,
-      ],
-    }));
-    setMachineryWizardOpen(false);
-    showToast(status === "Published" ? "Listing published." : "Saved as draft.");
+  function openMachineryWizard() {
+    // Continue an unfinished draft from the backend, or start a new one.
+    const resume = machineryDraft;
+    machinerySession.current = {
+      id: resume?.id ?? null,
+      clientKey: resume ? "" : crypto.randomUUID(),
+      saved: resume?.data ?? null,
+    };
+    setMachineryStart({ draft: resume?.data ?? null, step: resume?.resumeStep ?? 1 });
+    setMachineryWizardOpen(true);
+  }
 
-    request<ServerSnapshot>("/manufacturer/machinery", {
-      method: "POST",
-      body: JSON.stringify({ ...draft, status }),
-    })
-      .then((snapshot) => {
-        setState((current) => ({ ...current, machinery: toLocalMachinery(snapshot.state.machinery) }));
-      })
-      .catch((error: unknown) => {
-        setState((current) => ({
-          ...current,
-          machinery: current.machinery.filter((m) => m.id !== tempId),
-        }));
-        showToast(`Listing not saved — ${errorMessage(error)}`);
+  /** One machinery request: first save creates the draft (POST), later ones PATCH it. */
+  const sendMachinery = useCallback(
+    async (draft: MachineryDraft | null, extra: Record<string, unknown>): Promise<ServerSnapshot> => {
+      const session = machinerySession.current;
+      if (!session.id) {
+        if (!draft) throw new Error("Please fill in the machinery details first.");
+        const { finish, ...createExtra } = extra;
+        const created = await request<ServerSnapshot>("/manufacturer/machinery/drafts", {
+          method: "POST",
+          body: JSON.stringify({ clientKey: session.clientKey, ...draft, ...createExtra }),
+        });
+        session.id = created.machineryDraft?.id ?? null;
+        session.saved = draft;
+        if (!finish || !session.id) return created;
+        // Publish / Save as Draft on a never-saved draft: create it, then complete it.
+        extra = { finish };
+      }
+      const changes = draft ? diffFields(session.saved ?? draft, draft) : {};
+      const snapshot = await request<ServerSnapshot>(`/manufacturer/machinery/${session.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...changes, ...extra }),
       });
+      if (draft) session.saved = draft;
+      return snapshot;
+    },
+    [request],
+  );
+
+  const saveMachineryStep = useCallback(
+    async (step: number, draft: MachineryDraft | null, progress: StepProgress): Promise<boolean> => {
+      try {
+        const snapshot = await sendMachinery(draft, { progress: { step, ...progress } });
+        setMachineryDraft(snapshot.machineryDraft);
+        return true;
+      } catch (error: unknown) {
+        showToast(`Couldn’t save this step — ${errorMessage(error)}`);
+        return false;
+      }
+    },
+    [sendMachinery, showToast],
+  );
+
+  async function handleMachineryPublish(draft: MachineryDraft, status: "Draft" | "Published"): Promise<boolean> {
+    try {
+      // Save the last edits and complete the listing; close only when saved.
+      const snapshot = await sendMachinery(draft, { finish: status });
+      setState((current) => ({ ...current, machinery: toLocalMachinery(snapshot.state.machinery) }));
+      setMachineryDraft(snapshot.machineryDraft);
+      machinerySession.current = { id: null, clientKey: "", saved: null };
+      setMachineryWizardOpen(false);
+      showToast(status === "Published" ? "Listing published." : "Saved as draft.");
+      return true;
+    } catch (error: unknown) {
+      showToast(`Listing not saved — ${errorMessage(error)}`);
+      return false;
+    }
   }
 
   function handleSetMachineryStatus(id: number, status: ManufacturerState["machinery"][number]["status"]) {
@@ -394,25 +529,41 @@ export function ManufacturerApp() {
     });
   }
 
-  // Calendar / recurring / capacity: one batched save of all three.
+  // Calendar day clicks: batched PATCH of the calendar only (recurring and
+  // capacity are saved by their own Save buttons below and are never resent).
   useEffect(() => {
     if (!availabilityDirty.current) return;
     availabilityDirty.current = false;
     if (availabilityTimer.current !== null) window.clearTimeout(availabilityTimer.current);
-    const body = JSON.stringify({
-      calendar: state.calendar,
-      recurring: state.recurring,
-      capacity: state.capacity,
-    });
+    const body = JSON.stringify({ calendar: state.calendar });
     availabilityTimer.current = window.setTimeout(() => {
       availabilityTimer.current = null;
-      request<ServerSnapshot>("/manufacturer/availability", { method: "PUT", body }).catch(
+      request<ServerSnapshot>("/manufacturer/availability", { method: "PATCH", body }).catch(
         (error: unknown) => {
           showToast(`Availability not saved — ${errorMessage(error)}`);
         },
       );
     }, SAVE_DELAY_MS);
-  }, [request, showToast, state.calendar, state.recurring, state.capacity]);
+  }, [request, showToast, state.calendar]);
+
+  /** Recurring / capacity Save: PATCH only that part; update the screen after it is saved. */
+  async function saveAvailabilityPart(part: "recurring" | "capacity", value: unknown): Promise<boolean> {
+    if (availabilitySaving.current) return false;       // ignore double clicks
+    availabilitySaving.current = true;
+    try {
+      const snapshot = await request<ServerSnapshot>("/manufacturer/availability", {
+        method: "PATCH",
+        body: JSON.stringify({ [part]: value }),
+      });
+      setState((current) => ({ ...current, [part]: snapshot.state[part] }));
+      return true;
+    } catch (error: unknown) {
+      showToast(`Availability not saved — ${errorMessage(error)}`);
+      return false;
+    } finally {
+      availabilitySaving.current = false;
+    }
+  }
 
   // Send any pending profile edits before leaving the page.
   useEffect(() => {
@@ -437,21 +588,19 @@ export function ManufacturerApp() {
     });
   }
 
-  function handleSaveCapacity(plan: ManufacturerState["capacity"]) {
-    availabilityDirty.current = true;
-    setState((current) => ({ ...current, capacity: plan }));
-    showToast("Capacity saved.");
+  async function handleSaveCapacity(plan: ManufacturerState["capacity"]) {
+    if (await saveAvailabilityPart("capacity", plan)) showToast("Capacity saved.");
   }
 
-  function handleSaveRecurring(recurring: RecurringAvailability) {
+  async function handleSaveRecurring(recurring: RecurringAvailability) {
     if (!recurring.days.length || !recurring.start || !recurring.end) {
       showToast("Pick at least one day and a start/end time.");
       return;
     }
-    availabilityDirty.current = true;
-    setState((current) => ({ ...current, recurring }));
-    setRecurringOpen(false);
-    showToast("Recurring availability saved.");
+    if (await saveAvailabilityPart("recurring", recurring)) {
+      setRecurringOpen(false);
+      showToast("Recurring availability saved.");
+    }
   }
 
   function decideBooking(id: number, decision: "accepted" | "declined") {
@@ -541,7 +690,7 @@ export function ManufacturerApp() {
             pct={pct}
             flags={flags}
             onOpenProfileWizard={handleOpenProfileWizard}
-            onOpenMachineryWizard={() => setMachineryWizardOpen(true)}
+            onOpenMachineryWizard={openMachineryWizard}
             onSetMachineryStatus={handleSetMachineryStatus}
             onSaveCapacity={handleSaveCapacity}
             onCycleDay={handleCycleDay}
@@ -568,6 +717,7 @@ export function ManufacturerApp() {
               }}
               onFinish={() => undefined}
               showToast={showToast}
+              onSaveStep={saveProfileStep}
             />
           ) : null}
 
@@ -576,13 +726,17 @@ export function ManufacturerApp() {
               onClose={() => setMachineryWizardOpen(false)}
               onPublish={handleMachineryPublish}
               showToast={showToast}
+              onSaveStep={saveMachineryStep}
+              initialDraft={machineryStart.draft}
+              initialStep={machineryStart.step}
+              hasSavedDraft={machineryDraft !== null}
             />
           ) : null}
 
           {recurringOpen ? (
             <RecurringModal
               onClose={() => setRecurringOpen(false)}
-              onSave={(days, start, end) => handleSaveRecurring({ days, start, end })}
+              onSave={(days, start, end) => void handleSaveRecurring({ days, start, end })}
             />
           ) : null}
         </>

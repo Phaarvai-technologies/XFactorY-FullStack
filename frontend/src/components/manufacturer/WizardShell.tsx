@@ -22,6 +22,8 @@ type WizardFooterProps = {
   nextLabel?: string;
   /** When false, Previous is omitted (no broken back navigation). */
   showPrevious?: boolean;
+  /** True while the current step is being saved: buttons are disabled (no double submit). */
+  busy?: boolean;
 };
 
 /** Shared footer: Previous (left) · Skip (center) · Save & Next (right). */
@@ -31,22 +33,23 @@ export function WizardFooter({
   onNext,
   nextLabel = "Save & Next",
   showPrevious = true,
+  busy = false,
 }: WizardFooterProps) {
   return (
     <div className="wiz-footer">
       <div className="wiz-footer-side wiz-footer-left">
         {showPrevious && onPrevious ? (
-          <button type="button" className="btn-primary" onClick={onPrevious}>
+          <button type="button" className="btn-primary" onClick={onPrevious} disabled={busy}>
             Previous
           </button>
         ) : null}
       </div>
-      <button type="button" className="btn-text wiz-footer-skip" onClick={onSkip}>
+      <button type="button" className="btn-text wiz-footer-skip" onClick={onSkip} disabled={busy}>
         Skip
       </button>
       <div className="wiz-footer-side wiz-footer-right">
-        <button type="button" className="btn-primary" onClick={onNext}>
-          {nextLabel}
+        <button type="button" className="btn-primary" onClick={onNext} disabled={busy} aria-busy={busy}>
+          {busy ? "Saving…" : nextLabel}
         </button>
       </div>
     </div>
