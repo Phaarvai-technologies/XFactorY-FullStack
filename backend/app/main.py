@@ -6,19 +6,17 @@ from app.api.routes.manufacturer import router as manufacturer_router
 from app.api.routes.webhooks import router as clerk_webhook_router
 from app.core.config import get_settings
 
+
 settings = get_settings()
 
-app = FastAPI(title="XY Factory API", version="1.1.0")
-
-origins = [
-    origin.strip()
-    for origin in settings.cors_origins.split(",")
-    if origin.strip()
-]
+app = FastAPI(
+    title="XY Factory API",
+    version="1.1.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,7 +27,10 @@ app.include_router(identity_router, prefix="/api/v1")
 app.include_router(clerk_webhook_router, prefix="/api/v1")
 
 
-@app.get("/health")
-@app.get("/health/live")
+@app.get("/health", tags=["health"])
+@app.get("/health/live", tags=["health"])
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "environment": settings.environment,
+    }
