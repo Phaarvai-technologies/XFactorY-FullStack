@@ -1,5 +1,6 @@
 import { FeatureSections } from "@/components/home/FeatureSections";
 import { Hero } from "@/components/home/Hero";
+import { PlatformStatsSection } from "@/components/home/PlatformStatsSection";
 import { PersonaIcons } from "@/components/home/PersonaIcons";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
@@ -11,10 +12,15 @@ export default function HomePage() {
       <PersonaIcons />
       <PilotStrip />
       <Header />
+      
       <main>
         <Hero />
+
+        <PlatformStatsSection />
+
         <FeatureSections />
       </main>
+
       <Footer />
     </>
   );

@@ -357,7 +357,7 @@ h1.headline {
 .trust {
   background: var(--navy);
   color: #dce7f7;
-  padding: 22px 0;
+  padding: 10px 0;
 }
 
 .trust .wrap {
@@ -368,20 +368,20 @@ h1.headline {
 
 .trust .icon {
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border: 1.3px solid #6e8ab8;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   margin-top: 1px;
 }
 
 .trust p {
   margin: 0;
-  font-size: 13.8px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.4;
   color: #c4d5ee;
   max-width: 78ch;
 }

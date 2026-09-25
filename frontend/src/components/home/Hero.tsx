@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/Button";
 
+
 export function Hero() {
   return (
     <section className="hero">
