@@ -51,13 +51,35 @@ function blankDraft(): MachineryDraft {
 
 type MachineryWizardProps = {
   onClose: () => void;
-  onPublish: (draft: MachineryDraft, status: "Draft" | "Published") => void;
+  /** Final step (Save as Draft / Publish). Resolves true once saved; the parent then closes the wizard. */
+  onPublish: (draft: MachineryDraft, status: "Draft" | "Published") => Promise<boolean>;
   showToast: (message: string) => void;
+  /**
+   * Saves one step to the backend (the first one creates the draft record).
+   * `draft` is null when only the position is saved (Skip). Resolves true when saved.
+   */
+  onSaveStep: (step: number, draft: MachineryDraft | null, progress: { completed: boolean; nextStep: number }) => Promise<boolean>;
+  /** A saved, unfinished draft to continue (from the backend). */
+  initialDraft?: MachineryDraft | null;
+  /** Step to continue from (the last incomplete one). */
+  initialStep?: number;
+  /** True once the draft exists in the database. */
+  hasSavedDraft?: boolean;
 };
 
-export function MachineryWizard({ onClose, onPublish, showToast }: MachineryWizardProps) {
-  const [step, setStep] = useState(1);
-  const [draft, setDraft] = useState<MachineryDraft>(blankDraft);
+export function MachineryWizard({
+  onClose,
+  onPublish,
+  showToast,
+  onSaveStep,
+  initialDraft = null,
+  initialStep = 1,
+  hasSavedDraft = false,
+}: MachineryWizardProps) {
+  const [step, setStep] = useState(initialStep);
+  const [draft, setDraft] = useState<MachineryDraft>(() => initialDraft ?? blankDraft());
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [errors, setErrors] = useState<{ industry?: string; type?: string }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -122,26 +144,59 @@ export function MachineryWizard({ onClose, onPublish, showToast }: MachineryWiza
     return true;
   }
 
-  function goNext() {
-    if (!validateStep(step)) return;
-    if (step < EPIC3_TOTAL) setStep(step + 1);
+  /** Save first; move only when the backend confirmed (no double submit). */
+  async function run(action: () => Promise<boolean>): Promise<boolean> {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      return await action();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
 
-  function skip() {
-    if (step < EPIC3_TOTAL) setStep(step + 1);
+  async function goNext() {
+    if (savingRef.current || !validateStep(step)) return;
+    const nextStep = Math.min(step + 1, EPIC3_TOTAL);
+    const saved = await run(() => onSaveStep(step, draft, { completed: true, nextStep }));
+    if (saved && step < EPIC3_TOTAL) setStep(nextStep);
   }
 
-  function handleBack() {
+  async function skip() {
+    if (step >= EPIC3_TOTAL) return;
+    const nextStep = step + 1;
+    // Before the first save there is no record yet (step 1 creates it).
+    if (hasSavedDraft) {
+      const saved = await run(() => onSaveStep(step, null, { completed: false, nextStep }));
+      if (!saved) return;
+    }
+    setStep(nextStep);
+  }
+
+  async function handleBack() {
+    if (hasSavedDraft) {
+      // Keep what was typed on this step (not marked complete) before leaving it.
+      const saved = await run(() =>
+        onSaveStep(step, draft, { completed: false, nextStep: Math.max(step - 1, 1) }),
+      );
+      if (!saved) return;
+    }
     if (step > 1) {
       setStep(step - 1);
     } else {
       onClose();
-      showToast("Draft discarded — nothing was saved.");
+      showToast(
+        hasSavedDraft
+          ? "Progress saved — pick up where you left off any time."
+          : "Draft discarded — nothing was saved.",
+      );
     }
   }
 
-  function finish(status: "Draft" | "Published") {
-    onPublish(draft, status);
+  async function finish(status: "Draft" | "Published") {
+    await run(() => onPublish(draft, status));
   }
 
   const summaryRows: { label: string; value: string }[] = [
@@ -181,9 +236,10 @@ export function MachineryWizard({ onClose, onPublish, showToast }: MachineryWiza
       footer={
         <WizardFooter
           showPrevious
-          onPrevious={handleBack}
-          onSkip={skip}
-          onNext={goNext}
+          onPrevious={() => void handleBack()}
+          onSkip={() => void skip()}
+          onNext={() => void goNext()}
+          busy={saving}
           nextLabel="Save & Next"
         />
       }
@@ -536,7 +592,8 @@ export function MachineryWizard({ onClose, onPublish, showToast }: MachineryWiza
               type="button"
               className="btn-secondary-full"
               style={{ width: "auto", flex: 1 }}
-              onClick={() => finish("Draft")}
+              onClick={() => void finish("Draft")}
+              disabled={saving}
             >
               Save as Draft
             </button>
@@ -544,7 +601,8 @@ export function MachineryWizard({ onClose, onPublish, showToast }: MachineryWiza
               type="button"
               className="btn-primary"
               style={{ flex: 1 }}
-              onClick={() => finish("Published")}
+              onClick={() => void finish("Published")}
+              disabled={saving}
             >
               Publish
             </button>

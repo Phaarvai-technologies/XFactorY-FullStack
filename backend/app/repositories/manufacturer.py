@@ -67,11 +67,6 @@ def int_or_none(value: Any) -> int | None:
     return int(value) if value.isdigit() else None
 
 
-def valid_year(value: Any) -> int | None:
-    year = int_or_none(value)
-    return year if year and 1700 <= year <= date.today().year else None
-
-
 def parse_pin(pin: Any) -> tuple[float, float] | None:
     """Frontend pin format is 'lat, lng'."""
     if not isinstance(pin, str):
@@ -108,6 +103,11 @@ class ManufacturerRepository:
         """Create the user / organization / membership rows for a Clerk user."""
         if not profile.get("email"):
             raise LookupError("Your Clerk account has no primary email address")
+        # One setup at a time per Clerk user: the roles page and the dashboard can
+        # both trigger this at the same moment, and without the lock each request
+        # could create its own manufacturer organization (duplicate records).
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                              {"key": f"xy-sync-actor:{actor.clerk_user_id}"})
         try:
             user_id = await self.db.scalar(text("""
                 INSERT INTO users(clerk_user_id,email,phone,display_name,first_name,last_name)
@@ -258,63 +258,117 @@ class ManufacturerRepository:
         return file_id
 
     # ------------------------------------------------------------------ profile
-    async def save_profile(self, actor: Actor, data: dict, asset_ids: dict[str, UUID]) -> None:
+    # Frontend field -> (table, column). Only these columns can be written, so
+    # the dynamic UPDATEs below never take a column name from the request.
+    COMPANY_PROFILE_COLUMNS = {
+        "about": "about_company", "vision": "vision", "estYear": "establishment_year",
+        "employees": "employee_count", "businessType": "business_type", "orgSize": "organization_size",
+    }
+    LOCATION_COLUMNS = {
+        "address": ("address", "address_line1"), "city": ("city",), "state": ("state_province",),
+        "zip": ("postal_code",), "sez": ("sez_status",),
+    }
+
+    async def update_profile(self, actor: Actor, changes: dict, asset_ids: dict[str, UUID | None],
+                             commit: bool = True) -> None:
+        """Partial update of the manufacturer profile (PATCH semantics).
+
+        `changes` holds ONLY the fields the user changed:
+          key absent        -> column untouched (existing value or NULL stays)
+          key = "" / null   -> user cleared it -> NULL
+          key = value       -> saved (replaces an existing value or a NULL)
+        The record is identified by the Clerk user's manufacturer organization;
+        existing rows are updated in place, never duplicated.
+        """
         ctx = await self.context(actor)
-        company, location = data["company"], data["location"]
-        await self.db.execute(text("""
-            UPDATE organizations SET display_name=COALESCE(NULLIF(:name,''),display_name),
-              description=NULLIF(:about,''),updated_at=now(),version=version+1
-            WHERE id=:organization_id
-        """), {**ctx, "name": str(company.get("name") or "").strip(), "about": company.get("about") or ""})
-        await self.db.execute(text("""
-            INSERT INTO organization_profiles
-              (organization_id,logo_file_id,cover_file_id,about_company,vision,establishment_year,
-               employee_count,business_type,organization_size)
-            VALUES (:organization_id,:logo,:cover,:about,:vision,:year,:employees,:business,:size)
-            ON CONFLICT (organization_id) DO UPDATE SET
-              logo_file_id=COALESCE(EXCLUDED.logo_file_id,organization_profiles.logo_file_id),
-              cover_file_id=COALESCE(EXCLUDED.cover_file_id,organization_profiles.cover_file_id),
-              about_company=EXCLUDED.about_company,vision=EXCLUDED.vision,
-              establishment_year=EXCLUDED.establishment_year,employee_count=EXCLUDED.employee_count,
-              business_type=EXCLUDED.business_type,organization_size=EXCLUDED.organization_size,updated_at=now()
-        """), {**ctx, "logo": asset_ids.get("logo"), "cover": asset_ids.get("cover"),
-                "about": company.get("about") or None, "vision": company.get("vision") or None,
-                "year": valid_year(company.get("estYear")), "employees": int_or_none(company.get("employees")),
-                "business": company.get("businessType") or None, "size": company.get("orgSize") or None})
+        company = changes.get("company") or {}
+        location = changes.get("location")
 
-        country_name = location.get("country") or ""
-        pin = location.get("pin")
-        coords = parse_pin(pin)
+        # organizations: display_name is required, so an empty name is ignored
+        # (the company keeps its name); description mirrors "about".
+        org_sets, org_params = [], {}
+        if str(company.get("name") or "").strip():
+            org_sets.append("display_name=:name"); org_params["name"] = company["name"].strip()
+        if "about" in company:
+            org_sets.append("description=:about"); org_params["about"] = company["about"] or None
+        if org_sets:
+            await self.db.execute(text(
+                f"UPDATE organizations SET {', '.join(org_sets)}, updated_at=now(), version=version+1 "
+                "WHERE id=:organization_id"), {**ctx, **org_params})
+
+        # organization_profiles: one row per organization (primary key), upserted.
+        profile_values: dict[str, Any] = {}
+        for key, column in self.COMPANY_PROFILE_COLUMNS.items():
+            if key in company:
+                value = company[key]
+                if key in ("estYear", "employees"):
+                    value = int(value) if str(value or "").strip() else None
+                profile_values[column] = value if value not in ("",) else None
+        for key in ("logo", "cover"):
+            if key in asset_ids:  # new image uploaded, or cleared (None)
+                profile_values[f"{key}_file_id"] = asset_ids[key]
+        if profile_values:
+            cols = list(profile_values)
+            await self.db.execute(text(
+                f"INSERT INTO organization_profiles (organization_id, {', '.join(cols)}) "
+                f"VALUES (:organization_id, {', '.join(':' + c for c in cols)}) "
+                f"ON CONFLICT (organization_id) DO UPDATE SET "
+                f"{', '.join(f'{c}=EXCLUDED.{c}' for c in cols)}, updated_at=now()"),
+                {**ctx, **profile_values})
+
+        needs_facility = location is not None or any(k in changes for k in ("certifications", "infra", "faqs"))
+        facility_id = await self._ensure_facility(ctx, company.get("name")) if needs_facility else None
+
+        if location:
+            sets, params = [], {"facility": facility_id}
+            for key, columns in self.LOCATION_COLUMNS.items():
+                if key in location:
+                    params[key] = location[key] or None
+                    sets += [f"{column}=:{key}" for column in columns]
+            if "country" in location:
+                params["country_name"] = location["country"] or None
+                params["country_code"] = await self._country_code(location["country"] or "")
+                sets += ["country_name=:country_name", "country_code=:country_code"]
+            if "serviceableAreas" in location:
+                params["areas"] = list(location["serviceableAreas"] or [])  # NOT NULL column: cleared = []
+                sets.append("serviceable_areas=:areas")
+            if "pin" in location:
+                coords = parse_pin(location["pin"])
+                params.update(pin=location["pin"] or None,
+                              lat=coords[0] if coords else None, lng=coords[1] if coords else None)
+                sets += ["map_pin=:pin",
+                         "location=CASE WHEN CAST(:lat AS float8) IS NULL THEN NULL ELSE "
+                         "ST_SetSRID(ST_MakePoint(CAST(:lng AS float8),CAST(:lat AS float8)),4326)::geography END"]
+            if sets:
+                await self.db.execute(text(
+                    f"UPDATE facilities SET {', '.join(sets)}, version=version+1 WHERE id=:facility"), params)
+
+        if "certifications" in changes:
+            await self._replace_certifications(ctx, facility_id, changes["certifications"] or [])
+        if "infra" in changes:
+            await self._replace_infrastructure(ctx, facility_id, changes["infra"] or {})
+        if "faqs" in changes:
+            await self._replace_faqs(ctx, facility_id, changes["faqs"] or [])
+        if commit:
+            await self.db.commit()
+
+    async def _ensure_facility(self, ctx: dict, company_name: str | None) -> UUID:
+        """The manufacturer's single headquarters facility (created once, then reused)."""
         facility_id = await self.db.scalar(text("""
-            INSERT INTO facilities
-              (organization_id,name,facility_type,address,address_line1,city,state_province,country_code,
-               country_name,postal_code,is_headquarters,sez_status,serviceable_areas,map_pin,location,
-               status,visibility)
-            VALUES (:organization_id,:name,'factory',:address,:address,:city,:state,:country,:country_name,:zip,
-                    true,:sez,:areas,:pin,
-                    CASE WHEN CAST(:lat AS float8) IS NULL THEN NULL
-                         ELSE ST_SetSRID(ST_MakePoint(CAST(:lng AS float8),CAST(:lat AS float8)),4326)::geography END,
-                    'draft','private')
+            SELECT id FROM facilities WHERE organization_id=:organization_id
+              AND is_headquarters=true AND status<>'suspended' LIMIT 1
+        """), ctx)
+        if facility_id:
+            return facility_id
+        return await self.db.scalar(text("""
+            INSERT INTO facilities (organization_id,name,facility_type,is_headquarters,status,visibility)
+            VALUES (:organization_id,:name,'factory',true,'draft','private')
             ON CONFLICT (organization_id) WHERE is_headquarters=true AND status<>'suspended'
-            DO UPDATE SET name=EXCLUDED.name,address=EXCLUDED.address,address_line1=EXCLUDED.address_line1,
-              city=EXCLUDED.city,state_province=EXCLUDED.state_province,country_code=EXCLUDED.country_code,
-              country_name=EXCLUDED.country_name,postal_code=EXCLUDED.postal_code,sez_status=EXCLUDED.sez_status,
-              serviceable_areas=EXCLUDED.serviceable_areas,map_pin=EXCLUDED.map_pin,location=EXCLUDED.location,
-              version=facilities.version+1
-            RETURNING id
-        """), {**ctx, "name": f'{company.get("name") or ctx["display_name"] or "Manufacturer"} Headquarters',
-                "address": location.get("address") or None, "city": location.get("city") or None,
-                "state": location.get("state") or None, "country": await self._country_code(country_name),
-                "country_name": country_name or None, "zip": location.get("zip") or None,
-                "sez": location.get("sez") or None, "areas": list(location.get("serviceableAreas") or []),
-                "pin": pin if isinstance(pin, str) and pin else None,
-                "lat": coords[0] if coords else None, "lng": coords[1] if coords else None})
+            DO UPDATE SET version=facilities.version RETURNING id
+        """), {**ctx, "name": f'{(company_name or "").strip() or ctx["display_name"] or "Manufacturer"} Headquarters'})
 
-        await self._replace_certifications(ctx, facility_id, data.get("certifications") or [])
-        await self._replace_infrastructure(ctx, facility_id, data.get("infra") or {})
-        await self._replace_faqs(ctx, facility_id, data.get("faqs") or [])
-
-        flags = profile_flags(data)
+    async def set_onboarding_flags(self, actor: Actor, flags: dict[str, bool]) -> None:
+        ctx = await self.context(actor)
         pct = round(15 + sum(flags.values()) / 5 * 85)
         steps = [("company", "company_information"), ("location", "location"), ("certs", "certification"),
                  ("infra", "infrastructure"), ("faq", "faq")]
@@ -365,22 +419,32 @@ class ManufacturerRepository:
                     "file_name": item.get("fileName") or None})
 
     async def _replace_infrastructure(self, ctx: dict, facility_id: UUID, values: dict) -> None:
+        """Updates only the infrastructure answers that were sent (partial)."""
         for position, (code, category) in enumerate(INFRA_CATEGORIES.items()):
+            if code not in values:
+                continue
             item_id = await self.db.scalar(text("""
                 INSERT INTO infrastructure_items(code,name,category,answer_type,display_order)
                 VALUES (:code,:name,:category,'text',:position)
                 ON CONFLICT (code) DO UPDATE SET name=infrastructure_items.name RETURNING id
             """), {"code": code, "name": INFRA_NAMES[code], "category": category, "position": position})
-            await self.db.execute(text("""
-                INSERT INTO manufacturer_infrastructure
-                  (organization_id,facility_id,infrastructure_item_id,text_value,updated_by_membership_id)
-                VALUES (:organization_id,:facility,:item,:value,:membership_id)
-                ON CONFLICT (organization_id,facility_id,infrastructure_item_id)
-                DO UPDATE SET text_value=EXCLUDED.text_value,
-                  updated_by_membership_id=EXCLUDED.updated_by_membership_id,
-                  version=manufacturer_infrastructure.version+1
+            # Update the existing answer row (older rows may have no facility_id),
+            # otherwise insert one - never a second row for the same question.
+            updated = await self.db.execute(text("""
+                UPDATE manufacturer_infrastructure SET text_value=:value,facility_id=:facility,
+                  updated_by_membership_id=:membership_id,version=version+1
+                WHERE organization_id=:organization_id AND infrastructure_item_id=:item
+                  AND (facility_id=:facility OR facility_id IS NULL)
+                RETURNING id
             """), {**ctx, "facility": facility_id, "item": item_id,
                     "value": str(values.get(code) or "").strip() or None})
+            if updated.first() is None:
+                await self.db.execute(text("""
+                    INSERT INTO manufacturer_infrastructure
+                      (organization_id,facility_id,infrastructure_item_id,text_value,updated_by_membership_id)
+                    VALUES (:organization_id,:facility,:item,:value,:membership_id)
+                """), {**ctx, "facility": facility_id, "item": item_id,
+                        "value": str(values.get(code) or "").strip() or None})
 
     async def _replace_faqs(self, ctx: dict, facility_id: UUID, faqs: list[dict]) -> None:
         # The wizard can remove FAQs, so the stored list mirrors it exactly.
@@ -403,6 +467,165 @@ class ManufacturerRepository:
                 DO UPDATE SET text_value=EXCLUDED.text_value,display_order=EXCLUDED.display_order
             """), {**ctx, "facility": facility_id, "question": question_id,
                     "answer": str(faq.get("a") or ""), "position": position})
+
+    # ------------------------------------------------------------------ step progress
+    PROFILE_STEPS = 5          # Welcome, Company, Location, Certifications, Infrastructure & FAQ
+    MACHINERY_STEPS = 7        # Details, Images, Raw materials, Labour, Logistics, Pricing, Review
+
+    async def profile_step_errors(self, ctx: dict, step: int) -> list[str]:
+        """Server-side check of a step the user marked as done (mirrors the wizard)."""
+        row = (await self.db.execute(text("""
+            SELECT o.display_name, op.about_company, f.address_line1, f.city, f.country_name
+            FROM organizations o
+            LEFT JOIN organization_profiles op ON op.organization_id=o.id
+            LEFT JOIN facilities f ON f.organization_id=o.id AND f.is_headquarters AND f.status<>'suspended'
+            WHERE o.id=:organization_id
+        """), ctx)).first()
+        blank = lambda v: not str(v or "").strip()
+        errors = []
+        if step == 2:
+            if blank(row.display_name): errors.append("Company name is required.")
+            if blank(row.about_company): errors.append("Tell buyers a little about your company.")
+        if step == 3:
+            if blank(row.address_line1): errors.append("Facility address is required.")
+            if blank(row.city): errors.append("City is required.")
+            if blank(row.country_name): errors.append("Please select a country.")
+        return errors
+
+    async def save_progress(self, ctx: dict, form_key: str, record_id: UUID, total: int,
+                            progress: dict | None, client_key: UUID | None = None,
+                            finished: bool = False) -> None:
+        """Upsert the single progress row of a form instance (never duplicated)."""
+        step = (progress or {}).get("step")
+        completed = bool((progress or {}).get("completed"))
+        next_step = (progress or {}).get("nextStep") or (min(step + 1, total) if step else None)
+        await self.db.execute(text("""
+            INSERT INTO manufacturer_form_progress
+              (organization_id, form_key, record_id, client_key, current_step, completed_steps, total_steps,
+               status, completed_at)
+            VALUES (:organization_id, :form, :record, :client, COALESCE(:current, 1),
+                    CASE WHEN :completed THEN ARRAY[CAST(:step AS smallint)] ELSE '{}'::smallint[] END,
+                    :total, CASE WHEN :finished THEN 'completed' ELSE 'draft' END,
+                    CASE WHEN :finished THEN now() END)
+            ON CONFLICT (organization_id, form_key, record_id) DO UPDATE SET
+              current_step = COALESCE(:current, manufacturer_form_progress.current_step),
+              completed_steps = CASE
+                WHEN :completed AND NOT (CAST(:step AS smallint) = ANY(manufacturer_form_progress.completed_steps))
+                THEN array_append(manufacturer_form_progress.completed_steps, CAST(:step AS smallint))
+                ELSE manufacturer_form_progress.completed_steps END,
+              status = CASE WHEN :finished THEN 'completed' ELSE manufacturer_form_progress.status END,
+              completed_at = CASE WHEN :finished THEN now() ELSE manufacturer_form_progress.completed_at END,
+              updated_at = now()
+        """), {**ctx, "form": form_key, "record": record_id, "client": client_key, "current": next_step,
+                "completed": completed and step is not None, "step": step or 0, "total": total,
+                "finished": finished})
+        if form_key == "company_profile":
+            # The profile form is complete once every step has been saved as done.
+            await self.db.execute(text("""
+                UPDATE manufacturer_form_progress SET
+                  status = CASE WHEN completed_steps @> CAST(:all AS smallint[]) THEN 'completed' ELSE 'draft' END,
+                  completed_at = CASE WHEN completed_steps @> CAST(:all AS smallint[])
+                                      THEN COALESCE(completed_at, now()) END
+                WHERE organization_id=:organization_id AND form_key='company_profile' AND record_id=:record
+            """), {**ctx, "record": record_id, "all": list(range(1, total + 1))})
+
+    async def form_progress(self, ctx: dict) -> list[dict]:
+        rows = await self.db.execute(text("""
+            SELECT form_key, record_id, current_step, completed_steps, total_steps, status, updated_at
+            FROM manufacturer_form_progress WHERE organization_id=:organization_id
+        """), ctx)
+        return [dict(r._mapping) for r in rows]
+
+    # ------------------------------------------------------------------ machinery drafts (step by step)
+    async def find_file_by_key(self, ctx: dict, object_key: str) -> UUID | None:
+        return await self.db.scalar(text("""
+            SELECT id FROM files WHERE organization_id=:organization_id AND object_key=:key AND status='active'
+        """), {**ctx, "key": object_key})
+
+    async def create_machinery_draft(self, actor: Actor, client_key: UUID, changes: dict,
+                                     images: list[tuple[UUID, bool]] | None, progress: dict | None) -> str:
+        """First "Save & Next": create the draft machine + its progress row, once."""
+        ctx = await self.context(actor)
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                              {"k": f"xy-machinery-draft:{ctx['organization_id']}:{client_key}"})
+        existing = await self.db.scalar(text("""
+            SELECT record_id FROM manufacturer_form_progress
+            WHERE organization_id=:organization_id AND client_key=:client
+        """), {**ctx, "client": client_key})
+        if existing:                       # repeated submission: same draft, nothing new
+            await self.db.commit()
+            return str(existing)
+        if not str(changes.get("type") or "").strip() or not str(changes.get("industry") or "").strip():
+            raise ValueError("Please select an industry and enter the machinery type.")
+        machine_id = await self.db.scalar(text("""
+            INSERT INTO machines (organization_id,facility_id,machinery_term_id,name,status,publication_status,created_at)
+            VALUES (:organization_id,
+                    (SELECT id FROM facilities WHERE organization_id=:organization_id AND is_headquarters
+                       AND status<>'suspended' LIMIT 1),
+                    :term, :name, 'active', 'draft', clock_timestamp())
+            RETURNING id
+        """), {**ctx, "term": await self._machinery_term(changes["type"]), "name": changes["type"].strip()})
+        await self._apply_machinery_changes(machine_id, changes, images)
+        await self.save_progress(ctx, "machinery", machine_id, self.MACHINERY_STEPS, progress, client_key)
+        await self.db.commit()
+        return str(machine_id)
+
+    async def update_machinery_draft(self, actor: Actor, machine_id: str, changes: dict,
+                                     images: list[tuple[UUID, bool]] | None, progress: dict | None,
+                                     finish: str | None) -> None:
+        ctx = await self.context(actor)
+        machine = (await self.db.execute(text("""
+            SELECT id FROM machines WHERE id=CAST(:id AS uuid) AND organization_id=:organization_id
+        """), {**ctx, "id": machine_id})).first()
+        if not machine:
+            raise LookupError("Machinery listing not found")
+        if "type" in changes and not str(changes["type"] or "").strip():
+            raise ValueError("Machinery type is required.")
+        if "industry" in changes and not str(changes["industry"] or "").strip():
+            raise ValueError("Please select an industry.")
+        await self._apply_machinery_changes(machine.id, changes, images)
+        if finish:
+            status, publication = MACHINE_STATUS[finish]
+            await self.db.execute(text("""
+                UPDATE machines SET status=:status, publication_status=:publication, version=version+1
+                WHERE id=:id
+            """), {"id": machine.id, "status": status, "publication": publication})
+            progress = {"step": self.MACHINERY_STEPS, "completed": True, "nextStep": self.MACHINERY_STEPS}
+        await self.save_progress(ctx, "machinery", machine.id, self.MACHINERY_STEPS, progress,
+                                 finished=bool(finish))
+        await self.db.commit()
+
+    async def _machinery_term(self, machine_type: str) -> UUID:
+        return await self.db.scalar(text("""
+            INSERT INTO taxonomy_terms(term_type,term,code,status) VALUES ('machinery',:term,:code,'active')
+            ON CONFLICT (term_type,code,taxonomy_version) DO UPDATE SET term=taxonomy_terms.term RETURNING id
+        """), {"term": machine_type.strip(), "code": slug(machine_type)})
+
+    async def _apply_machinery_changes(self, machine_id: UUID, changes: dict,
+                                       images: list[tuple[UUID, bool]] | None) -> None:
+        """Only the fields present in `changes` are written."""
+        if str(changes.get("type") or "").strip():
+            await self.db.execute(text("""
+                UPDATE machines SET name=:name, machinery_term_id=:term, version=version+1 WHERE id=:id
+            """), {"id": machine_id, "name": changes["type"].strip(), "term": await self._machinery_term(changes["type"])})
+        if "technical" in changes:
+            await self.db.execute(text("UPDATE machines SET description=:d WHERE id=:id"),
+                                  {"id": machine_id, "d": changes["technical"] or None})
+        for key, value in changes.items():
+            if key in MACHINE_COLUMN_KEYS:
+                continue
+            await self.db.execute(text("""
+                INSERT INTO machine_specs(machine_id,spec_code,value_text) VALUES (:machine,:code,:value)
+                ON CONFLICT (machine_id,spec_code) DO UPDATE SET value_text=EXCLUDED.value_text
+            """), {"machine": machine_id, "code": key,
+                    "value": json.dumps(value) if isinstance(value, (dict, list)) else str(value or "")})
+        if images is not None:                 # the image list was changed: replace it
+            await self.db.execute(text("DELETE FROM machine_images WHERE machine_id=:id"), {"id": machine_id})
+            for order, (file_id, primary) in enumerate(images):
+                await self.db.execute(text("""
+                    INSERT INTO machine_images(machine_id,file_id,display_order,alt_text)
+                    VALUES (:machine,:file,:order,(SELECT name FROM machines WHERE id=:machine))
+                """), {"machine": machine_id, "file": file_id, "order": 0 if primary else order + 1})
 
     # ------------------------------------------------------------------ machinery
     async def create_machinery(self, actor: Actor, data: dict, images: list[tuple[UUID, bool]]) -> str:
@@ -463,6 +686,20 @@ class ManufacturerRepository:
               recurring=EXCLUDED.recurring,capacity=EXCLUDED.capacity,updated_by_user_id=EXCLUDED.updated_by_user_id
         """), {**ctx, "calendar": json.dumps(data.get("calendar") or {}),
                 "recurring": json.dumps(data.get("recurring")), "capacity": json.dumps(data.get("capacity"))})
+        await self.db.commit()
+
+    async def patch_availability(self, actor: Actor, changes: dict) -> None:
+        """Only the parts sent (calendar / recurring / capacity) are written."""
+        ctx = await self.context(actor)
+        cols = [c for c in ("calendar", "recurring", "capacity") if c in changes]
+        if not cols:
+            return
+        params = {c: json.dumps(changes[c] if c != "calendar" else (changes[c] or {})) for c in cols}
+        await self.db.execute(text(
+            f"INSERT INTO manufacturer_availability_preferences (organization_id, updated_by_user_id, {', '.join(cols)}) "
+            f"VALUES (:organization_id, :user_id, {', '.join(f'CAST(:{c} AS jsonb)' for c in cols)}) "
+            f"ON CONFLICT (organization_id) DO UPDATE SET updated_by_user_id=EXCLUDED.updated_by_user_id, "
+            + ", ".join(f"{c}=EXCLUDED.{c}" for c in cols)), {**ctx, **params})
         await self.db.commit()
 
     # ------------------------------------------------------------------ bookings
@@ -539,7 +776,8 @@ class ManufacturerRepository:
                    COALESCE(jsonb_object_agg(ms.spec_code,ms.value_text) FILTER (WHERE ms.spec_code IS NOT NULL),
                             '{}'::jsonb) specs
             FROM machines m LEFT JOIN machine_specs ms ON ms.machine_id=m.id
-            WHERE m.organization_id=:organization_id GROUP BY m.id ORDER BY m.created_at DESC, m.id
+            WHERE m.organization_id=:organization_id
+            GROUP BY m.id ORDER BY m.created_at DESC, m.id
         """), ctx)
         images = await self.db.execute(text("""
             SELECT mi.machine_id,f.object_key,mi.display_order FROM machine_images mi
@@ -569,4 +807,5 @@ class ManufacturerRepository:
             "images": [dict(r._mapping) for r in images],
             "availability": dict(availability._mapping) if availability else {},
             "bookings": [dict(r._mapping) for r in bookings],
+            "progress": await self.form_progress(ctx),
         }
