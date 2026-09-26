@@ -633,24 +633,19 @@ function CapacityForm({
   }
 
   return (
-    <>
-      <div className="form-grid">
-        <div>
-          <label htmlFor="cap-machine">Machine Name</label>
-          <select
-            id="cap-machine"
-            className={machine ? "" : "placeholder-shown"}
-            value={machine}
-            onChange={(e) => setMachine(e.target.value)}
-          >
-            <option value="" disabled>
-              Select a machine
-            </option>
-            {machinery.map((m) => (
-              <option key={m.id}>{m.type || "Untitled machinery"}</option>
-            ))}
-          </select>
-        </div>
+  <>
+    <div className="form-grid">
+      <div>
+        <label htmlFor="cap-machine">Machine Name</label>
+        <input
+          id="cap-machine"
+          type="text"
+          className={machine ? "" : "placeholder-shown"}
+          value={machine}
+          onChange={(e) => setMachine(e.target.value)}
+          placeholder="Enter machine name"
+        />
+      </div>
         <div>
           <label htmlFor="cap-count">No. of Machines</label>
           <input

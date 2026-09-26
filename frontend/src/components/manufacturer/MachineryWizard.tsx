@@ -299,7 +299,7 @@ export function MachineryWizard({
               />
             </div>
             <div>
-              <label htmlFor="m-age">Age</label>
+              <label htmlFor="m-age">Equipment Age</label>
               <input
                 type="text"
                 id="m-age"
