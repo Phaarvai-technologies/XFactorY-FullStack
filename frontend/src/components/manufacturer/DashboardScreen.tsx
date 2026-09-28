@@ -24,6 +24,7 @@ type DashboardScreenProps = {
   flags: ProfileCompletionFlags;
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
   onOpenMachineryWizard: () => void;
+  onEditMachinery: (machine: MachineryListing) => void;
   onSetMachineryStatus: (id: number, status: MachineryListing["status"]) => void;
   onSaveCapacity: (plan: CapacityPlan) => void;
   onCycleDay: (key: string) => void;
@@ -60,6 +61,7 @@ export function DashboardScreen({
   flags,
   onOpenProfileWizard,
   onOpenMachineryWizard,
+  onEditMachinery,
   onSetMachineryStatus,
   onSaveCapacity,
   onCycleDay,
@@ -351,14 +353,36 @@ export function DashboardScreen({
                     </div>
                     <div className="item-actions">
                       <span className={`badge ${MACHINERY_STATUS_BADGE[m.status]}`}>{m.status}</span>
-                      {actions}
+
+
                       <button
                         type="button"
-                        className="btn-danger-ghost"
-                        onClick={() => onSetMachineryStatus(m.id, "Archived")}
+                        className="btn-ghost"
+                        onClick={() => onEditMachinery(m)}
                       >
-                        Archive
-                      </button>
+                      Edit
+                     </button>
+                      {actions}
+
+                      
+
+                      {m.status === "Archived" ? (
+  <button
+    type="button"
+    className="btn-ghost"
+    onClick={() => onSetMachineryStatus(m.id, "Draft")}
+  >
+    Unarchive
+  </button>
+) : (
+  <button
+    type="button"
+    className="btn-danger-ghost"
+    onClick={() => onSetMachineryStatus(m.id, "Archived")}
+  >
+    Archive
+  </button>
+)}
                     </div>
                   </div>
                 );

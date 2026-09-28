@@ -291,7 +291,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="m-capacity">Capacity</label>
               <input
-                type="text"
+                type="number"
                 id="m-capacity"
                 placeholder="e.g. 200 units/day"
                 value={draft.capacity}
@@ -355,7 +355,7 @@ export function MachineryWizard({
             <input
               type="file"
               ref={fileInputRef}
-              accept="image/*"
+              accept=".pdf,.jpg,.jpeg,.png"
               multiple
               onChange={(e) => handleImages(e.target.files)}
             />

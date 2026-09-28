@@ -78,6 +78,12 @@ export function CustomSignInForm() {
   const [status, setStatus] = useState<StatusState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetStep, setResetStep] = useState<"email" | "code" | "password">("email");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   const redirectTo = useMemo(
     () => searchParams.get("redirect_url") || "/",
     [searchParams],
@@ -159,6 +165,158 @@ export function CustomSignInForm() {
     }
   }
 
+  async function handleForgotPassword() {
+  setStatus(null);
+
+  const trimmedEmail = email.trim();
+
+  if (!trimmedEmail) {
+    setFieldErrors((current) => ({
+      ...current,
+      email: "Please enter your email first.",
+    }));
+    return;
+  }
+
+  if (!EMAIL_PATTERN.test(trimmedEmail)) {
+    setFieldErrors((current) => ({
+      ...current,
+      email: "Please enter a valid email address.",
+    }));
+    return;
+  }
+
+  if (!isLoaded || !signIn) {
+    return;
+  }
+
+  try {
+    setIsResettingPassword(true);
+
+    await signIn.create({
+      strategy: "reset_password_email_code",
+      identifier: trimmedEmail,
+    });
+
+    setResetStep("code");
+
+    setStatus({
+      tone: "ok",
+      message: "Password reset code sent to your email.",
+    });
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsResettingPassword(false);
+  }
+}
+
+async function handleResetCode() {
+  setStatus(null);
+
+  if (!resetCode.trim()) {
+    setStatus({
+      tone: "error",
+      message: "Please enter the verification code.",
+    });
+    return;
+  }
+
+  if (!isLoaded || !signIn) {
+    return;
+  }
+
+  try {
+    setIsResettingPassword(true);
+
+    const result = await signIn.attemptFirstFactor({
+      strategy: "reset_password_email_code",
+      code: resetCode.trim(),
+    });
+
+    if (result.status === "needs_new_password") {
+      setResetStep("password");
+
+      setStatus({
+        tone: "ok",
+        message: "Code verified. Please create your new password.",
+      });
+    }
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsResettingPassword(false);
+  }
+}
+
+async function handleNewPassword() {
+  setStatus(null);
+
+  if (!newPassword) {
+    setStatus({
+      tone: "error",
+      message: "Please enter a new password.",
+    });
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    setStatus({
+      tone: "error",
+      message: "Password must be at least 8 characters.",
+    });
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setStatus({
+      tone: "error",
+      message: "Passwords do not match.",
+    });
+    return;
+  }
+
+  if (!isLoaded || !signIn || !setActive) {
+    return;
+  }
+
+  try {
+    setIsResettingPassword(true);
+
+    const result = await signIn.resetPassword({
+      password: newPassword,
+    });
+
+    if (result.status === "complete" && result.createdSessionId) {
+      await setActive({
+        session: result.createdSessionId,
+      });
+
+      router.push(redirectTo);
+      router.refresh();
+    }
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsResettingPassword(false);
+  }
+}
+
   async function handleGoogleAuth() {
     setStatus(null);
 
@@ -181,15 +339,32 @@ export function CustomSignInForm() {
   }
 
   return (
-    <form className="auth-form" onSubmit={handleSubmit}>
-      <h1 className="auth-card-heading">Welcome back</h1>
+    <form
+  className="auth-form"
+  onSubmit={
+    resetStep === "code"
+      ? (event) => {
+          event.preventDefault();
+          handleResetCode();
+        }
+      : resetStep === "password"
+        ? (event) => {
+            event.preventDefault();
+            handleNewPassword();
+          }
+        : handleSubmit
+  }
+>
 
       <div className={`status-box status-${status?.tone ?? "error"}${status ? " show" : ""}`}>
         <StatusIcon tone={status?.tone ?? "error"} />
         <span>{status?.message}</span>
       </div>
 
-      <button
+      {resetStep === "email" && (
+  <>
+  
+  <button
         type="button"
         className="provider-btn"
         onClick={handleGoogleAuth}
@@ -258,9 +433,14 @@ export function CustomSignInForm() {
           <label htmlFor="si-password" style={{ marginBottom: 0 }}>
             Password
           </label>
-          <Link href="#" className="link-inline">
-            Forgot password?
-          </Link>
+          <button
+              type="button"
+              className="link-inline"
+              onClick={handleForgotPassword}
+              disabled={isResettingPassword || !isLoaded}
+           >
+              {isResettingPassword ? "Sending..." : "Forgot password?"}
+           </button>
         </div>
         <div className="input-wrap auth-input-spaced">
           <svg className="field-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -347,6 +527,115 @@ export function CustomSignInForm() {
           Create account
         </Link>
       </div>
+  </>
+
+  )}
+
+
+  
+
+      {resetStep === "code" && (
+  <>
+    <h1 className="auth-card-heading">Verify your email</h1>
+
+    <p className="auth-description">
+      Enter the verification code sent to{" "}
+      <strong>{email}</strong>.
+    </p>
+
+    <div className="field">
+      <label htmlFor="reset-code">Verification code</label>
+
+      <input
+        type="text"
+        id="reset-code"
+        value={resetCode}
+        onChange={(event) => setResetCode(event.target.value)}
+        placeholder="Enter verification code"
+        autoComplete="one-time-code"
+        inputMode="numeric"
+      />
+    </div>
+
+    <button
+      type="submit"
+      className={`primary-cta${isResettingPassword ? " loading" : ""}`}
+      disabled={isResettingPassword || !isLoaded}
+    >
+      {isResettingPassword ? "Verifying..." : "Verify code"}
+    </button>
+
+    <button
+      type="button"
+      className="link-inline"
+      onClick={() => {
+        setResetStep("email");
+        setResetCode("");
+        setStatus(null);
+      }}
+    >
+      Back to sign in
+    </button>
+  </>
+)}
+
+
+{resetStep === "password" && (
+  <>
+    <h1 className="auth-card-heading">Create a new password</h1>
+
+    <p className="auth-description">
+      Enter your new password below.
+    </p>
+
+    <div className="field">
+      <label htmlFor="new-password">New password</label>
+
+      <input
+        type="password"
+        id="new-password"
+        value={newPassword}
+        onChange={(event) => setNewPassword(event.target.value)}
+        placeholder="Enter new password"
+        autoComplete="new-password"
+      />
+    </div>
+
+    <div className="field">
+      <label htmlFor="confirm-password">Confirm password</label>
+
+      <input
+        type="password"
+        id="confirm-password"
+        value={confirmPassword}
+        onChange={(event) => setConfirmPassword(event.target.value)}
+        placeholder="Confirm new password"
+        autoComplete="new-password"
+      />
+    </div>
+
+    <button
+      type="submit"
+      className={`primary-cta${isResettingPassword ? " loading" : ""}`}
+      disabled={isResettingPassword || !isLoaded}
+    >
+      {isResettingPassword ? "Changing password..." : "Change password"}
+    </button>
+
+    <button
+      type="button"
+      className="link-inline"
+      onClick={() => {
+        setResetStep("code");
+        setStatus(null);
+      }}
+    >
+      Back to verification code
+    </button>
+  </>
+)}
+
+      
     </form>
   );
 }
