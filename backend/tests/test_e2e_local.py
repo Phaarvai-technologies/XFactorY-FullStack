@@ -76,6 +76,9 @@ async def client(monkeypatch):
             {"sub": user, "iat": int(time.time()), "exp": int(time.time()) + 600,
              "iss": os.environ["CLERK_ISSUER"], "azp": "http://localhost:3000"}, key, algorithm="RS256")
         c.sql = lambda q, **p: _sql(engine, text(q), p)
+        c.token_for = lambda sub: jwt.encode(
+            {"sub": sub, "iat": int(time.time()), "exp": int(time.time()) + 600,
+             "iss": os.environ["CLERK_ISSUER"], "azp": "http://localhost:3000"}, key, algorithm="RS256")
         yield c
     await engine.dispose()
 
@@ -323,3 +326,19 @@ async def test_sample_bookings_come_from_the_database(client):
     r = await client.patch(f"/manufacturer/booking-requests/{ids['Vertex Auto Parts']}", json={"status": "declined"})
     status = {b["buyer"]: b["status"] for b in r.json()["state"]["bookings"]}
     assert status["BluePeak Foods"] == "Booked" and status["Vertex Auto Parts"] == "Cancelled"
+
+
+async def test_missing_migration_is_reported_clearly(client):
+    """A database without migration 006 must not look like a 422 validation error."""
+    await client.sql("ALTER TABLE organization_profiles RENAME COLUMN production_capacity_label TO pcl_tmp")
+    try:
+        r = await client.get("/manufacturer/bootstrap")
+        assert r.status_code == 500
+        assert "production_capacity_label" in r.json()["detail"] and "migrate" in r.json()["detail"]
+        r = await client.get("/../../health/ready")
+        assert r.status_code == 503
+        assert any("production_capacity_label" in m for m in r.json()["missing"])
+    finally:
+        await client.sql("ALTER TABLE organization_profiles RENAME COLUMN pcl_tmp TO production_capacity_label")
+    r = await client.get("/../../health/ready")
+    assert r.status_code == 200

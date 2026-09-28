@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from jwt import PyJWKClient
 
 from app.core.config import Settings, get_settings
@@ -28,6 +28,7 @@ def _jwks_client(url: str) -> PyJWKClient:
 
 
 async def current_actor(
+    request: Request,
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> Actor:
@@ -58,4 +59,6 @@ async def current_actor(
     if not org_id and isinstance(org_claim, dict):
         org_id = org_claim.get("id")
 
+    # Lets the error recorder (app/core/activity.py) link a failed request to its user.
+    request.state.clerk_user_id = claims["sub"]
     return Actor(clerk_user_id=claims["sub"], clerk_org_id=org_id or None)

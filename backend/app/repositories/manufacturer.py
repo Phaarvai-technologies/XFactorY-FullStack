@@ -116,7 +116,7 @@ class ManufacturerRepository:
                   phone=COALESCE(users.phone,EXCLUDED.phone),
                   first_name=COALESCE(users.first_name,EXCLUDED.first_name),
                   last_name=COALESCE(users.last_name,EXCLUDED.last_name),
-                  status='active',updated_at=now()
+                  status=CASE WHEN users.status='suspended' THEN 'suspended' ELSE 'active' END,updated_at=now()
                 RETURNING id
             """), {
                 "clerk": actor.clerk_user_id, "email": profile["email"], "phone": profile.get("phone"),
@@ -158,6 +158,7 @@ class ManufacturerRepository:
     async def context(self, actor: Actor) -> dict:
         base = """
             SELECT u.id user_id, u.first_name, u.last_name, u.date_of_birth, u.email, u.phone,
+                   u.status user_status,
                    o.id organization_id, o.display_name, o.organization_type, m.id membership_id
             FROM users u
             JOIN memberships m ON m.user_id=u.id AND m.status='active'
@@ -173,9 +174,47 @@ class ManufacturerRepository:
         if not row:
             raise LookupError("Clerk user/organization is not synchronized yet")
         result = dict(row._mapping)
+        if result.pop("user_status") != "active":
+            raise PermissionError("This account has been suspended. Please contact X!Y support.")
         if result["organization_type"] != "manufacturer":
             raise PermissionError("Active organization is not a Manufacturer")
         return result
+
+    async def context_for_org(self, organization_id: str) -> dict:
+        """Context for admin work on one manufacturer: the organization plus its
+        owner's user record (for display). membership_id is None, so rows an admin
+        writes are not attributed to the manufacturer's own membership."""
+        row = (await self.db.execute(text("""
+            SELECT u.id user_id, u.first_name, u.last_name, u.date_of_birth, u.email, u.phone,
+                   o.id organization_id, o.display_name, o.organization_type, CAST(NULL AS uuid) membership_id
+            FROM organizations o
+            LEFT JOIN LATERAL (
+              SELECT m.user_id FROM memberships m WHERE m.organization_id=o.id AND m.status='active'
+              ORDER BY (m.membership_role='owner') DESC, m.created_at LIMIT 1) own ON true
+            LEFT JOIN users u ON u.id=own.user_id
+            WHERE o.id=CAST(:org AS uuid) AND o.organization_type='manufacturer'
+        """), {"org": organization_id})).first()
+        if not row:
+            raise LookupError("Manufacturer not found")
+        return dict(row._mapping)
+
+    async def touch_last_seen(self, clerk_user_id: str) -> None:
+        await self.db.execute(
+            text(
+                """
+                UPDATE public.users
+                SET last_seen_at = now()
+                WHERE clerk_user_id = :clerk_user_id
+                AND (
+                    last_seen_at IS NULL
+                    OR last_seen_at < now() - interval '5 minutes'
+                )
+                """
+            ),
+            {
+                "clerk_user_id": clerk_user_id,
+            },
+        )
 
     async def _country_code(self, name: str) -> str | None:
         code = COUNTRY_CODES.get((name or "").strip().lower())
@@ -184,21 +223,40 @@ class ManufacturerRepository:
         return None
 
     # ------------------------------------------------------------------ account
-    async def create_account(self, actor: Actor, data: dict) -> None:
+    async def create_account(self, actor: Actor, data: dict) -> dict:
+        """Manufacturer onboarding form. The user is identified by the Clerk user id
+        (via `context`); the existing user / organization rows are updated in place.
+
+        First and last name arrive prefilled from the saved user record: they are
+        written only if the user changed them, so unchanged values are preserved.
+        Returns {"names_changed": bool} so the caller can sync Clerk."""
         ctx = await self.context(actor)
+        # One onboarding save at a time per user (double submit -> no duplicate rows).
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                              {"k": f"xy-account:{ctx['user_id']}"})
         contact = data["contact"].strip()
         email = contact if "@" in contact else None
         contact_phone = data.get("phone") or (None if email else contact)
         country = await self._country_code(data["country"])
+        first, last = data["firstName"].strip(), data["lastName"].strip()
+        names_changed = (await self.db.execute(text("""
+            UPDATE users SET first_name=:first, last_name=:last, display_name=:display, updated_at=now()
+            WHERE id=:user_id AND (first_name IS DISTINCT FROM CAST(:first AS text)
+                                   OR last_name IS DISTINCT FROM CAST(:last AS text))
+            RETURNING id
+        """), {**ctx, "first": first, "last": last, "display": f"{first} {last}"})).first() is not None
+        # users.email stays the Clerk sign-in email; the form's email is the contact email below.
         await self.db.execute(text("""
-            UPDATE users SET first_name=:first,last_name=:last,date_of_birth=:dob,
-              phone=COALESCE(:phone,phone),display_name=:display,updated_at=now()
+            UPDATE users SET date_of_birth=CAST(:dob AS date), phone=COALESCE(CAST(:phone AS text),phone),
+              updated_at=now()
             WHERE id=:user_id
-        """), {**ctx, "first": data["firstName"], "last": data["lastName"], "dob": date.fromisoformat(str(data["dob"])),
-                "phone": contact_phone, "display": f'{data["firstName"]} {data["lastName"]}'})
+              AND (date_of_birth IS DISTINCT FROM CAST(:dob AS date)
+                   OR (CAST(:phone AS text) IS NOT NULL AND phone IS DISTINCT FROM CAST(:phone AS text)))
+        """), {**ctx, "dob": date.fromisoformat(str(data["dob"])), "phone": contact_phone})
         await self.db.execute(text("""
             UPDATE organizations SET display_name=:name,legal_name=COALESCE(legal_name,:name),
-              updated_at=now(),version=version+1 WHERE id=:organization_id
+              updated_at=now(),version=version+1
+            WHERE id=:organization_id AND display_name IS DISTINCT FROM CAST(:name AS text)
         """), {**ctx, "name": data["companyName"]})
         await self.db.execute(text("""
             INSERT INTO organization_profiles
@@ -229,6 +287,17 @@ class ManufacturerRepository:
                           ELSE manufacturer_onboarding.status END,
               version=manufacturer_onboarding.version+1
         """), ctx)
+        await self.db.commit()
+        return {"names_changed": names_changed}
+
+    async def fill_missing_names(self, ctx: dict, first: str | None, last: str | None) -> None:
+        """Copy the name from Clerk into the user record when the record has none
+        (never overwrites a saved name)."""
+        await self.db.execute(text("""
+            UPDATE users SET first_name=COALESCE(first_name, NULLIF(:first,'')),
+              last_name=COALESCE(last_name, NULLIF(:last,'')), updated_at=now()
+            WHERE id=:user_id AND (first_name IS NULL OR last_name IS NULL)
+        """), {**ctx, "first": (first or "").strip(), "last": (last or "").strip()})
         await self.db.commit()
 
     # ------------------------------------------------------------------ files
@@ -269,8 +338,8 @@ class ManufacturerRepository:
         "zip": ("postal_code",), "sez": ("sez_status",),
     }
 
-    async def update_profile(self, actor: Actor, changes: dict, asset_ids: dict[str, UUID | None],
-                             commit: bool = True) -> None:
+    async def update_profile(self, actor: Actor | None, changes: dict, asset_ids: dict[str, UUID | None],
+                             commit: bool = True, ctx: dict | None = None) -> None:
         """Partial update of the manufacturer profile (PATCH semantics).
 
         `changes` holds ONLY the fields the user changed:
@@ -280,7 +349,7 @@ class ManufacturerRepository:
         The record is identified by the Clerk user's manufacturer organization;
         existing rows are updated in place, never duplicated.
         """
-        ctx = await self.context(actor)
+        ctx = ctx or await self.context(actor)
         company = changes.get("company") or {}
         location = changes.get("location")
 
@@ -367,8 +436,11 @@ class ManufacturerRepository:
             DO UPDATE SET version=facilities.version RETURNING id
         """), {**ctx, "name": f'{(company_name or "").strip() or ctx["display_name"] or "Manufacturer"} Headquarters'})
 
-    async def set_onboarding_flags(self, actor: Actor, flags: dict[str, bool]) -> None:
-        ctx = await self.context(actor)
+    async def set_onboarding_flags(self, actor: Actor | None, flags: dict[str, bool], ctx: dict | None = None) -> None:
+        """Also moves the review status: a profile with every section complete becomes
+        SUBMITTED (including after an admin's "Needs correction"); REVIEWED stays."""
+        ctx = ctx or await self.context(actor)
+        complete = all(flags.values())
         pct = round(15 + sum(flags.values()) / 5 * 85)
         steps = [("company", "company_information"), ("location", "location"), ("certs", "certification"),
                  ("infra", "infrastructure"), ("faq", "faq")]
@@ -384,10 +456,16 @@ class ManufacturerRepository:
               certification_completed=EXCLUDED.certification_completed,
               infrastructure_completed=EXCLUDED.infrastructure_completed,
               faq_completed=EXCLUDED.faq_completed,completion_percentage=EXCLUDED.completion_percentage,
-              status=CASE WHEN manufacturer_onboarding.status='draft' THEN 'in_progress'
-                          ELSE manufacturer_onboarding.status END,
+              status=CASE
+                WHEN :complete AND manufacturer_onboarding.status IN ('draft','in_progress','changes_requested')
+                  THEN 'submitted'
+                WHEN manufacturer_onboarding.status='draft' THEN 'in_progress'
+                ELSE manufacturer_onboarding.status END,
+              submitted_at=CASE
+                WHEN :complete AND manufacturer_onboarding.status IN ('draft','in_progress','changes_requested')
+                  THEN now() ELSE manufacturer_onboarding.submitted_at END,
               version=manufacturer_onboarding.version+1
-        """), {**ctx, **flags, "step": next_step, "pct": pct})
+        """), {**ctx, **flags, "step": next_step, "pct": pct, "complete": complete})
         await self.db.commit()
 
     async def _replace_certifications(self, ctx: dict, facility_id: UUID, items: list[dict]) -> None:
@@ -736,8 +814,8 @@ class ManufacturerRepository:
         await self.db.commit()
 
     # ------------------------------------------------------------------ read model
-    async def snapshot(self, actor: Actor) -> dict:
-        ctx = await self.context(actor)
+    async def snapshot(self, actor: Actor | None, ctx: dict | None = None) -> dict:
+        ctx = ctx or await self.context(actor)
         profile = (await self.db.execute(text("""
             SELECT o.display_name,op.company_category,op.stated_production_capacity,op.production_capacity_label,
                    op.country_name account_country,op.contact_email,op.contact_phone,
