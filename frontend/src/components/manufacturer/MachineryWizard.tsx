@@ -514,7 +514,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-hour">Hourly rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-hour"
                 placeholder="₹ per hour"
                 value={draft.pricing.hour}
@@ -524,7 +524,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-day">Daily rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-day"
                 placeholder="₹ per day"
                 value={draft.pricing.day}
@@ -534,7 +534,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-month">Monthly rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-month"
                 placeholder="₹ per month"
                 value={draft.pricing.month}
@@ -544,7 +544,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-unit">Per-unit rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-unit"
                 placeholder="₹ per unit"
                 value={draft.pricing.unit}
@@ -554,7 +554,7 @@ export function MachineryWizard({
             <div className="col-span-2">
               <label htmlFor="price-batch">Per-batch rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-batch"
                 placeholder="₹ per batch"
                 value={draft.pricing.batch}

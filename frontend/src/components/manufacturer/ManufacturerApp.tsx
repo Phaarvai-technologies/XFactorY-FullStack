@@ -757,11 +757,14 @@ export function ManufacturerApp() {
           ) : null}
 
           {recurringOpen ? (
-            <RecurringModal
-              onClose={() => setRecurringOpen(false)}
-              onSave={(days, start, end) => void handleSaveRecurring({ days, start, end })}
-            />
-          ) : null}
+  <RecurringModal
+    initialValue={state.recurring}
+    onClose={() => setRecurringOpen(false)}
+    onSave={(days, start, end) =>
+      void handleSaveRecurring({ days, start, end })
+    }
+  />
+) : null}
         </>
       ) : null}
 

@@ -47,6 +47,7 @@ async def current_actor(
             options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )
     except Exception as exc:  # noqa: BLE001 - any failure is an auth failure
+        print("CLERK TOKEN VALIDATION ERROR:", repr(exc))
         raise HTTPException(401, "Invalid or expired Clerk token") from exc
 
     if claims.get("azp") and claims["azp"] not in settings.clerk_authorized_parties:

@@ -649,12 +649,23 @@ function CapacityForm({
   const [end, setEnd] = useState(capacity?.end ?? "");
 
   function handleSave() {
-    if (!machine || !count.trim() || !start || !end) {
-      showToast("Fill in machine, number of machines, and both dates.");
-      return;
-    }
-    onSave({ machine, count: count.trim(), start, end });
+  if (!machine || !count.trim() || !start || !end) {
+    showToast("Fill in machine, number of machines, and both dates.");
+    return;
   }
+
+  if (end < start) {
+    showToast("End date cannot be earlier than start date.");
+    return;
+  }
+
+  onSave({
+    machine,
+    count: count.trim(),
+    start,
+    end,
+  });
+}
 
   return (
   <>
@@ -691,14 +702,15 @@ function CapacityForm({
           />
         </div>
         <div>
-          <label htmlFor="cap-end">End date</label>
-          <input
-            type="date"
-            id="cap-end"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </div>
+  <label htmlFor="cap-end">End date</label>
+  <input
+    type="date"
+    id="cap-end"
+    min={start}
+    value={end}
+    onChange={(e) => setEnd(e.target.value)}
+  />
+</div>
         <div className="col-span-2">
           <button className="btn-ghost" type="button" onClick={onOpenRecurringModal}>
             Add recurring

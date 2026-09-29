@@ -1,16 +1,23 @@
 import { useState } from "react";
+import type { RecurringAvailability } from "@/lib/manufacturer/types";
+
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 type RecurringModalProps = {
+  initialValue?: RecurringAvailability | null;
   onSave: (days: string[], start: string, end: string) => void;
   onClose: () => void;
 };
 
-export function RecurringModal({ onSave, onClose }: RecurringModalProps) {
-  const [days, setDays] = useState<string[]>([]);
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
+export function RecurringModal({
+  initialValue,
+  onSave,
+  onClose,
+}: RecurringModalProps) {
+  const [days, setDays] = useState<string[]>(initialValue?.days ?? []);
+  const [startTime, setStartTime] = useState(initialValue?.start ?? "");
+  const [endTime, setEndTime] = useState(initialValue?.end ?? "");
 
   function toggleDay(day: string) {
     setDays((current) =>
