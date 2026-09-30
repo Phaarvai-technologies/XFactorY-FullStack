@@ -25,12 +25,15 @@ const INDUSTRIES = [
 ];
 const CONDITIONS = ["New", "Excellent", "Good", "Fair"];
 
-type MachineryDraft = Omit<MachineryListing, "id" | "status">;
+type MachineryDraft = Omit<MachineryListing, "id" | "status"> & {
+  customIndustry: string;
+};
 
 function blankDraft(): MachineryDraft {
   return {
     industry: "",
     subcategory: "",
+    customIndustry: "",
     type: "",
     capacity: "",
     age: "",
@@ -201,9 +204,14 @@ export function MachineryWizard({
 
   const summaryRows: { label: string; value: string }[] = [
     {
-      label: "Industry / type",
-      value: [draft.industry, draft.type].filter(Boolean).join(" — ") || "—",
-    },
+  label: "Industry / type",
+  value: [
+    draft.industry === "Other" ? draft.customIndustry : draft.industry,
+    draft.type,
+  ]
+    .filter(Boolean)
+    .join(" — ") || "—",
+},
     {
       label: "Capacity / condition",
       value: [draft.capacity, draft.condition].filter(Boolean).join(" · ") || "—",
@@ -250,22 +258,56 @@ export function MachineryWizard({
           <p className="wiz-intro">Tell buyers exactly what this machine or service is.</p>
           <div className="form-grid">
             <div>
-              <label htmlFor="m-industry">Industry</label>
-              <select
-                id="m-industry"
-                className={`${draft.industry ? "" : "placeholder-shown"}${errors.industry ? " error" : ""}`}
-                value={draft.industry}
-                onChange={(e) => update({ industry: e.target.value })}
-              >
-                <option value="" disabled>
-                  Select
-                </option>
-                {INDUSTRIES.map((option) => (
-                  <option key={option}>{option}</option>
-                ))}
-              </select>
-              {errors.industry ? <p className="field-error">{errors.industry}</p> : null}
-            </div>
+  <label htmlFor="m-industry">Industry</label>
+
+  <select
+    id="m-industry"
+    className={`${draft.industry ? "" : "placeholder-shown"}${
+      errors.industry ? " error" : ""
+    }`}
+    value={draft.industry}
+    onChange={(e) => {
+      const value = e.target.value;
+
+      update({
+        industry: value,
+        ...(value !== "Other" && { customIndustry: "" }),
+      });
+    }}
+  >
+    <option value="" disabled>
+      Select
+    </option>
+
+    {INDUSTRIES.map((option) => (
+      <option key={option} value={option}>
+        {option}
+      </option>
+    ))}
+  </select>
+
+  {draft.industry === "Other" && (
+    <div style={{ marginTop: 10 }}>
+      <label htmlFor="m-custom-industry">Enter your industry</label>
+
+      <input
+        type="text"
+        id="m-custom-industry"
+        placeholder="e.g. Aerospace Manufacturing"
+        value={draft.customIndustry || ""}
+        onChange={(e) =>
+          update({
+            customIndustry: e.target.value,
+          })
+        }
+      />
+    </div>
+  )}
+
+  {errors.industry ? (
+    <p className="field-error">{errors.industry}</p>
+  ) : null}
+</div>
             <div>
               <label htmlFor="m-subcategory">Subcategory</label>
               <input
