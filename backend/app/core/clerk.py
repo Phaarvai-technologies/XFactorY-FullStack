@@ -14,6 +14,41 @@ class ClerkManagement:
     def __init__(self, settings: Settings):
         self.secret = settings.clerk_secret_key
 
+    async def update_user_name(self, clerk_user_id: str, first_name: str, last_name: str) -> None:
+        """Keep Clerk's copy of the name equal to the one edited in onboarding, so
+        Clerk's user.updated webhook can't bring back the old name."""
+        if not self.secret:
+            raise RuntimeError("CLERK_SECRET_KEY is not configured")
+        async with httpx.AsyncClient(base_url="https://api.clerk.com/v1",
+                                     headers={"Authorization": f"Bearer {self.secret}"}, timeout=15) as client:
+            response = await client.patch(f"/users/{clerk_user_id}",
+                                          json={"first_name": first_name, "last_name": last_name})
+        if response.status_code >= 400:
+            raise RuntimeError(f"Clerk rejected the name update ({response.status_code})")
+
+    async def set_banned(self, clerk_user_id: str, banned: bool) -> None:
+        """Suspend / reactivate sign-in in Clerk (admin user management)."""
+        if not self.secret:
+            raise RuntimeError("CLERK_SECRET_KEY is not configured")
+        async with httpx.AsyncClient(base_url="https://api.clerk.com/v1",
+                                     headers={"Authorization": f"Bearer {self.secret}"}, timeout=15) as client:
+            response = await client.post(f"/users/{clerk_user_id}/{'ban' if banned else 'unban'}")
+        if response.status_code >= 400:
+            raise RuntimeError(f"Clerk rejected the {'ban' if banned else 'unban'} ({response.status_code})")
+
+    async def login_info(self, clerk_user_id: str) -> dict:
+        """Last sign-in / activity times from Clerk. Never returns secrets."""
+        if not self.secret:
+            raise RuntimeError("CLERK_SECRET_KEY is not configured")
+        async with httpx.AsyncClient(base_url="https://api.clerk.com/v1",
+                                     headers={"Authorization": f"Bearer {self.secret}"}, timeout=10) as client:
+            response = await client.get(f"/users/{clerk_user_id}")
+        if response.status_code >= 400:
+            raise RuntimeError(f"Clerk lookup failed ({response.status_code})")
+        data = response.json()
+        return {"last_sign_in_at": data.get("last_sign_in_at"), "last_active_at": data.get("last_active_at"),
+                "banned": bool(data.get("banned"))}
+
     async def actor_profile(self, actor: Actor) -> dict:
         if not self.secret:
             raise HTTPException(503, "CLERK_SECRET_KEY is not configured on the backend")

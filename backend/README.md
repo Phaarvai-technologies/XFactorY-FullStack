@@ -17,6 +17,9 @@ Either run the SQL files in the Supabase SQL editor, in order:
 2. `database/migrations/004_manufacturer_api_support.sql` (also creates the `manufacturer-assets` storage bucket)
 3. `database/migrations/005_minimal_reference_seed.sql`
 4. `database/migrations/006_frontend_field_support.sql`
+5. `database/migrations/007_form_progress.sql`
+6. `database/migrations/008_admin_dashboard.sql` (Admin Dashboard: record type, entry source,
+   archive, assignment, change history, internal notes, activity log, `admin_manufacturer_overview` view)
 
 or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
 schema only if the database is empty, then runs all migrations (they are idempotent).
@@ -59,9 +62,60 @@ SELECT xy_seed_sample_bookings('manufacturer@example.com');  -- email of a user 
 
 It returns how many rows were added; running it again adds nothing.
 
+## Admin Dashboard (`/admin`)
+
+Admins are users with an active row in `platform_role_assignments`
+(platform_administrator, platform_operator, support_specialist or verification_analyst).
+Everyone else gets 403 from every `/api/v1/admin/...` endpoint and sees
+"Admin access only" at `/admin`.
+
+Make the first admin(s) either way:
+
+- `.env`: `ADMIN_EMAILS=you@company.com,colleague@company.com` — these users are granted
+  `platform_administrator` automatically the first time they open `/admin` (signed in with that email).
+- CLI (user must have signed in once): `PYTHONPATH=. python -m app.grant_admin you@company.com`
+  (`--revoke` removes the role).
+
+What it records (migration 008):
+
+| Table / view | Used for |
+| --- | --- |
+| `organizations.record_type` (REAL/DEMO/TEST), `entry_source` (MANUFACTURER/ADMIN_ASSISTED/IMPORTED), `referral_source`, `assigned_admin_user_id`, `is_archived`, `archived_at` | XY-ADMIN-04/07/08 |
+| `admin_change_history` | every admin change: field, old value, new value, admin, time, reason |
+| `admin_internal_notes` | notes only admins can see |
+| `user_activity_events` | failed API calls (method, path, status, message, error reference) and suspensions — never passwords, codes or tokens |
+| `users.last_seen_at` | last activity (updated at most every 5 minutes) |
+| `admin_manufacturer_overview` (view) | one row per manufacturer for lists, queue and analytics |
+
+Onboarding status is `manufacturer_onboarding.status`, shown as Not started / In progress /
+Submitted / Needs correction / Reviewed. A profile moves to Submitted automatically when every
+required section is complete. Completeness = required items completed ÷ 14 × 100 (the 14 items
+are listed on the manufacturer's Onboarding & Review tab); it is separate from the percentage the
+manufacturer sees on their own dashboard. Suspending a user blocks the API (403) and bans the
+user in Clerk. "Open support issues" = users with failed operations in the last 7 days.
+
 ## Endpoints used by the frontend
 
 See `infrastructure/API_CONTRACT.md`.
+
+## Running behind the API gateway
+
+In production the backend is not exposed directly: `docker compose up --build`
+(project root) starts it on a private network behind the nginx + ModSecurity
+gateway, which terminates HTTPS and filters attacks. See `../gateway/README.md`.
+The backend still verifies every Clerk JWT itself. `backend/Dockerfile` runs
+uvicorn with `--proxy-headers` so client IPs/scheme come from the gateway.
+
+## Troubleshooting
+
+- Check `http://localhost:8000/health/ready`: it lists any missing tables/columns.
+  On startup the uvicorn console also prints `DATABASE IS MISSING MIGRATIONS` if
+  the database is behind. Fix: `PYTHONPATH=. python -m app.migrate` (safe to re-run),
+  or run the files in `database/migrations/` in the Supabase SQL editor.
+- Every error response has a `detail` message; open the browser's Network tab,
+  click the failed request and read its Response.
+- 401: Clerk token rejected - check `CLERK_ISSUER`, `CLERK_JWKS_URL`, `CLERK_AUTHORIZED_PARTIES`.
+- 422: the request body is invalid (the `detail` names the field).
 
 ## Tests
 

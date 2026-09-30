@@ -28,6 +28,11 @@ REQUIRED = [
     ("organization_certifications", "document_file_name", "006_frontend_field_support.sql"),
     ("manufacturer_faq_answers", "display_order", "006_frontend_field_support.sql"),
     ("manufacturer_form_progress", None, "007_form_progress.sql"),
+    ("organizations", "record_type", "008_admin_dashboard.sql"),
+    ("admin_change_history", None, "008_admin_dashboard.sql"),
+    ("admin_internal_notes", None, "008_admin_dashboard.sql"),
+    ("user_activity_events", None, "008_admin_dashboard.sql"),
+    ("admin_manufacturer_overview", "completeness", "008_admin_dashboard.sql"),
 ]
 
 

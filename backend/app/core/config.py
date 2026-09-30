@@ -1,64 +1,39 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
-LOCAL_FRONTEND_URL = "http://localhost:3000"
-PRODUCTION_FRONTEND_URL = "https://x-factor-y-full-stack-cwlx.vercel.app"
-
 
 class Settings(BaseSettings):
-    # Application
     environment: str = "development"
-
-    # Supabase PostgreSQL
     database_url: str
-
-    # CORS
-    cors_origins: list[str] = [
-        LOCAL_FRONTEND_URL,
-        PRODUCTION_FRONTEND_URL,
-    ]
+    cors_origins: list[str] = ["http://localhost:3000"]
 
     # Clerk
     clerk_issuer: str
     clerk_jwks_url: str
     clerk_secret_key: str = ""
     clerk_webhook_signing_secret: str = ""
+    clerk_authorized_parties: list[str] = ["http://localhost:3000"]
 
-    # Valid JWT frontend origins
-    clerk_authorized_parties: list[str] = [
-        LOCAL_FRONTEND_URL,
-        PRODUCTION_FRONTEND_URL,
-    ]
-
-    # Supabase Storage
+    # Supabase Storage (logo, cover and machinery images)
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_storage_bucket: str = "manufacturer-assets"
 
-    @field_validator("environment")
-    @classmethod
-    def validate_environment(cls, value: str) -> str:
-        normalized_value = value.strip().lower()
+    # Admin dashboard: comma-separated emails that are made platform
+    # administrators on their first visit to /admin (bootstrap the first admins).
+    # More admins can then be granted with `python -m app.grant_admin <email>`.
+    admin_emails: str = ""
 
-        if normalized_value not in {"development", "production", "test"}:
-            raise ValueError(
-                "ENVIRONMENT must be development, production, or test"
-            )
+    @property
+    def admin_email_list(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
 
-        return normalized_value
-
-    model_config = SettingsConfigDict(
-        env_file=ENV_FILE,
-        env_file_encoding="utf-8",
-        extra="ignore",
-        case_sensitive=False,
-    )
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", case_sensitive=False)
 
 
 @lru_cache

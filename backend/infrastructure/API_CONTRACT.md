@@ -101,3 +101,50 @@ Duplicates are prevented by: one progress row per form instance (unique key);
 `clientKey` on the first machinery save (a repeated request returns the same
 draft); a per-user lock on first sign-in; disabled buttons while saving.
 A step that fails validation returns 422 and saves nothing from that request.
+
+## Onboarding prefill (Manufacturer account form)
+
+`GET /manufacturer/bootstrap` also returns the signed-in user's saved record:
+
+```json
+"user": { "firstName": "Jordan", "lastName": "Lee", "email": "jordan@example.com" }
+```
+
+- Stored when the user signs up (Clerk `user.created` webhook) or on their first
+  API call; if the record has no name yet, it is copied from Clerk once.
+- The onboarding form opens with First name, Last name and Email filled in.
+- `POST /manufacturer/account` (same body as before):
+  - names unchanged -> the saved record is not rewritten;
+  - names edited -> `users.first_name/last_name` updated, and the new name is
+    also sent to Clerk so its `user.updated` webhook can't restore the old one;
+  - the form's email is saved as the manufacturer contact email
+    (`organization_profiles.contact_email`); `users.email` stays the Clerk
+    sign-in email.
+- The user is identified by the Clerk user id; repeated or simultaneous
+  submits update the same rows (per-user lock) - no duplicates.
+
+## Admin Dashboard (`/api/v1/admin/...`)
+
+Every endpoint needs a Clerk token of a user with an active platform role (see
+`backend/README.md`); others get 403. Screens live at `/admin` in the frontend.
+
+| Screen / ticket | Method + path | Notes |
+| --- | --- | --- |
+| Access (01) | `GET /admin/me` | 200 `{id,name,email,roles}` or 403 |
+| Overview (02) | `GET /admin/overview` | cards (real records only) + recent / updated / needs-attention lists |
+| Users (03) | `GET /admin/users?q=&account_status=&onboarding_status=&page=` | onboarding_status also `NO_PROFILE` |
+| User detail + troubleshooting (03/10) | `GET /admin/users/{id}` | last login, last save, last section, recent failed operations with error reference |
+| Suspend / reactivate (03) | `POST /admin/users/{id}/suspend` · `/reactivate` `{reason}` | blocks the API + bans in Clerk |
+| Manufacturer list (04) | `GET /admin/manufacturers?q=&industry=&process=&location=&completeness=&review_status=&record_type=&entry_source=&archived=&assigned=&sort=&page=` | list filters repeat (`record_type=DEMO&record_type=TEST`); archived hidden by default |
+| Detail (05) | `GET /admin/manufacturers/{id}` | profile, contacts, linked users, notes, history, timeline, required fields |
+| Edit a response (06) | `PATCH /admin/manufacturers/{id}/fields` `{field, value, reason}` | same validation as onboarding; history keeps old/new value, admin, time, reason |
+| Review / classification (07/08) | `PATCH /admin/manufacturers/{id}/admin-fields` `{review_status?, assigned_admin_id?, unassign?, record_type?, entry_source?, referral_source?, reason?}` | NEEDS_CORRECTION requires `reason` (also saved as a note) |
+| Queue (07) | `GET /admin/review-queue?q=&review_status=&assigned=me|unassigned&include_test=` | Submitted first; Reviewed hidden unless filtered |
+| Notes (07) | `POST /admin/manufacturers/{id}/notes` `{note}` | |
+| Archive (04/08) | `POST /admin/manufacturers/{id}/archive` · `/restore` `{reason?}`; `POST /admin/manufacturers/archive-batch` `{ids, reason?}` | batch archives DEMO/TEST only |
+| Analytics (09) | `GET /admin/analytics?from=YYYY-MM-DD&to=&include_test=` | DEMO/TEST excluded by default |
+| Support (10) | `GET /admin/support/recent-errors` | latest 25 failed operations |
+
+Editable `field` keys: `company.*`, `location.*`, `infra.*`, `certifications`, `faqs`,
+`account.companyType`, `account.country`, `account.capacity`, `contact.email`,
+`contact.phone`, `machinery.{listingId}.{key}`.

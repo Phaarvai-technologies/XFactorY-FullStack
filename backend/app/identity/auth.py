@@ -2,7 +2,8 @@ from typing import Annotated
 
 import httpx
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import auth as core_auth
@@ -56,6 +57,7 @@ def _primary_email(data: dict) -> tuple[str, bool]:
 
 
 async def get_actor(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     session: Annotated[AsyncSession, Depends(get_session)] = None,
     settings: Annotated[Settings, Depends(get_settings)] = None,
@@ -64,6 +66,7 @@ async def get_actor(
         raise HTTPException(401, "Missing Clerk session token")
     claims = verify_clerk_token(authorization.removeprefix("Bearer ").strip(), settings)
     clerk_user_id = claims["sub"]
+    request.state.clerk_user_id = clerk_user_id
     row = await get_user_by_clerk_id(session, clerk_user_id)
     if row is None:
         data = await _fetch_clerk_user(clerk_user_id, settings)
@@ -82,7 +85,14 @@ async def get_actor(
         )
         await session.commit()
     else:
+        if row["status"] != "active":
+            raise HTTPException(403, "This account has been suspended. Please contact X!Y support.")
         user_id = row["id"]
+        await session.execute(text("""
+            UPDATE users SET last_seen_at=now()
+            WHERE id=:id AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
+        """), {"id": user_id})
+        await session.commit()
     # Clerk session-token v1 uses `org_id`, v2 uses `o.id`.
     organization_claim = claims.get("o")
     clerk_organization_id = claims.get("org_id")

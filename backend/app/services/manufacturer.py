@@ -115,13 +115,15 @@ class ManufacturerService:
     async def ensure_actor(self, actor: Actor) -> dict:
         """Returns the DB context; creates the rows on first use (webhook may be late)."""
         try:
-            return await self._run(self.repo.context(actor))
+            ctx = await self._run(self.repo.context(actor))
         except HTTPException as exc:
             if exc.status_code != 409:
                 raise
-        profile = await self.clerk.actor_profile(actor)
-        await self._run(self.repo.sync_actor(actor, profile))
-        return await self._run(self.repo.context(actor))
+            profile = await self.clerk.actor_profile(actor)
+            await self._run(self.repo.sync_actor(actor, profile))
+            ctx = await self._run(self.repo.context(actor))
+        await self.repo.touch_last_seen(actor.clerk_user_id)
+        return ctx
 
     async def _image_file(self, ctx: dict, data_url: str, purpose: str, folder: str):
         image = decode_data_url(data_url)
@@ -136,8 +138,21 @@ class ManufacturerService:
     # ---------------------------------------------------------------- read model
     async def bootstrap(self, actor: Actor) -> dict:
         """Everything ManufacturerApp needs: `state` (ManufacturerState) and `profileData`."""
-        await self.ensure_actor(actor)
+        ctx = await self.ensure_actor(actor)
+        if not (ctx.get("first_name") and ctx.get("last_name")):
+            # No name saved yet (e.g. the user record was created before Clerk had
+            # one): copy it from Clerk once so the onboarding form can be prefilled.
+            try:
+                clerk_profile = await self.clerk.actor_profile(actor)
+                await self.repo.fill_missing_names(ctx, clerk_profile.get("first_name"),
+                                                   clerk_profile.get("last_name"))
+            except Exception as exc:  # noqa: BLE001 - prefill is a convenience
+                log.info("Could not read the name from Clerk: %s", exc)
         raw = await self._run(self.repo.snapshot(actor))
+        return self.view(raw)
+
+    def view(self, raw: dict) -> dict:
+        """Frontend snapshot from repository data (also used read-only by the admin)."""
         p, ctx = raw["profile"], raw["context"]
         asset = self.storage.public_url
 
@@ -253,13 +268,22 @@ class ManufacturerService:
                           "certsDone": flags["certs"], "infraDone": flags["infra"], "faqDone": flags["faq"]},
         }
         return {"accountExists": bool(p.get("personal_information_completed")),
+                # Saved user record (from Clerk sign-up) used to prefill onboarding.
+                "user": {"firstName": ctx.get("first_name") or "", "lastName": ctx.get("last_name") or "",
+                         "email": ctx.get("email") or ""},
                 "state": state, "profileData": profile_data,
                 "profileProgress": profile_progress, "machineryDraft": machinery_draft}
 
     # ---------------------------------------------------------------- mutations
     async def create_account(self, actor: Actor, data: dict) -> dict:
         await self.ensure_actor(actor)
-        await self._run(self.repo.create_account(actor, data))
+        result = await self._run(self.repo.create_account(actor, data))
+        if result["names_changed"]:
+            try:
+                await self.clerk.update_user_name(actor.clerk_user_id, data["firstName"].strip(),
+                                                  data["lastName"].strip())
+            except Exception as exc:  # noqa: BLE001 - the database already has the new name
+                log.warning("Saved the new name, but could not update it in Clerk: %s", exc)
         return await self.bootstrap(actor)
 
     async def update_profile(self, actor: Actor, changes: dict, progress: dict | None = None) -> dict:
