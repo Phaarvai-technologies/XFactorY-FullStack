@@ -678,3 +678,77 @@
 }
 .adm-root .adm-danger-text { color: var(--red-600); font-size: 12.5px; padding: 0; }
 .adm-root .adm-pricing-grid { gap: 12px; }
+
+/* ===== sign-in (/admin/login) ===== */
+.adm-root .adm-login { width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.adm-root .adm-login-card { width: 100%; padding: 32px 30px 26px; }
+.adm-root .adm-login-brand { display: flex; align-items: center; gap: 9px; font-size: 18px; font-weight: 700; margin-bottom: 22px; }
+.adm-root .adm-login-brand .topbar-crumb { margin-left: 0; }
+.adm-root .adm-login-title { font-size: 21px; font-weight: 700; line-height: 1.3; margin-bottom: 4px; }
+.adm-root .adm-login-sub { font-size: 13.5px; color: var(--slate-500); margin-bottom: 20px; }
+.adm-root .adm-login-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: var(--slate-100);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+.adm-root .adm-login-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--slate-500);
+}
+.adm-root .adm-login-switch button.active { background: #fff; color: var(--blue-700); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); }
+.adm-root .adm-login-field { margin-bottom: 16px; }
+.adm-root .adm-pw-input { padding-right: 44px !important; }
+.adm-root .adm-pw-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--slate-400);
+}
+.adm-root .adm-pw-toggle:hover { color: var(--slate-700); background: var(--slate-100); }
+.adm-root .adm-login-submit { width: 100%; margin-top: 4px; }
+.adm-root .adm-login-error { margin: 0 0 14px; }
+.adm-root .adm-login-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--blue-50);
+  border: 1px solid var(--blue-100);
+  color: var(--blue-700);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.adm-root .adm-login-continue { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.adm-root .adm-login-continue p { font-size: 13.5px; color: var(--slate-600); }
+.adm-root .adm-login-hint { margin-top: 18px; font-size: 12.5px; color: var(--slate-500); line-height: 1.55; }
+.adm-root .adm-login-foot { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate-400); }
+@media (max-width: 480px) {
+  .adm-root .adm-login-card { padding: 26px 20px 22px; }
+}
+
+/* sidebar: sign-in method + change password */
+.adm-root .adm-signin-method { font-size: 11.5px; color: var(--slate-400); margin: -4px 0 10px; }
+.adm-root .adm-change-pw { margin-bottom: 8px; }
+.adm-root .adm-change-pw:hover { background: var(--blue-50); border-color: var(--blue-100); color: var(--blue-700); }
+.adm-root .adm-pw-rules { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12.5px; color: var(--slate-500); }
+.adm-root .adm-pw-rules li.ok { color: var(--emerald-600); font-weight: 600; }

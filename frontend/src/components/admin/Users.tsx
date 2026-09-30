@@ -6,6 +6,7 @@ import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import {
   AccountBadge,
   Completeness,
+  EmailStatusBadge,
   ErrorBox,
   Loading,
   Modal,
@@ -114,7 +115,7 @@ export function Users() {
                     <td>
                       {u.isAdmin ? (
                         <span className="badge badge-info">
-                          <ShieldCheck size={11} style={{ marginRight: 3 }} /> Admin
+                          <ShieldCheck size={11} style={{ marginRight: 3 }} /> {u.staffOnly ? "Admin (staff)" : "Admin"}
                         </span>
                       ) : (
                         u.userType
@@ -236,7 +237,10 @@ export function UserDetailView({ id }: { id: string }) {
               </div>
               <div className="detail-item">
                 <p className="detail-label">User type</p>
-                <p className="detail-value">{u.isAdmin ? "Admin" : u.userType}</p>
+                <p className="detail-value">
+                  {u.isAdmin ? (u.staffOnly ? "Admin (staff-only account)" : "Admin") : u.userType}
+                  {u.adminLogin && ` · admin email + password ${u.adminLogin === "active" ? "sign-in" : "sign-in (disabled)"}`}
+                </p>
               </div>
               <div className="detail-item">
                 <p className="detail-label">Account status</p>
@@ -330,21 +334,60 @@ export function UserDetailView({ id }: { id: string }) {
             )}
           </section>
 
+          {t.emails && t.emails.length > 0 && (
+            <section className="card adm-section">
+              <div className="adm-section-head">
+                <h3>Emails sent to this user</h3>
+                <span className="adm-muted">Latest {t.emails.length}</span>
+              </div>
+              <div className="adm-table-wrap">
+                <table className="adm-table">
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Subject</th>
+                      <th>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {t.emails.map((e) => (
+                      <tr key={e.id}>
+                        <td className="adm-nowrap">{fmtDateTime(e.created_at)}</td>
+                        <td className="adm-wrap">
+                          <div className="adm-cell-main">{e.subject}</div>
+                          <div className="adm-cell-sub">{e.to_email}</div>
+                        </td>
+                        <td>
+                          <EmailStatusBadge status={e.status} />
+                          {e.error && <div className="adm-cell-sub adm-wrap">{e.error}</div>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <section className="card adm-section">
             <div className="adm-section-head">
-              <h3>Recent failed operations & account events</h3>
+              <h3>Recent failed operations, sign-ins & account events</h3>
             </div>
             {t.events.length === 0 ? (
               <p className="adm-muted">No failed operations recorded.</p>
             ) : (
               <ul className="adm-events">
                 {t.events.map((e, i) => (
-                  <li key={i} className={e.kind === "error" ? "err" : "acct"}>
+                  <li key={i} className={e.kind === "error" || e.kind === "admin_login_failed" ? "err" : "acct"}>
                     <div className="adm-event-top">
                       {e.kind === "error" ? (
                         <span className="badge badge-rejected">
                           {e.status_code} {e.method}
                         </span>
+                      ) : e.kind === "admin_login_failed" ? (
+                        <span className="badge badge-rejected">Failed admin sign-in</span>
+                      ) : e.kind === "admin_login" ? (
+                        <span className="badge badge-info">Admin sign-in</span>
                       ) : (
                         <span className="badge badge-info">Account</span>
                       )}

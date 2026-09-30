@@ -5,7 +5,13 @@ export type RecordType = "REAL" | "DEMO" | "TEST";
 export type EntrySource = "MANUFACTURER" | "ADMIN_ASSISTED" | "IMPORTED";
 export type AccountStatus = "active" | "suspended" | "deactivated";
 
-export type AdminMe = { id: string; name: string | null; email: string; roles: string[] };
+export type AdminMe = {
+  id: string;
+  name: string | null;
+  email: string;
+  roles: string[];
+  authMethod: "clerk" | "password";
+};
 export type AdminUserRef = { id: string; name: string | null; email: string };
 
 export type SectionState = { name: string; complete: boolean };
@@ -169,12 +175,16 @@ export type UserRow = {
   lastActivity: string | null;
   accountStatus: AccountStatus;
   onboardingStatus: ReviewStatus | "NO_PROFILE";
+  /** Admin created with an email + password only (no X!Y sign-up). */
+  staffOnly: boolean;
+  /** Status of the admin email + password sign-in, if the user has one. */
+  adminLogin: "active" | "disabled" | null;
 };
 
 export type UserList = { total: number; page: number; pageSize: number; rows: UserRow[] };
 
 export type ActivityEvent = {
-  kind: "error" | "account_status";
+  kind: "error" | "account_status" | "admin_login" | "admin_login_failed";
   method: string | null;
   path: string | null;
   status_code: number | null;
@@ -204,8 +214,28 @@ export type UserDetail = {
     onboarding: { lastCompleted: string | null; stoppedAt: string | null; missingFields: string[] } | null;
     events: ActivityEvent[];
     notificationStatus: string;
+    emails?: EmailDelivery[];
   };
   clerkSynced?: boolean;
+};
+
+export type EmailDelivery = {
+  id: string;
+  to_email: string;
+  template: string;
+  subject: string;
+  status: "sent" | "failed" | "skipped";
+  error: string | null;
+  created_at: string;
+};
+
+export type EmailLog = { emails: EmailDelivery[]; smtpConfigured: boolean };
+
+export type TestEmailResult = {
+  status: EmailDelivery["status"];
+  error: string | null;
+  to: string;
+  smtpConfigured: boolean;
 };
 
 export type RecentError = {

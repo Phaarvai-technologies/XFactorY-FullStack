@@ -31,6 +31,11 @@ export function AccountBadge({ status }: { status: AccountStatus }) {
 }
 
 /** Completeness % with a thin bar (doc formula: required completed / required × 100). */
+export function EmailStatusBadge({ status }: { status: "sent" | "failed" | "skipped" }) {
+  const cls = status === "sent" ? "badge-verified" : status === "failed" ? "badge-rejected" : "badge-neutral";
+  return <span className={`badge ${cls}`}>{status === "sent" ? "Sent" : status === "failed" ? "Failed" : "Not sent (email off)"}</span>;
+}
+
 export function Completeness({ value, done, total }: { value: number; done?: number; total?: number }) {
   const tone = value >= 100 ? "full" : value >= 50 ? "mid" : "low";
   return (

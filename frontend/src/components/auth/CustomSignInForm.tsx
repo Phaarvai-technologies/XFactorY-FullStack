@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
+import { NEEDS_SECOND_STEP, pickSecondStep, secondStepPrompt, sendSecondStepCode, type SecondStep } from "@/lib/auth/secondFactor";
 
 type FieldErrors = {
   email?: string;
   password?: string;
+  code?: string;
 };
 
 type StatusTone = "error" | "warn" | "ok";
@@ -77,6 +79,9 @@ export function CustomSignInForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<StatusState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  // Clerk asked for a one-time code after the password (new device / two-step verification).
+  const [secondStep, setSecondStep] = useState<SecondStep | null>(null);
+  const [verificationCode, setVerificationCode] = useState("");
 
   const redirectTo = useMemo(
     () => searchParams.get("redirect_url") || "/",
@@ -127,6 +132,15 @@ export function CustomSignInForm() {
         return;
       }
 
+      const step = NEEDS_SECOND_STEP.has(result.status ?? "") ? pickSecondStep(result.supportedSecondFactors) : null;
+      if (step) {
+        await sendSecondStepCode(signIn, step);
+        setSecondStep(step);
+        setVerificationCode("");
+        setStatus({ tone: "ok", message: `${secondStepPrompt(step)} This is needed when you sign in on a new device.` });
+        return;
+      }
+
       setStatus({
         tone: "warn",
         message: "Additional verification is required before you can continue.",
@@ -159,6 +173,70 @@ export function CustomSignInForm() {
     }
   }
 
+  async function handleVerifyCode(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus(null);
+    clearField("code");
+
+    if (!verificationCode.trim()) {
+      setFieldErrors((current) => ({ ...current, code: "Please enter the verification code." }));
+      return;
+    }
+    if (!isLoaded || !signIn || !setActive || !secondStep) {
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const result = await signIn.attemptSecondFactor({ strategy: secondStep.strategy, code: verificationCode.trim() });
+
+      if (result.status === "complete" && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId });
+        router.push(redirectTo);
+        router.refresh();
+        return;
+      }
+
+      setStatus({ tone: "warn", message: "Additional verification is required before you can continue." });
+    } catch (error) {
+      const parsed = parseClerkError(error);
+      if (parsed.code === "session_exists") {
+        router.push(redirectTo);
+        router.refresh();
+        return;
+      }
+      setFieldErrors((current) => ({ ...current, code: parsed.message }));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleResendCode() {
+    setStatus(null);
+
+    if (!isLoaded || !signIn || !secondStep) {
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await sendSecondStepCode(signIn, secondStep);
+      setStatus({ tone: "ok", message: "A new verification code has been sent." });
+    } catch (error) {
+      const parsed = parseClerkError(error);
+      setStatus({ tone: "error", message: parsed.message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleBackToPassword() {
+    setSecondStep(null);
+    setVerificationCode("");
+    setStatus(null);
+    clearField("code");
+  }
+
   async function handleGoogleAuth() {
     setStatus(null);
 
@@ -181,7 +259,7 @@ export function CustomSignInForm() {
   }
 
   return (
-    <form className="auth-form" onSubmit={handleSubmit}>
+    <form className="auth-form" onSubmit={secondStep ? handleVerifyCode : handleSubmit}>
       <h1 className="auth-card-heading">Welcome back</h1>
 
       <div className={`status-box status-${status?.tone ?? "error"}${status ? " show" : ""}`}>
@@ -189,6 +267,8 @@ export function CustomSignInForm() {
         <span>{status?.message}</span>
       </div>
 
+      {!secondStep ? (
+        <>
       <button
         type="button"
         className="provider-btn"
@@ -323,13 +403,71 @@ export function CustomSignInForm() {
           separately once you&apos;re in.
         </span>
       </div>
+        </>
+      ) : (
+        <>
+          <div className="auth-verification-note">
+            {secondStep.strategy === "totp" ? (
+              <>Enter the code from your authenticator app to finish signing in as <strong>{email}</strong>.</>
+            ) : (
+              <>
+                Enter the verification code sent to <strong>{secondStep.sentTo || email}</strong> to continue.
+              </>
+            )}
+          </div>
+
+          <div className="field">
+            <label htmlFor="si-code">Verification code</label>
+            <div className="input-wrap">
+              <input
+                type="text"
+                id="si-code"
+                placeholder="123456"
+                value={verificationCode}
+                onChange={(event) => {
+                  setVerificationCode(event.target.value);
+                  clearField("code");
+                }}
+                className={fieldErrors.code ? "invalid auth-code-input" : "auth-code-input"}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+              />
+            </div>
+            <FieldError message={fieldErrors.code} />
+          </div>
+
+          <div className="auth-verification-actions">
+            {secondStep.strategy !== "totp" && (
+              <button
+                type="button"
+                className="auth-link-button"
+                onClick={handleResendCode}
+                disabled={isSubmitting || !isLoaded}
+              >
+                Resend code
+              </button>
+            )}
+            <button
+              type="button"
+              className="auth-link-button"
+              onClick={handleBackToPassword}
+              disabled={isSubmitting}
+            >
+              Use a different account
+            </button>
+          </div>
+        </>
+      )}
 
       <button className={`primary-cta${isSubmitting ? " loading" : ""}`} disabled={isSubmitting || !isLoaded}>
         {isSubmitting ? (
           <>
             <span className="spinner" aria-hidden="true" />
-            Signing in…
+            {secondStep ? "Verifying…" : "Signing in…"}
           </>
+        ) : secondStep ? (
+          "Verify and sign in"
         ) : (
           "Sign in"
         )}
