@@ -24,6 +24,7 @@ type DashboardScreenProps = {
   flags: ProfileCompletionFlags;
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
   onOpenMachineryWizard: () => void;
+  onEditMachinery: (machine: MachineryListing) => void;
   onSetMachineryStatus: (id: number, status: MachineryListing["status"]) => void;
   onSaveCapacity: (plan: CapacityPlan) => void;
   onCycleDay: (key: string) => void;
@@ -60,6 +61,7 @@ export function DashboardScreen({
   flags,
   onOpenProfileWizard,
   onOpenMachineryWizard,
+  onEditMachinery,
   onSetMachineryStatus,
   onSaveCapacity,
   onCycleDay,
@@ -351,14 +353,36 @@ export function DashboardScreen({
                     </div>
                     <div className="item-actions">
                       <span className={`badge ${MACHINERY_STATUS_BADGE[m.status]}`}>{m.status}</span>
-                      {actions}
+
+
                       <button
                         type="button"
-                        className="btn-danger-ghost"
-                        onClick={() => onSetMachineryStatus(m.id, "Archived")}
+                        className="btn-ghost"
+                        onClick={() => onEditMachinery(m)}
                       >
-                        Archive
-                      </button>
+                      Edit
+                     </button>
+                      {actions}
+
+                      
+
+                      {m.status === "Archived" ? (
+  <button
+    type="button"
+    className="btn-ghost"
+    onClick={() => onSetMachineryStatus(m.id, "Draft")}
+  >
+    Unarchive
+  </button>
+) : (
+  <button
+    type="button"
+    className="btn-danger-ghost"
+    onClick={() => onSetMachineryStatus(m.id, "Archived")}
+  >
+    Archive
+  </button>
+)}
                     </div>
                   </div>
                 );
@@ -625,32 +649,38 @@ function CapacityForm({
   const [end, setEnd] = useState(capacity?.end ?? "");
 
   function handleSave() {
-    if (!machine || !count.trim() || !start || !end) {
-      showToast("Fill in machine, number of machines, and both dates.");
-      return;
-    }
-    onSave({ machine, count: count.trim(), start, end });
+  if (!machine || !count.trim() || !start || !end) {
+    showToast("Fill in machine, number of machines, and both dates.");
+    return;
   }
 
+  if (end < start) {
+    showToast("End date cannot be earlier than start date.");
+    return;
+  }
+
+  onSave({
+    machine,
+    count: count.trim(),
+    start,
+    end,
+  });
+}
+
   return (
-    <>
-      <div className="form-grid">
-        <div>
-          <label htmlFor="cap-machine">Machine Name</label>
-          <select
-            id="cap-machine"
-            className={machine ? "" : "placeholder-shown"}
-            value={machine}
-            onChange={(e) => setMachine(e.target.value)}
-          >
-            <option value="" disabled>
-              Select a machine
-            </option>
-            {machinery.map((m) => (
-              <option key={m.id}>{m.type || "Untitled machinery"}</option>
-            ))}
-          </select>
-        </div>
+  <>
+    <div className="form-grid">
+      <div>
+        <label htmlFor="cap-machine">Machine Name</label>
+        <input
+          id="cap-machine"
+          type="text"
+          className={machine ? "" : "placeholder-shown"}
+          value={machine}
+          onChange={(e) => setMachine(e.target.value)}
+          placeholder="Enter machine name"
+        />
+      </div>
         <div>
           <label htmlFor="cap-count">No. of Machines</label>
           <input
@@ -672,14 +702,15 @@ function CapacityForm({
           />
         </div>
         <div>
-          <label htmlFor="cap-end">End date</label>
-          <input
-            type="date"
-            id="cap-end"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </div>
+  <label htmlFor="cap-end">End date</label>
+  <input
+    type="date"
+    id="cap-end"
+    min={start}
+    value={end}
+    onChange={(e) => setEnd(e.target.value)}
+  />
+</div>
         <div className="col-span-2">
           <button className="btn-ghost" type="button" onClick={onOpenRecurringModal}>
             Add recurring

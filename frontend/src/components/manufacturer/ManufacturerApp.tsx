@@ -452,6 +452,28 @@ export function ManufacturerApp() {
     setMachineryWizardOpen(true);
   }
 
+  function handleEditMachinery(machine: MachineryListing) {
+  const serverId = ids.current.toServer.get(machine.id);
+
+  if (!serverId) {
+    showToast("Unable to edit this machinery.");
+    return;
+  }
+
+  machinerySession.current = {
+    id: serverId,
+    clientKey: "",
+    saved: machine as unknown as MachineryDraft,
+  };
+
+  setMachineryStart({
+    draft: machine as unknown as MachineryDraft,
+    step: 1,
+  });
+
+  setMachineryWizardOpen(true);
+}
+
   /** One machinery request: first save creates the draft (POST), later ones PATCH it. */
   const sendMachinery = useCallback(
     async (draft: MachineryDraft | null, extra: Record<string, unknown>): Promise<ServerSnapshot> => {
@@ -691,6 +713,7 @@ export function ManufacturerApp() {
             flags={flags}
             onOpenProfileWizard={handleOpenProfileWizard}
             onOpenMachineryWizard={openMachineryWizard}
+            onEditMachinery={handleEditMachinery}
             onSetMachineryStatus={handleSetMachineryStatus}
             onSaveCapacity={handleSaveCapacity}
             onCycleDay={handleCycleDay}
@@ -734,11 +757,14 @@ export function ManufacturerApp() {
           ) : null}
 
           {recurringOpen ? (
-            <RecurringModal
-              onClose={() => setRecurringOpen(false)}
-              onSave={(days, start, end) => void handleSaveRecurring({ days, start, end })}
-            />
-          ) : null}
+  <RecurringModal
+    initialValue={state.recurring}
+    onClose={() => setRecurringOpen(false)}
+    onSave={(days, start, end) =>
+      void handleSaveRecurring({ days, start, end })
+    }
+  />
+) : null}
         </>
       ) : null}
 

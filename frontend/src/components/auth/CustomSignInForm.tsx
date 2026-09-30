@@ -5,12 +5,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
-import { NEEDS_SECOND_STEP, pickSecondStep, secondStepPrompt, sendSecondStepCode, type SecondStep } from "@/lib/auth/secondFactor";
 
 type FieldErrors = {
   email?: string;
   password?: string;
-  code?: string;
 };
 
 type StatusTone = "error" | "warn" | "ok";
@@ -79,9 +77,12 @@ export function CustomSignInForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<StatusState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  // Clerk asked for a one-time code after the password (new device / two-step verification).
-  const [secondStep, setSecondStep] = useState<SecondStep | null>(null);
-  const [verificationCode, setVerificationCode] = useState("");
+
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetStep, setResetStep] = useState<"email" | "code" | "password">("email");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const redirectTo = useMemo(
     () => searchParams.get("redirect_url") || "/",
@@ -132,15 +133,6 @@ export function CustomSignInForm() {
         return;
       }
 
-      const step = NEEDS_SECOND_STEP.has(result.status ?? "") ? pickSecondStep(result.supportedSecondFactors) : null;
-      if (step) {
-        await sendSecondStepCode(signIn, step);
-        setSecondStep(step);
-        setVerificationCode("");
-        setStatus({ tone: "ok", message: `${secondStepPrompt(step)} This is needed when you sign in on a new device.` });
-        return;
-      }
-
       setStatus({
         tone: "warn",
         message: "Additional verification is required before you can continue.",
@@ -173,69 +165,157 @@ export function CustomSignInForm() {
     }
   }
 
-  async function handleVerifyCode(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus(null);
-    clearField("code");
+  async function handleForgotPassword() {
+  setStatus(null);
 
-    if (!verificationCode.trim()) {
-      setFieldErrors((current) => ({ ...current, code: "Please enter the verification code." }));
-      return;
-    }
-    if (!isLoaded || !signIn || !setActive || !secondStep) {
-      return;
-    }
+  const trimmedEmail = email.trim();
 
-    try {
-      setIsSubmitting(true);
-      const result = await signIn.attemptSecondFactor({ strategy: secondStep.strategy, code: verificationCode.trim() });
-
-      if (result.status === "complete" && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId });
-        router.push(redirectTo);
-        router.refresh();
-        return;
-      }
-
-      setStatus({ tone: "warn", message: "Additional verification is required before you can continue." });
-    } catch (error) {
-      const parsed = parseClerkError(error);
-      if (parsed.code === "session_exists") {
-        router.push(redirectTo);
-        router.refresh();
-        return;
-      }
-      setFieldErrors((current) => ({ ...current, code: parsed.message }));
-    } finally {
-      setIsSubmitting(false);
-    }
+  if (!trimmedEmail) {
+    setFieldErrors((current) => ({
+      ...current,
+      email: "Please enter your email first.",
+    }));
+    return;
   }
 
-  async function handleResendCode() {
-    setStatus(null);
-
-    if (!isLoaded || !signIn || !secondStep) {
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      await sendSecondStepCode(signIn, secondStep);
-      setStatus({ tone: "ok", message: "A new verification code has been sent." });
-    } catch (error) {
-      const parsed = parseClerkError(error);
-      setStatus({ tone: "error", message: parsed.message });
-    } finally {
-      setIsSubmitting(false);
-    }
+  if (!EMAIL_PATTERN.test(trimmedEmail)) {
+    setFieldErrors((current) => ({
+      ...current,
+      email: "Please enter a valid email address.",
+    }));
+    return;
   }
 
-  function handleBackToPassword() {
-    setSecondStep(null);
-    setVerificationCode("");
-    setStatus(null);
-    clearField("code");
+  if (!isLoaded || !signIn) {
+    return;
   }
+
+  try {
+    setIsResettingPassword(true);
+
+    await signIn.create({
+      strategy: "reset_password_email_code",
+      identifier: trimmedEmail,
+    });
+
+    setResetStep("code");
+
+    setStatus({
+      tone: "ok",
+      message: "Password reset code sent to your email.",
+    });
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsResettingPassword(false);
+  }
+}
+
+async function handleResetCode() {
+  setStatus(null);
+
+  if (!resetCode.trim()) {
+    setStatus({
+      tone: "error",
+      message: "Please enter the verification code.",
+    });
+    return;
+  }
+
+  if (!isLoaded || !signIn) {
+    return;
+  }
+
+  try {
+    setIsResettingPassword(true);
+
+    const result = await signIn.attemptFirstFactor({
+      strategy: "reset_password_email_code",
+      code: resetCode.trim(),
+    });
+
+    if (result.status === "needs_new_password") {
+      setResetStep("password");
+
+      setStatus({
+        tone: "ok",
+        message: "Code verified. Please create your new password.",
+      });
+    }
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsResettingPassword(false);
+  }
+}
+
+async function handleNewPassword() {
+  setStatus(null);
+
+  if (!newPassword) {
+    setStatus({
+      tone: "error",
+      message: "Please enter a new password.",
+    });
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    setStatus({
+      tone: "error",
+      message: "Password must be at least 8 characters.",
+    });
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setStatus({
+      tone: "error",
+      message: "Passwords do not match.",
+    });
+    return;
+  }
+
+  if (!isLoaded || !signIn || !setActive) {
+    return;
+  }
+
+  try {
+    setIsResettingPassword(true);
+
+    const result = await signIn.resetPassword({
+      password: newPassword,
+    });
+
+    if (result.status === "complete" && result.createdSessionId) {
+      await setActive({
+        session: result.createdSessionId,
+      });
+
+      router.push(redirectTo);
+      router.refresh();
+    }
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsResettingPassword(false);
+  }
+}
 
   async function handleGoogleAuth() {
     setStatus(null);
@@ -259,17 +339,32 @@ export function CustomSignInForm() {
   }
 
   return (
-    <form className="auth-form" onSubmit={secondStep ? handleVerifyCode : handleSubmit}>
-      <h1 className="auth-card-heading">Welcome back</h1>
+    <form
+  className="auth-form"
+  onSubmit={
+    resetStep === "code"
+      ? (event) => {
+          event.preventDefault();
+          handleResetCode();
+        }
+      : resetStep === "password"
+        ? (event) => {
+            event.preventDefault();
+            handleNewPassword();
+          }
+        : handleSubmit
+  }
+>
 
       <div className={`status-box status-${status?.tone ?? "error"}${status ? " show" : ""}`}>
         <StatusIcon tone={status?.tone ?? "error"} />
         <span>{status?.message}</span>
       </div>
 
-      {!secondStep ? (
-        <>
-      <button
+      {resetStep === "email" && (
+  <>
+  
+  <button
         type="button"
         className="provider-btn"
         onClick={handleGoogleAuth}
@@ -338,9 +433,14 @@ export function CustomSignInForm() {
           <label htmlFor="si-password" style={{ marginBottom: 0 }}>
             Password
           </label>
-          <Link href="#" className="link-inline">
-            Forgot password?
-          </Link>
+          <button
+              type="button"
+              className="link-inline"
+              onClick={handleForgotPassword}
+              disabled={isResettingPassword || !isLoaded}
+           >
+              {isResettingPassword ? "Sending..." : "Forgot password?"}
+           </button>
         </div>
         <div className="input-wrap auth-input-spaced">
           <svg className="field-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -403,71 +503,13 @@ export function CustomSignInForm() {
           separately once you&apos;re in.
         </span>
       </div>
-        </>
-      ) : (
-        <>
-          <div className="auth-verification-note">
-            {secondStep.strategy === "totp" ? (
-              <>Enter the code from your authenticator app to finish signing in as <strong>{email}</strong>.</>
-            ) : (
-              <>
-                Enter the verification code sent to <strong>{secondStep.sentTo || email}</strong> to continue.
-              </>
-            )}
-          </div>
-
-          <div className="field">
-            <label htmlFor="si-code">Verification code</label>
-            <div className="input-wrap">
-              <input
-                type="text"
-                id="si-code"
-                placeholder="123456"
-                value={verificationCode}
-                onChange={(event) => {
-                  setVerificationCode(event.target.value);
-                  clearField("code");
-                }}
-                className={fieldErrors.code ? "invalid auth-code-input" : "auth-code-input"}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                autoFocus
-              />
-            </div>
-            <FieldError message={fieldErrors.code} />
-          </div>
-
-          <div className="auth-verification-actions">
-            {secondStep.strategy !== "totp" && (
-              <button
-                type="button"
-                className="auth-link-button"
-                onClick={handleResendCode}
-                disabled={isSubmitting || !isLoaded}
-              >
-                Resend code
-              </button>
-            )}
-            <button
-              type="button"
-              className="auth-link-button"
-              onClick={handleBackToPassword}
-              disabled={isSubmitting}
-            >
-              Use a different account
-            </button>
-          </div>
-        </>
-      )}
 
       <button className={`primary-cta${isSubmitting ? " loading" : ""}`} disabled={isSubmitting || !isLoaded}>
         {isSubmitting ? (
           <>
             <span className="spinner" aria-hidden="true" />
-            {secondStep ? "Verifying…" : "Signing in…"}
+            Signing in…
           </>
-        ) : secondStep ? (
-          "Verify and sign in"
         ) : (
           "Sign in"
         )}
@@ -485,6 +527,115 @@ export function CustomSignInForm() {
           Create account
         </Link>
       </div>
+  </>
+
+  )}
+
+
+  
+
+      {resetStep === "code" && (
+  <>
+    <h1 className="auth-card-heading">Verify your email</h1>
+
+    <p className="auth-description">
+      Enter the verification code sent to{" "}
+      <strong>{email}</strong>.
+    </p>
+
+    <div className="field">
+      <label htmlFor="reset-code">Verification code</label>
+
+      <input
+        type="text"
+        id="reset-code"
+        value={resetCode}
+        onChange={(event) => setResetCode(event.target.value)}
+        placeholder="Enter verification code"
+        autoComplete="one-time-code"
+        inputMode="numeric"
+      />
+    </div>
+
+    <button
+      type="submit"
+      className={`primary-cta${isResettingPassword ? " loading" : ""}`}
+      disabled={isResettingPassword || !isLoaded}
+    >
+      {isResettingPassword ? "Verifying..." : "Verify code"}
+    </button>
+
+    <button
+      type="button"
+      className="link-inline"
+      onClick={() => {
+        setResetStep("email");
+        setResetCode("");
+        setStatus(null);
+      }}
+    >
+      Back to sign in
+    </button>
+  </>
+)}
+
+
+{resetStep === "password" && (
+  <>
+    <h1 className="auth-card-heading">Create a new password</h1>
+
+    <p className="auth-description">
+      Enter your new password below.
+    </p>
+
+    <div className="field">
+      <label htmlFor="new-password">New password</label>
+
+      <input
+        type="password"
+        id="new-password"
+        value={newPassword}
+        onChange={(event) => setNewPassword(event.target.value)}
+        placeholder="Enter new password"
+        autoComplete="new-password"
+      />
+    </div>
+
+    <div className="field">
+      <label htmlFor="confirm-password">Confirm password</label>
+
+      <input
+        type="password"
+        id="confirm-password"
+        value={confirmPassword}
+        onChange={(event) => setConfirmPassword(event.target.value)}
+        placeholder="Confirm new password"
+        autoComplete="new-password"
+      />
+    </div>
+
+    <button
+      type="submit"
+      className={`primary-cta${isResettingPassword ? " loading" : ""}`}
+      disabled={isResettingPassword || !isLoaded}
+    >
+      {isResettingPassword ? "Changing password..." : "Change password"}
+    </button>
+
+    <button
+      type="button"
+      className="link-inline"
+      onClick={() => {
+        setResetStep("code");
+        setStatus(null);
+      }}
+    >
+      Back to verification code
+    </button>
+  </>
+)}
+
+      
     </form>
   );
 }

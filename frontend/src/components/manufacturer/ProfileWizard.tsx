@@ -731,12 +731,51 @@ export function ProfileWizard({
                     <span>Reviewed by our team before it shows as verified</span>
                   </div>
                   <input
-                    type="file"
-                    id="cert-file"
-                    accept="application/pdf,image/*"
-                    onChange={(e) => setCertFileName(e.target.files?.[0]?.name ?? "")}
-                  />
+  type="file"
+  id="cert-file"
+  accept=".pdf,.jpg,.jpeg,.png,.zip"
+  onChange={(e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) {
+      setCertFileName("");
+      return;
+    }
+
+    const allowedTypes = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+    ];
+
+    const fileExtension = file.name.split(".").pop()?.toLowerCase();
+
+    const allowedExtensions = ["pdf", "jpg", "jpeg", "png"];
+
+    if (
+      !allowedTypes.includes(file.type) ||
+      !allowedExtensions.includes(fileExtension || "")
+    ) {
+      setCertError(
+        "Please upload a valid certification document. Supported formats: PDF, JPG, JPEG, or PNG."
+      );
+      setCertFileName("");
+      e.target.value = "";
+      return;
+    }
+
+    setCertError("");
+    setCertFileName(file.name);
+  }}
+/>
+
+{certError ? (
+  <p className="field-error">{certError}</p>
+) : null}
                 </div>
+                 {certError ? (
+    <p className="field-error">{certError}</p>
+  ) : null}
               </div>
             </div>
             {certError ? <p className="field-error">{certError}</p> : null}

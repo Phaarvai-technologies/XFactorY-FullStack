@@ -25,12 +25,15 @@ const INDUSTRIES = [
 ];
 const CONDITIONS = ["New", "Excellent", "Good", "Fair"];
 
-type MachineryDraft = Omit<MachineryListing, "id" | "status">;
+type MachineryDraft = Omit<MachineryListing, "id" | "status"> & {
+  customIndustry: string;
+};
 
 function blankDraft(): MachineryDraft {
   return {
     industry: "",
     subcategory: "",
+    customIndustry: "",
     type: "",
     capacity: "",
     age: "",
@@ -201,9 +204,14 @@ export function MachineryWizard({
 
   const summaryRows: { label: string; value: string }[] = [
     {
-      label: "Industry / type",
-      value: [draft.industry, draft.type].filter(Boolean).join(" — ") || "—",
-    },
+  label: "Industry / type",
+  value: [
+    draft.industry === "Other" ? draft.customIndustry : draft.industry,
+    draft.type,
+  ]
+    .filter(Boolean)
+    .join(" — ") || "—",
+},
     {
       label: "Capacity / condition",
       value: [draft.capacity, draft.condition].filter(Boolean).join(" · ") || "—",
@@ -250,22 +258,56 @@ export function MachineryWizard({
           <p className="wiz-intro">Tell buyers exactly what this machine or service is.</p>
           <div className="form-grid">
             <div>
-              <label htmlFor="m-industry">Industry</label>
-              <select
-                id="m-industry"
-                className={`${draft.industry ? "" : "placeholder-shown"}${errors.industry ? " error" : ""}`}
-                value={draft.industry}
-                onChange={(e) => update({ industry: e.target.value })}
-              >
-                <option value="" disabled>
-                  Select
-                </option>
-                {INDUSTRIES.map((option) => (
-                  <option key={option}>{option}</option>
-                ))}
-              </select>
-              {errors.industry ? <p className="field-error">{errors.industry}</p> : null}
-            </div>
+  <label htmlFor="m-industry">Industry</label>
+
+  <select
+    id="m-industry"
+    className={`${draft.industry ? "" : "placeholder-shown"}${
+      errors.industry ? " error" : ""
+    }`}
+    value={draft.industry}
+    onChange={(e) => {
+      const value = e.target.value;
+
+      update({
+        industry: value,
+        ...(value !== "Other" && { customIndustry: "" }),
+      });
+    }}
+  >
+    <option value="" disabled>
+      Select
+    </option>
+
+    {INDUSTRIES.map((option) => (
+      <option key={option} value={option}>
+        {option}
+      </option>
+    ))}
+  </select>
+
+  {draft.industry === "Other" && (
+    <div style={{ marginTop: 10 }}>
+      <label htmlFor="m-custom-industry">Enter your industry</label>
+
+      <input
+        type="text"
+        id="m-custom-industry"
+        placeholder="e.g. Aerospace Manufacturing"
+        value={draft.customIndustry || ""}
+        onChange={(e) =>
+          update({
+            customIndustry: e.target.value,
+          })
+        }
+      />
+    </div>
+  )}
+
+  {errors.industry ? (
+    <p className="field-error">{errors.industry}</p>
+  ) : null}
+</div>
             <div>
               <label htmlFor="m-subcategory">Subcategory</label>
               <input
@@ -291,7 +333,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="m-capacity">Capacity</label>
               <input
-                type="text"
+                type="number"
                 id="m-capacity"
                 placeholder="e.g. 200 units/day"
                 value={draft.capacity}
@@ -299,7 +341,7 @@ export function MachineryWizard({
               />
             </div>
             <div>
-              <label htmlFor="m-age">Age</label>
+              <label htmlFor="m-age">Equipment Age</label>
               <input
                 type="text"
                 id="m-age"
@@ -355,7 +397,7 @@ export function MachineryWizard({
             <input
               type="file"
               ref={fileInputRef}
-              accept="image/*"
+              accept=".pdf,.jpg,.jpeg,.png"
               multiple
               onChange={(e) => handleImages(e.target.files)}
             />
@@ -514,7 +556,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-hour">Hourly rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-hour"
                 placeholder="₹ per hour"
                 value={draft.pricing.hour}
@@ -524,7 +566,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-day">Daily rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-day"
                 placeholder="₹ per day"
                 value={draft.pricing.day}
@@ -534,7 +576,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-month">Monthly rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-month"
                 placeholder="₹ per month"
                 value={draft.pricing.month}
@@ -544,7 +586,7 @@ export function MachineryWizard({
             <div>
               <label htmlFor="price-unit">Per-unit rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-unit"
                 placeholder="₹ per unit"
                 value={draft.pricing.unit}
@@ -554,7 +596,7 @@ export function MachineryWizard({
             <div className="col-span-2">
               <label htmlFor="price-batch">Per-batch rate</label>
               <input
-                type="text"
+                type="number"
                 id="price-batch"
                 placeholder="₹ per batch"
                 value={draft.pricing.batch}
