@@ -46,3 +46,17 @@ Set `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api/v1`).
 - Recurring availability and capacity wait for their PATCH before closing /
   confirming; calendar clicks are batched into one PATCH of the calendar.
 - Component tests: see `tests/README.md`.
+
+## Admin Dashboard (`/admin`)
+
+New, separate area; no existing page, style or behaviour changed.
+
+- Route: `src/app/admin/[[...slug]]/page.tsx` (+ `layout.tsx`). Sub-pages: `/admin`,
+  `/admin/users[/id]`, `/admin/manufacturers[/id]?tab=`, `/admin/review`, `/admin/analytics`,
+  `/admin/support`. Filters are kept in the URL, so every list is linkable.
+- Clerk protects the route (`proxy.ts` treats it as private); the backend decides who is an
+  admin (`GET /admin/me` → 403 shows "Admin access only").
+- Styling reuses the Manufacturer site's XY classes (`manufacturer.css`, scoped `.mfg-root`)
+  plus `src/app/admin/admin.css` (scoped `.adm-root`).
+- Code: `src/components/admin/*`, `src/lib/admin/*` (`api.ts` = token + fetch hooks,
+  `fields.ts` = how each response is edited, `types.ts` = API shapes).
