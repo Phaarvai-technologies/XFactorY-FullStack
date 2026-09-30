@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
+import { safeRedirectPath } from "@/lib/auth/safeRedirect";
 
 type FieldErrors = {
   name?: string;
@@ -119,7 +120,7 @@ function splitName(fullName: string) {
   };
 }
 
-export function CustomSignUpForm() {
+export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?: string } = {}) {
   const { isLoaded, setActive, signUp } = useSignUp();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -137,8 +138,15 @@ export function CustomSignUpForm() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const redirectTo = useMemo(
-    () => searchParams.get("redirect_url") || "/",
-    [searchParams],
+    // Checked on the server by the page; only this site's own addresses are allowed.
+    () =>
+      checkedRedirect ??
+      safeRedirectPath(
+        searchParams.get("redirect_url"),
+        typeof window === "undefined" ? "http://localhost:3000" : window.location.origin,
+      ) ??
+      "/",
+    [checkedRedirect, searchParams],
   );
   const passwordStrength = checkPasswordStrength(password);
 

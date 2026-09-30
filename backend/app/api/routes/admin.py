@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.auth import AdminContext, current_admin
-from app.admin.schemas import AccountStatusIn, AdminFields, ArchiveIn, BatchArchiveIn, FieldEdit, NoteIn
+from app.admin.schemas import AccountStatusIn, AdminFields, ArchiveIn, BatchArchiveIn, FieldEdit, NoteIn, TestEmailIn
 from app.admin.service import AdminService
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
@@ -133,6 +133,19 @@ async def reactivate(user_id: UUID, body: AccountStatusIn, admin: Admin, svc: Sv
 @router.get("/support/recent-errors")
 async def recent_errors(admin: Admin, svc: Svc):
     return await svc.recent_errors()
+
+
+@router.get("/support/emails")
+async def recent_emails(admin: Admin, svc: Svc):
+    """Latest outgoing emails and their delivery result (no email bodies are stored)."""
+    return {"emails": [{**e, "id": str(e["id"])} for e in await svc.repo.recent_emails()],
+            "smtpConfigured": svc.mailer.enabled}
+
+
+@router.post("/support/test-email")
+async def test_email(body: TestEmailIn, admin: Admin, svc: Svc):
+    """Sends a test email (to the admin's own address by default)."""
+    return await svc.send_test_email(admin, body.to)
 
 
 @router.get("/analytics")

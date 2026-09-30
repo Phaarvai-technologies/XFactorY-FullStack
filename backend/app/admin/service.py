@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.admin import accounts
 from app.admin.auth import AdminContext
 from app.admin.repository import (
     REQUIRED_FIELDS,
@@ -16,7 +17,9 @@ from app.admin.repository import (
     AdminRepository,
     sections_status,
 )
+from app.core import email_templates as tpl
 from app.core.clerk import ClerkManagement
+from app.core.email import Mailer
 from app.core.config import Settings
 from app.repositories.manufacturer import ManufacturerRepository, profile_flags
 from app.schemas.manufacturer import MachineryPatch, ProfilePatchPayload
@@ -95,6 +98,8 @@ class AdminService:
         self.mrepo = ManufacturerRepository(session)
         self.msvc = ManufacturerService(session, settings)
         self.clerk = ClerkManagement(settings)
+        self.settings = settings
+        self.mailer = Mailer(settings, session)
 
     async def _run(self, coro):
         return await self.msvc._run(coro)
@@ -111,7 +116,8 @@ class AdminService:
 
     # ------------------------------------------------------------------ XY-ADMIN-01
     async def me(self, admin: AdminContext) -> dict:
-        return {"id": str(admin.user_id), "name": admin.name, "email": admin.email, "roles": list(admin.roles)}
+        return {"id": str(admin.user_id), "name": admin.name, "email": admin.email, "roles": list(admin.roles),
+                "authMethod": admin.auth_method}
 
     async def admins(self) -> list[dict]:
         return [{"id": str(a["id"]), "name": a["name"], "email": a["email"]} for a in await self.repo.admins()]
@@ -333,6 +339,7 @@ class AdminService:
                 await self.repo.add_history(org_id, "Assigned admin", names.get(old_admin or "", "Unassigned"),
                                             names.get(new_admin or "", "Unassigned"), admin.user_id, reason)
                 changed = True
+        review_email = None
         if body.get("review_status"):
             old = DB_TO_REVIEW.get(meta["onboarding_raw_status"] or "draft", "NOT_STARTED")
             new = body["review_status"]
@@ -344,11 +351,36 @@ class AdminService:
                                             admin.user_id, reason)
                 if new == "NEEDS_CORRECTION" and (reason or "").strip():
                     await self.repo.add_note(org_id, admin.user_id, f"Correction requested: {reason.strip()}")
+                if new in ("NEEDS_CORRECTION", "REVIEWED"):
+                    review_email = (new, (reason or "").strip())
                 changed = True
         if not changed:
             raise HTTPException(422, "Nothing to change.")
         await self._run(self._commit())
-        return await self.detail(org_id)
+        email = await self._review_email(org_id, *review_email) if review_email else None
+        detail = await self.detail(org_id)
+        if email:
+            detail["email"] = email
+        return detail
+
+    async def _review_email(self, org_id: str, status: str, note: str) -> dict | None:
+        """Tell the manufacturer (the account owner) about the review decision."""
+        owner = next((u for u in await self.repo.linked_users(org_id) if u.get("email")), None)
+        if not owner:
+            return None
+        row = await self.repo.overview_row(org_id)
+        company = (row or {}).get("company_name") or ""
+        name = owner.get("first_name") or ""
+        url = f"{self.settings.app_base_url.rstrip('/')}/manufacturer/dashboard"
+        if status == "NEEDS_CORRECTION":
+            subject, text_body, html = tpl.needs_correction(name, company, note, url)
+            template = "review_needs_correction"
+        else:
+            subject, text_body, html = tpl.reviewed(name, company, url)
+            template = "review_reviewed"
+        result = await self.mailer.send(owner["email"], template, subject, text_body, html,
+                                        user_id=owner["id"], organization_id=org_id)
+        return {**result, "to": owner["email"], "template": template}
 
     async def _commit(self):
         await self.db.commit()
@@ -385,7 +417,9 @@ class AdminService:
                 "companyName": u.get("company_name"), "completeness": u.get("completeness"),
                 "recordType": u.get("record_type"),
                 "registeredAt": u["created_at"], "lastActivity": u.get("last_seen_at"),
-                "accountStatus": u["account_status"], "onboardingStatus": u["onboarding_status"]}
+                "accountStatus": u["account_status"], "onboardingStatus": u["onboarding_status"],
+                "staffOnly": str(u["clerk_user_id"]).startswith(accounts.LOCAL_CLERK_PREFIX),
+                "adminLogin": u.get("password_account_status")}
 
     async def users(self, filters: dict, page: int, page_size: int) -> dict:
         data = await self._run(self.repo.users(filters, page, page_size))
@@ -406,15 +440,22 @@ class AdminService:
                 last_section = {"lastCompleted": st["lastCompletedSection"], "stoppedAt": st["stoppedAt"],
                                 "missingFields": st["missingFields"]}
         login = {"lastSignInAt": None, "available": False}
-        try:
-            info = await self.clerk.login_info(u["clerk_user_id"])
-            ms = info.get("last_sign_in_at")
-            login = {"lastSignInAt": datetime.fromtimestamp(ms / 1000, tz=timezone.utc) if ms else None,
-                     "available": True}
-        except Exception as exc:  # noqa: BLE001 - Clerk is optional for this panel
-            log.info("Clerk login info unavailable: %s", exc)
+        if not str(u["clerk_user_id"]).startswith(accounts.LOCAL_CLERK_PREFIX):
+            try:
+                info = await self.clerk.login_info(u["clerk_user_id"])
+                ms = info.get("last_sign_in_at")
+                login = {"lastSignInAt": datetime.fromtimestamp(ms / 1000, tz=timezone.utc) if ms else None,
+                         "available": True}
+            except Exception as exc:  # noqa: BLE001 - Clerk is optional for this panel
+                log.info("Clerk login info unavailable: %s", exc)
+        pw_login = u.get("password_last_login")
+        if pw_login and (not login["lastSignInAt"] or pw_login > login["lastSignInAt"]):
+            login = {"lastSignInAt": pw_login, "available": True}
+        elif u.get("password_account_status") and not login["available"]:
+            login = {"lastSignInAt": None, "available": True}
         a = trouble["activity"] or {}
         saves = [x for x in (a.get("last_step_save"), a.get("last_profile_save")) if x]
+        emails = [{**e, "id": str(e["id"])} for e in await self.repo.user_emails(user_id)]
         return {
             "user": self._user_row(u),
             "manufacturers": [{**m, "organization_id": str(m["organization_id"])} for m in manufacturers],
@@ -423,9 +464,16 @@ class AdminService:
                 "lastSuccessfulSave": max(saves) if saves else None,
                 "profileWizardStep": a.get("profile_wizard_step"), "onboarding": last_section,
                 "events": trouble["events"],
-                "notificationStatus": "Not tracked in the MVP",
+                "notificationStatus": self._email_summary(emails),
+                "emails": emails,
             },
         }
+
+    def _email_summary(self, emails: list[dict]) -> str:
+        if not emails:
+            return "No emails sent yet" if self.mailer.enabled else "Email is off (SMTP not configured)"
+        last = emails[0]
+        return f"Last email {last['status']}: {last['subject']}"
 
     async def set_account_status(self, admin: AdminContext, user_id: str, suspend: bool, reason: str) -> dict:
         u = await self.repo.user(user_id)
@@ -439,16 +487,33 @@ class AdminService:
         if u["account_status"] == target:
             raise HTTPException(422, f"The account is already {'suspended' if suspend else 'active'}.")
         await self.repo.set_user_status(user_id, target, admin.user_id, reason)
+        if suspend:
+            await accounts.revoke_user_sessions(self.db, user_id)
         await self.db.commit()
         clerk_synced = True
-        try:
-            await self.clerk.set_banned(u["clerk_user_id"], suspend)
-        except Exception as exc:  # noqa: BLE001 - the database status already blocks API access
-            clerk_synced = False
-            log.warning("Account status saved, but Clerk was not updated: %s", exc)
+        if not str(u["clerk_user_id"]).startswith(accounts.LOCAL_CLERK_PREFIX):
+            try:
+                await self.clerk.set_banned(u["clerk_user_id"], suspend)
+            except Exception as exc:  # noqa: BLE001 - the database status already blocks API access
+                clerk_synced = False
+                log.warning("Account status saved, but Clerk was not updated: %s", exc)
+        name = u.get("first_name") or ""
+        if suspend:
+            subject, text_body, html = tpl.account_suspended(name)
+        else:
+            subject, text_body, html = tpl.account_reactivated(name, f"{self.settings.app_base_url.rstrip('/')}/sign-in")
+        email = await self.mailer.send(u["email"], "account_suspended" if suspend else "account_reactivated",
+                                       subject, text_body, html, user_id=u["id"])
         detail = await self.user_detail(user_id)
         detail["clerkSynced"] = clerk_synced
+        detail["email"] = {**email, "to": u["email"]}
         return detail
+
+    async def send_test_email(self, admin: AdminContext, to: str | None) -> dict:
+        to = (to or admin.email).strip()
+        subject, text_body, html = tpl.test_email(admin.name)
+        result = await self.mailer.send(to, "test", subject, text_body, html, user_id=None)
+        return {**result, "to": to, "smtpConfigured": self.mailer.enabled}
 
     async def recent_errors(self) -> list[dict]:
         return [{**e, "user_id": str(e["user_id"]) if e["user_id"] else None} for e in await self.repo.recent_errors()]

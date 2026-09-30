@@ -28,6 +28,15 @@ async def upsert_user(
     last_name: str | None = None,
     email_verified: bool = False,
 ) -> UUID:
+    if email_verified:
+        # A staff-only admin account (python -m app.admin_account) reserved this email before the
+        # person signed up with X!Y. Their verified X!Y sign-in takes over that same user record,
+        # so both sign-in methods lead to one person.
+        await session.execute(text("""
+            UPDATE users SET clerk_user_id = :clerk_user_id, updated_at = now()
+            WHERE email = CAST(:email AS citext) AND clerk_user_id LIKE 'local-admin:%'
+              AND NOT EXISTS (SELECT 1 FROM users WHERE clerk_user_id = :clerk_user_id)
+        """), {"clerk_user_id": clerk_user_id, "email": email})
     result = await session.execute(
         text("""
             INSERT INTO users (

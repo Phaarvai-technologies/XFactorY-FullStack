@@ -112,7 +112,7 @@ class AdminRepository:
     async def overview(self) -> dict:
         cards = await self.row("""
             SELECT
-              (SELECT count(*) FROM users WHERE status<>'deactivated') AS total_users,
+              (SELECT count(*) FROM users WHERE status<>'deactivated' AND clerk_user_id NOT LIKE 'local-admin:%') AS total_users,
               count(*) FILTER (WHERE record_type='REAL') AS total_manufacturers,
               count(*) FILTER (WHERE record_type='REAL' AND completeness=100) AS completed,
               count(*) FILTER (WHERE record_type='REAL' AND completeness<100) AS incomplete,
@@ -348,8 +348,9 @@ class AdminRepository:
                EXISTS (SELECT 1 FROM platform_role_assignments p WHERE p.user_id=u.id
                        AND p.status='active' AND p.revoked_at IS NULL) AS is_admin,
                mf.organization_id, mf.company_name, mf.completeness, mf.record_type,
-               coalesce(mf.review_status, 'NO_PROFILE') AS onboarding_status
-        FROM users u LEFT JOIN mf ON mf.user_id=u.id
+               coalesce(mf.review_status, 'NO_PROFILE') AS onboarding_status,
+               aa.last_login_at AS password_last_login, aa.status AS password_account_status
+        FROM users u LEFT JOIN mf ON mf.user_id=u.id LEFT JOIN admin_accounts aa ON aa.user_id=u.id
     """
 
     async def users(self, f: dict, page: int, page_size: int) -> dict:
@@ -417,6 +418,18 @@ class AdminRepository:
         """, {"u": user_id})
         return {"activity": activity, "events": events}
 
+    async def user_emails(self, user_id: str, limit: int = 10) -> list[dict]:
+        return await self.rows("""
+            SELECT id, to_email::text AS to_email, template, subject, status, error, created_at
+            FROM email_deliveries WHERE user_id=CAST(:u AS uuid) ORDER BY created_at DESC LIMIT :n
+        """, {"u": user_id, "n": limit})
+
+    async def recent_emails(self, limit: int = 25) -> list[dict]:
+        return await self.rows("""
+            SELECT id, to_email::text AS to_email, template, subject, status, error, created_at
+            FROM email_deliveries ORDER BY created_at DESC LIMIT :n
+        """, {"n": limit})
+
     async def recent_errors(self, limit: int = 25) -> list[dict]:
         return await self.rows("""
             SELECT e.method, e.path, e.status_code, e.detail, e.request_id, e.created_at,
@@ -437,10 +450,10 @@ class AdminRepository:
             SELECT count(*) AS manufacturers,
                    count(*) FILTER (WHERE completeness=100) AS completed,
                    count(*) FILTER (WHERE completeness<100) AS incomplete,
-                   (SELECT count(*) FROM users WHERE status<>'deactivated'
+                   (SELECT count(*) FROM users WHERE status<>'deactivated' AND clerk_user_id NOT LIKE 'local-admin:%'
                       AND (CAST(:from AS date) IS NULL OR created_at >= CAST(:from AS date))
                       AND (CAST(:to AS date) IS NULL OR created_at < CAST(:to AS date) + 1)) AS users,
-                   (SELECT count(*) FROM users u WHERE u.status<>'deactivated'
+                   (SELECT count(*) FROM users u WHERE u.status<>'deactivated' AND u.clerk_user_id NOT LIKE 'local-admin:%'
                       AND (CAST(:from AS date) IS NULL OR u.created_at >= CAST(:from AS date))
                       AND (CAST(:to AS date) IS NULL OR u.created_at < CAST(:to AS date) + 1)
                       AND NOT EXISTS (SELECT 1 FROM memberships m JOIN organizations o ON o.id=m.organization_id

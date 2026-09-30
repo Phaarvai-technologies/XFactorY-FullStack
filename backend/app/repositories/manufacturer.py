@@ -199,22 +199,12 @@ class ManufacturerRepository:
         return dict(row._mapping)
 
     async def touch_last_seen(self, clerk_user_id: str) -> None:
-        await self.db.execute(
-            text(
-                """
-                UPDATE public.users
-                SET last_seen_at = now()
-                WHERE clerk_user_id = :clerk_user_id
-                AND (
-                    last_seen_at IS NULL
-                    OR last_seen_at < now() - interval '5 minutes'
-                )
-                """
-            ),
-            {
-                "clerk_user_id": clerk_user_id,
-            },
-        )
+        """Last activity for the admin Users / Support pages (at most every 5 minutes)."""
+        await self.db.execute(text("""
+            UPDATE users SET last_seen_at=now()
+            WHERE clerk_user_id=:c AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
+        """), {"c": clerk_user_id})
+        await self.db.commit()
 
     async def _country_code(self, name: str) -> str | None:
         code = COUNTRY_CODES.get((name or "").strip().lower())

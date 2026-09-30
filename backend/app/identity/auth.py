@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import auth as core_auth
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
+from app.core.welcome import send_welcome_soon
 from app.identity.context import ActorContext
 from app.identity.repository import get_user_by_clerk_id, upsert_user
 
@@ -84,6 +85,7 @@ async def get_actor(
             email_verified=verified,
         )
         await session.commit()
+        send_welcome_soon(user_id)
     else:
         if row["status"] != "active":
             raise HTTPException(403, "This account has been suspended. Please contact X!Y support.")

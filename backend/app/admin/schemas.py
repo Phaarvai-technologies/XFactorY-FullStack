@@ -45,3 +45,20 @@ class BatchArchiveIn(_Model):
 
 class AccountStatusIn(_Model):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class LoginIn(BaseModel):
+    # No whitespace stripping: passwords are used exactly as typed.
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ChangePasswordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=256)
+
+
+class TestEmailIn(_Model):
+    to: str | None = Field(default=None, max_length=320)

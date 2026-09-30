@@ -1,16 +1,20 @@
 """XY-ADMIN-01: only authorized X!Y staff can use /api/v1/admin.
 
 An admin is a user with an active row in `platform_role_assignments` (existing
-schema table). The first admins are bootstrapped from ADMIN_EMAILS; more can be
-granted with `python -m app.grant_admin <email>`."""
+schema table). Admins sign in either way:
+- X!Y (Clerk) account: `Authorization: Bearer <Clerk JWT>`. The first admins are
+  bootstrapped from ADMIN_EMAILS; more with `python -m app.grant_admin <email>`.
+- Admin account (email + password, `python -m app.admin_account create <email>`):
+  `Authorization: Bearer xya_...` session token from POST /admin/auth/login."""
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import Actor, current_actor
+from app.admin import accounts
+from app.core.auth import current_actor
 from app.core.clerk import ClerkManagement
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
@@ -26,6 +30,9 @@ class AdminContext:
     email: str
     name: str
     roles: tuple[str, ...] = field(default_factory=tuple)
+    auth_method: str = "clerk"  # "clerk" | "password"
+    account_id: UUID | None = None
+    session_token: str | None = None
 
 
 async def _active_roles(session: AsyncSession, user_id: UUID) -> list[str]:
@@ -47,10 +54,15 @@ async def grant(session: AsyncSession, user_id: UUID, role: str = "platform_admi
 
 
 async def current_admin(
-    actor: Actor = Depends(current_actor),
+    request: Request,
+    authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AdminContext:
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    if accounts.is_admin_session_token(token):
+        return await _password_admin(request, token, session, settings)
+    actor = await current_actor(request, authorization, settings)
     row = (await session.execute(text("""
         SELECT id, email, first_name, last_name, display_name, status FROM users WHERE clerk_user_id=:c
     """), {"c": actor.clerk_user_id})).first()
@@ -76,11 +88,36 @@ async def current_admin(
         roles = await _active_roles(session, row.id)
     if not roles:
         raise HTTPException(403, "Admin access only. Ask an X!Y administrator to grant you access.")
-    await session.execute(text("""
-        UPDATE users SET last_seen_at=now()
-        WHERE id=:u AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
-    """), {"u": row.id})
-    await session.commit()
+    await _touch(session, row.id)
     name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.display_name or str(row.email)
     return AdminContext(user_id=row.id, clerk_user_id=actor.clerk_user_id, email=str(row.email),
                         name=name, roles=tuple(roles))
+
+
+async def _touch(session: AsyncSession, user_id: UUID) -> None:
+    await session.execute(text("""
+        UPDATE users SET last_seen_at=now()
+        WHERE id=:u AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
+    """), {"u": user_id})
+    await session.commit()
+
+
+async def _password_admin(request: Request, token: str, session: AsyncSession, settings: Settings) -> AdminContext:
+    found = await accounts.resolve(session, settings, token)
+    if found is None:
+        raise HTTPException(401, "Your admin session has ended. Please sign in again.")
+    row = (await session.execute(text("""
+        SELECT id, clerk_user_id, email, first_name, last_name, display_name, status FROM users WHERE id=:u
+    """), {"u": found["user_id"]})).first()
+    if row is None or row.status != "active":
+        await accounts.logout(session, token)
+        raise HTTPException(403, "This account has been suspended.")
+    roles = await _active_roles(session, row.id)
+    if not roles:
+        raise HTTPException(403, "Admin access only. Ask an X!Y administrator to grant you access.")
+    request.state.clerk_user_id = row.clerk_user_id
+    await _touch(session, row.id)
+    name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.display_name or str(row.email)
+    return AdminContext(user_id=row.id, clerk_user_id=row.clerk_user_id, email=str(row.email), name=name,
+                        roles=tuple(roles), auth_method="password", account_id=found["account_id"],
+                        session_token=token)
