@@ -37,6 +37,10 @@ REQUIRED = [
     ("admin_sessions", None, "009_admin_accounts.sql"),
     ("email_deliveries", None, "010_email_deliveries.sql"),
     ("users", "welcome_email_sent_at", "011_welcome_email.sql"),
+    ("visionary_profiles", None, "012_visionary_portal.sql"),
+    ("visionary_projects", None, "012_visionary_portal.sql"),
+    ("visionary_request_details", None, "012_visionary_portal.sql"),
+    ("visionary_request_drafts", None, "012_visionary_portal.sql"),
 ]
 
 

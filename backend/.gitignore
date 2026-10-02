@@ -1,35 +1,14 @@
-# ---------- Environment and secrets ----------
+# XY Factory backend (FastAPI / Python)
+
+# ---------- Secrets: never commit ----------
+# Real values live only in .env (local) and the Render dashboard (production).
 .env
 .env.*
 !.env.example
 *.pem
-.clerk/
-
-# ---------- Node.js dependencies ----------
-node_modules/
-.pnp
-.pnp.*
-
-# Yarn
-.yarn/*
-!.yarn/patches/
-!.yarn/plugins/
-!.yarn/releases/
-!.yarn/versions/
-
-# ---------- Next.js and production builds ----------
-.next/
-out/
-build/
-.vercel/
-
-# ---------- TypeScript generated files ----------
-*.tsbuildinfo
-next-env.d.ts
-
-# ---------- Testing ----------
-coverage/
-frontend/tests/.out.js
+*.key
+*.p12
+*.pfx
 
 # ---------- Python environments ----------
 myenv/
@@ -40,137 +19,24 @@ env/
 # ---------- Python generated files ----------
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+
+# ---------- Tests and tools ----------
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# ---------- Debug logs ----------
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# ---------- Logs and local databases ----------
+*.log
+*.sqlite3
 
-# ---------- Editors ----------
+# ---------- Editors / operating system ----------
 .vscode/
 .idea/
-
-# ---------- Operating system files ----------
 .DS_Store
 Thumbs.db
-
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files. 
- 
-# dependencies 
-/node_modules 
-/.pnp 
-.pnp.* 
-.yarn/* 
-!.yarn/patches 
-!.yarn/plugins 
-!.yarn/releases 
-!.yarn/versions 
- 
-# testing 
-/coverage 
- 
-# next.js 
-/.next/ 
-/out/ 
- 
-# production 
-/build 
- 
-# misc 
-.DS_Store 
-*.pem 
- 
-# debug 
-npm-debug.log* 
-yarn-debug.log* 
-yarn-error.log* 
-.pnpm-debug.log* 
- 
-# env files (can opt-in for committing if needed) 
-.env* 
-!.env.example 
- 
-# vercel 
-.vercel 
- 
-# typescript 
-*.tsbuildinfo 
-next-env.d.ts 
-.clerk/ 
- 
-# Environment and secret files 
-.env 
-.env.* 
-!.env.example 
- 
-frontend/.env 
-frontend/.env.local 
-frontend/.env.production 
-frontend/.env.development 
- 
-backend/.env 
-backend/.env.local 
-backend/.env.production 
-backend/.env.development 
- 
- 
-# Frontend dependencies and builds 
-frontend/node_modules/ 
-frontend/.next/ 
-frontend/out/ 
-frontend/coverage/ 
- 
-# Backend generated files 
-backend/myenv/ 
-backend/.venv/ 
-backend/__pycache__/ 
-backend/.pytest_cache/ 
-*.pyc 
- 
-# Environment files 
-.env 
-.env.* 
-!.env.example 
-frontend/.env* 
-!frontend/.env.example 
-backend/.env* 
-!backend/.env.example 
- 
-# ---------- secrets (never commit) ---------- 
-.env 
-.env.* 
-!.env.example 
-*.pem 
- 
-# ---------- frontend (Next.js) ---------- 
-node_modules/ 
-.next/ 
-out/ 
-build/ 
-coverage/ 
-.vercel/ 
-*.tsbuildinfo 
-next-env.d.ts 
-npm-debug.log* 
-yarn-debug.log* 
-yarn-error.log* 
-.pnpm-debug.log* 
-frontend/tests/.out.js 
- 
-# ---------- backend (Python) ---------- 
-__pycache__/ 
-*.py[cod] 
-.pytest_cache/ 
-myenv/ 
-venv/ 
-.venv/ 
-env/ 
- 
-# ---------- editors / OS ---------- 
-.DS_Store 
-Thumbs.db 
-.vscode/ 
-.idea/ 
-structure it
