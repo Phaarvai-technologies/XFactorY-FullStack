@@ -12,6 +12,8 @@ const isPublicRoute = createRouteMatcher([
   // Admin dashboard: has its own sign-in page (/admin/login) with two methods — admin
   // email + password, or the X!Y (Clerk) account. The backend checks every admin API call.
   "/admin(.*)",
+  // Public Visionary overview. The Visionary flow (/visionaries/flow) stays behind sign-in.
+  "/visionaries",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
