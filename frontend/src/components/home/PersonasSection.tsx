@@ -19,7 +19,7 @@ const HOME_PERSONAS: HomePersona[] = [
     title: "Visionary",
     job: "Turn bold ideas into manufacturable products with the right design, technology, and production partners.",
     iconId: "ico-visionary",
-    href: "/sign-up",
+    href: "/visionaries",
   },
   {
     title: "Vendor",
