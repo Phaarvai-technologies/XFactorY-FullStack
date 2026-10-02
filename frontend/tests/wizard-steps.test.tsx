@@ -2,6 +2,8 @@ import "./setup";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createBlankProfileData, ProfileWizard, type ProfileWizardData } from "@/components/manufacturer/ProfileWizard";
 import { MachineryWizard } from "@/components/manufacturer/MachineryWizard";
+import { DashboardScreen } from "@/components/manufacturer/DashboardScreen";
+import { createInitialManufacturerState } from "@/lib/manufacturer/types";
 
 let passed = 0, failed = 0;
 const results: string[] = [];
@@ -145,6 +147,58 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(publishes === 1, `published ${publishes} times`);
     assert((publish as HTMLButtonElement).disabled && (screen.getByRole("button", { name: "Save as Draft" }) as HTMLButtonElement).disabled, "buttons not disabled");
     await act(async () => d.resolve(true));
+  });
+
+  // ---------------------------------------------------------------- saved values are not lost
+  await test("Profile: an area typed without Enter is saved with Save & Next", async () => {
+    const calls: any[] = [];
+    const d = profileData();
+    d.location = { ...d.location, address: "4 Ring Rd", city: "Coimbatore", country: "India", serviceableAreas: ["Chennai"] };
+    renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 3, data: d });
+    assert(screen.getByText("Chennai"), "saved area not shown when the step opens");
+    fireEvent.change(document.getElementById("serviceable-input")!, { target: { value: "South India" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush(); await flush();
+    const areas = calls[0]?.[1]?.location?.serviceableAreas;
+    assert(JSON.stringify(areas) === '["Chennai","South India"]', `areas sent: ${JSON.stringify(areas)}`);
+  });
+
+  await test("Profile: a certification typed without + Add is saved with Save & Next", async () => {
+    const calls: any[] = [];
+    renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 4 });
+    fireEvent.change(document.getElementById("cert-name")!, { target: { value: "ISO 9001:2015" } });
+    fireEvent.change(document.getElementById("cert-body")!, { target: { value: "BSI" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush(); await flush();
+    const certs = calls[0]?.[1]?.certifications;
+    assert(certs?.length === 1 && certs[0].name === "ISO 9001:2015" && certs[0].body === "BSI", `certs sent: ${JSON.stringify(certs)}`);
+    assert(calls[0][2].completed === true, "step not marked complete");
+  });
+
+  await test("Profile: a half-filled certification is not skipped silently", async () => {
+    const calls: any[] = [];
+    renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 4 });
+    fireEvent.change(document.getElementById("cert-name")!, { target: { value: "ISO 14001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush();
+    assert(calls.length === 0, "saved without the issuing body");
+    assert(screen.getAllByText("Certification name and issuing body are both required.").length > 0, "no error shown");
+  });
+
+  await test("Availability: Machine Name lists the manufacturer's own machinery", async () => {
+    const state = createInitialManufacturerState();
+    state.machinery = [
+      { ...(machine as any), id: 1, type: "VMC 850", status: "Published" },
+      { ...(machine as any), id: 2, type: "Old lathe", status: "Archived" },
+      { ...(machine as any), id: 3, type: "Laser cutter", status: "Draft" },
+    ];
+    state.capacity = { machine: "VMC 850", count: "2", start: "2026-11-01", end: "2026-11-30" };
+    render(<DashboardScreen state={state} pct={15} flags={flags} onOpenProfileWizard={noop}
+      onOpenMachineryWizard={noop} onEditMachinery={noop} onSetMachineryStatus={noop} onSaveCapacity={noop}
+      onCycleDay={noop} onOpenRecurringModal={noop} onAcceptBooking={noop} onDeclineBooking={noop}
+      onBackToLanding={noop} showToast={noop} />);
+    fireEvent.click(screen.getAllByRole("button").find((b) => /availability/i.test(b.textContent ?? ""))!); await flush();
+    const select = document.getElementById("cap-machine") as HTMLSelectElement;
+    const options = [...select.options].map((o) => o.value).filter(Boolean);
+    assert(JSON.stringify(options) === '["VMC 850","Laser cutter"]', `options: ${JSON.stringify(options)}`);
+    assert(select.value === "VMC 850", `saved plan not selected: ${select.value}`);
   });
 
   console.log(results.join("\n") + `\n\n${passed}/${passed + failed} component tests passed`);

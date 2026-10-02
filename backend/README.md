@@ -21,6 +21,9 @@ Either run the SQL files in the Supabase SQL editor, in order:
 6. `database/migrations/008_admin_dashboard.sql` (Admin Dashboard: record type, entry source,
    archive, assignment, change history, internal notes, activity log, `admin_manufacturer_overview` view)
 7. `database/migrations/009_admin_accounts.sql` (admin email + password sign-in)
+8. `database/migrations/010_email_deliveries.sql` and `011_welcome_email.sql`
+9. `database/migrations/012_visionary_portal.sql` (Visionaries portal: profile, project,
+   manufacturing requests and request drafts; see `../VISIONARIES_PORTAL.md`)
 
 or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
 schema only if the database is empty, then runs all migrations (they are idempotent).

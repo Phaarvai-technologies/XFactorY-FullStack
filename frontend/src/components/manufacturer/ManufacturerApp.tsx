@@ -154,8 +154,11 @@ export function ManufacturerApp() {
     userId: string;
     accountExists: boolean;
     failed: boolean;
+    /** Page where loading failed: moving to another manufacturer page tries again. */
+    path?: string;
   } | null>(null);
-  const checked = server !== null && server.userId === userId;
+  const checked =
+    server !== null && server.userId === userId && (!server.failed || server.path === pathname);
   /** UI components use numeric ids; the database uses UUIDs. */
   const ids = useRef({ toServer: new Map<number, string>(), toLocal: new Map<string, number>(), next: 1 });
   const profileSaveTimer = useRef<number | null>(null);
@@ -288,20 +291,39 @@ export function ManufacturerApp() {
 
     if (!checked || server.failed) return;
     // Details already saved -> never show the form again; not saved yet -> fill them first.
-    if (isManufacturerAccountPath(pathname) && server.accountExists) {
+    if ((screen === "landing" || isManufacturerAccountPath(pathname)) && server.accountExists) {
+      // Existing Manufacturer account: straight to the portal (data is already loaded).
       router.replace(MANUFACTURER_DASHBOARD_PATH);
     } else if (isManufacturerDashboardPath(pathname) && !server.accountExists) {
       router.replace(MANUFACTURER_ACCOUNT_PATH);
     }
-  }, [checked, isLoaded, isSignedIn, pathname, router, server]);
+  }, [checked, isLoaded, isSignedIn, pathname, router, screen, server]);
 
   // Load the manufacturer's saved data from the backend.
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !userId) return;
-    if (screen === "landing" || checked) return;
+    // Also on the overview page: a signed-in user's saved account decides whether the
+    // "Join Our Ecosystem" page is shown at all (see the route guard below).
+    if (checked) return;
     let cancelled = false;
 
-    request<ServerSnapshot>("/manufacturer/bootstrap")
+    // Right after sign-in the session token can take a moment to be ready, so a missing
+    // token / unreachable backend / server error is retried briefly before giving up.
+    async function loadWithRetry(): Promise<ServerSnapshot> {
+      const delays = [0, 700, 1500];
+      for (let attempt = 0; ; attempt++) {
+        if (delays[attempt]) await new Promise((resolve) => window.setTimeout(resolve, delays[attempt]));
+        try {
+          return await request<ServerSnapshot>("/manufacturer/bootstrap");
+        } catch (error: unknown) {
+          const status = error instanceof ApiError ? error.status : 0;
+          const retryable = status === 0 || status === 401 || status >= 500;
+          if (cancelled || !retryable || attempt === delays.length - 1) throw error;
+        }
+      }
+    }
+
+    loadWithRetry()
       .then((snapshot) => {
         if (cancelled) return;
         applySnapshot(snapshot);
@@ -312,14 +334,17 @@ export function ManufacturerApp() {
         if (cancelled) return;
         // Backend unreachable: keep the current screen usable and say why.
         setState((current) => ({ ...current, bookings: [] }));
-        setServer({ userId, accountExists: false, failed: true });
+        setServer({ userId, accountExists: false, failed: true, path: pathname });
         showToast(`Couldn’t load your data — ${errorMessage(error)}`);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [applySnapshot, checked, isLoaded, isSignedIn, request, screen, showToast, userId]);
+    // `pathname` is read only when loading fails (to know where to retry); it must not
+    // restart a load already in progress.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applySnapshot, checked, isLoaded, isSignedIn, request, showToast, userId]);
 
   // Dashboard progress comes from the backend (computed from saved data).
   const flags = profileProgress?.checklist ?? {
@@ -660,22 +685,23 @@ export function ManufacturerApp() {
   }
 
   if (!isLoaded) {
-    return <div className="mfg-root" aria-busy="true" />;
+    return <ManufacturerLoading />;
   }
 
   // Avoid flashing the wrong screen while redirects settle.
   if (!isSignedIn && (screen === "dashboard" || screen === "account")) {
-    return <div className="mfg-root" aria-busy="true" />;
+    return <ManufacturerLoading />;
   }
 
-  // Wait for the saved data (and any redirect) instead of flashing the wrong screen.
-  if (isSignedIn && (screen === "dashboard" || screen === "account")) {
+  // Signed in: wait until the saved account has been checked (and any redirect has
+  // happened) instead of briefly showing "Join Our Ecosystem" or the account form.
+  if (isSignedIn) {
     const redirecting =
       checked &&
       !server.failed &&
-      (screen === "account" ? server.accountExists : !server.accountExists);
+      (screen === "dashboard" ? !server.accountExists : server.accountExists);
     if (!checked || redirecting) {
-      return <div className="mfg-root" aria-busy="true" />;
+      return <ManufacturerLoading />;
     }
   }
 
@@ -771,6 +797,18 @@ export function ManufacturerApp() {
       <div className={`toast${toast.visible ? " show" : ""}`} role="status" aria-live="polite">
         <CheckIcon size={15} stroke="#4ade80" />
         <span>{toast.message}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Shown while the signed-in user's Manufacturer account is checked and loaded. */
+function ManufacturerLoading() {
+  return (
+    <div className="mfg-root mfg-loading-screen" aria-busy="true">
+      <div className="mfg-loading" role="status" aria-live="polite">
+        <span className="mfg-spinner" aria-hidden="true" />
+        <span>Loading your manufacturer account…</span>
       </div>
     </div>
   );
