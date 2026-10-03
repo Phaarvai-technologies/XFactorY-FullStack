@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
+import { safeRedirectPath } from "@/lib/auth/safeRedirect";
 
 type FieldErrors = {
   email?: string;
@@ -67,7 +68,7 @@ function FieldError({ message }: { message?: string }) {
   );
 }
 
-export function CustomSignInForm() {
+export function CustomSignInForm({ redirectTo: checkedRedirect }: { redirectTo?: string } = {}) {
   const { isLoaded, setActive, signIn } = useSignIn();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -84,9 +85,21 @@ export function CustomSignInForm() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  // New-device verification (Clerk Device Trust / two-step verification): the code step
+  // shown after a correct password. `null` = not needed.
+  const [deviceStep, setDeviceStep] = useState<DeviceStep | null>(null);
+  const [deviceCode, setDeviceCode] = useState("");
+
   const redirectTo = useMemo(
-    () => searchParams.get("redirect_url") || "/",
-    [searchParams],
+    // Checked on the server by the page; only this site's own addresses are allowed.
+    () =>
+      checkedRedirect ??
+      safeRedirectPath(
+        searchParams.get("redirect_url"),
+        typeof window === "undefined" ? "http://localhost:3000" : window.location.origin,
+      ) ??
+      "/",
+    [checkedRedirect, searchParams],
   );
 
   function clearField(field: keyof FieldErrors) {
@@ -130,6 +143,24 @@ export function CustomSignInForm() {
         await setActive({ session: result.createdSessionId });
         router.push(redirectTo);
         router.refresh();
+        return;
+      }
+
+      const step =
+        result.status === "needs_client_trust" || result.status === "needs_second_factor"
+          ? pickDeviceStep(result.supportedSecondFactors)
+          : null;
+      if (step) {
+        await sendDeviceCode(signIn, step);
+        setDeviceStep(step);
+        setDeviceCode("");
+        setStatus({
+          tone: "ok",
+          message:
+            step.strategy === "totp"
+              ? "Enter the code from your authenticator app."
+              : "Verification code sent to your email.",
+        });
         return;
       }
 
@@ -246,6 +277,11 @@ async function handleResetCode() {
         tone: "ok",
         message: "Code verified. Please create your new password.",
       });
+    } else {
+      setStatus({
+        tone: "warn",
+        message: "Additional verification is required before you can continue.",
+      });
     }
   } catch (error) {
     const parsed = parseClerkError(error);
@@ -304,6 +340,13 @@ async function handleNewPassword() {
 
       router.push(redirectTo);
       router.refresh();
+    } else {
+      setStatus({
+        tone: "warn",
+        message: "Password changed. Please sign in with your new password.",
+      });
+      setResetStep("email");
+      setPassword("");
     }
   } catch (error) {
     const parsed = parseClerkError(error);
@@ -314,6 +357,80 @@ async function handleNewPassword() {
     });
   } finally {
     setIsResettingPassword(false);
+  }
+}
+
+async function handleDeviceCode() {
+  setStatus(null);
+
+  if (!deviceCode.trim()) {
+    setStatus({
+      tone: "error",
+      message: "Please enter the verification code.",
+    });
+    return;
+  }
+
+  if (!isLoaded || !signIn || !setActive || !deviceStep) {
+    return;
+  }
+
+  try {
+    setIsSubmitting(true);
+
+    const result = await signIn.attemptSecondFactor({
+      strategy: deviceStep.strategy,
+      code: deviceCode.trim(),
+    });
+
+    if (result.status === "complete" && result.createdSessionId) {
+      await setActive({ session: result.createdSessionId });
+      router.push(redirectTo);
+      router.refresh();
+      return;
+    }
+
+    setStatus({
+      tone: "warn",
+      message: "Additional verification is required before you can continue.",
+    });
+  } catch (error) {
+    const parsed = parseClerkError(error);
+
+    if (parsed.code === "session_exists") {
+      router.push(redirectTo);
+      router.refresh();
+      return;
+    }
+
+    setStatus({
+      tone: "error",
+      message: parsed.message,
+    });
+  } finally {
+    setIsSubmitting(false);
+  }
+}
+
+async function handleResendDeviceCode() {
+  setStatus(null);
+
+  if (!isLoaded || !signIn || !deviceStep) {
+    return;
+  }
+
+  try {
+    setIsSubmitting(true);
+    await sendDeviceCode(signIn, deviceStep);
+    setStatus({
+      tone: "ok",
+      message: "A new verification code has been sent.",
+    });
+  } catch (error) {
+    const parsed = parseClerkError(error);
+    setStatus({ tone: "error", message: parsed.message });
+  } finally {
+    setIsSubmitting(false);
   }
 }
 
@@ -342,7 +459,12 @@ async function handleNewPassword() {
     <form
   className="auth-form"
   onSubmit={
-    resetStep === "code"
+    deviceStep
+      ? (event) => {
+          event.preventDefault();
+          handleDeviceCode();
+        }
+      : resetStep === "code"
       ? (event) => {
           event.preventDefault();
           handleResetCode();
@@ -361,8 +483,9 @@ async function handleNewPassword() {
         <span>{status?.message}</span>
       </div>
 
-      {resetStep === "email" && (
+      {resetStep === "email" && !deviceStep && (
   <>
+      <h1 className="auth-card-heading">Welcome back</h1>
   
   <button
         type="button"
@@ -534,6 +657,68 @@ async function handleNewPassword() {
 
   
 
+      {resetStep === "email" && deviceStep && (
+  <>
+    <h1 className="auth-card-heading">Verify it&apos;s you</h1>
+
+    <p className="auth-description">
+      {deviceStep.strategy === "totp" ? (
+        <>Enter the code from your authenticator app to sign in as <strong>{email}</strong>.</>
+      ) : (
+        <>
+          You&apos;re signing in on a new device. Enter the verification code sent to{" "}
+          <strong>{deviceStep.sentTo || email}</strong>.
+        </>
+      )}
+    </p>
+
+    <div className="field">
+      <label htmlFor="device-code">Verification code</label>
+
+      <input
+        type="text"
+        id="device-code"
+        value={deviceCode}
+        onChange={(event) => setDeviceCode(event.target.value)}
+        placeholder="Enter verification code"
+        autoComplete="one-time-code"
+        inputMode="numeric"
+      />
+    </div>
+
+    <button
+      type="submit"
+      className={`primary-cta${isSubmitting ? " loading" : ""}`}
+      disabled={isSubmitting || !isLoaded}
+    >
+      {isSubmitting ? "Verifying..." : "Verify and sign in"}
+    </button>
+
+    {deviceStep.strategy !== "totp" && (
+      <button
+        type="button"
+        className="link-inline"
+        onClick={handleResendDeviceCode}
+        disabled={isSubmitting || !isLoaded}
+      >
+        Resend code
+      </button>
+    )}
+
+    <button
+      type="button"
+      className="link-inline"
+      onClick={() => {
+        setDeviceStep(null);
+        setDeviceCode("");
+        setStatus(null);
+      }}
+    >
+      Back to sign in
+    </button>
+  </>
+)}
+
       {resetStep === "code" && (
   <>
     <h1 className="auth-card-heading">Verify your email</h1>
@@ -638,4 +823,34 @@ async function handleNewPassword() {
       
     </form>
   );
+}
+
+// ---------------------------------------------------------------------------
+// New-device verification (Clerk Device Trust) helpers.
+// Clerk asks for a code after a correct password on a new device/browser.
+
+type SignInResource = NonNullable<ReturnType<typeof useSignIn>["signIn"]>;
+type SecondFactor = NonNullable<SignInResource["supportedSecondFactors"]>[number];
+type DeviceStep = { strategy: "email_code" | "phone_code" | "totp"; id?: string; sentTo?: string };
+
+/** Email code first (what Device Trust uses), then text message, then authenticator app. */
+function pickDeviceStep(factors: SecondFactor[] | null | undefined): DeviceStep | null {
+  const list = factors ?? [];
+  for (const f of list) {
+    if (f.strategy === "email_code") return { strategy: "email_code", id: f.emailAddressId, sentTo: f.safeIdentifier };
+  }
+  for (const f of list) {
+    if (f.strategy === "phone_code") return { strategy: "phone_code", id: f.phoneNumberId, sentTo: f.safeIdentifier };
+  }
+  if (list.some((f) => f.strategy === "totp")) return { strategy: "totp" };
+  return null;
+}
+
+/** Asks Clerk to send the email / text code (authenticator apps need nothing). */
+async function sendDeviceCode(signIn: SignInResource, step: DeviceStep): Promise<void> {
+  if (step.strategy === "email_code") {
+    await signIn.prepareSecondFactor({ strategy: "email_code", emailAddressId: step.id });
+  } else if (step.strategy === "phone_code") {
+    await signIn.prepareSecondFactor({ strategy: "phone_code", phoneNumberId: step.id });
+  }
 }

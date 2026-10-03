@@ -223,9 +223,48 @@ export function ProfileWizard({
     }
   }
 
+  /**
+   * Values typed on this step but not yet added with Enter / "+ Add certification".
+   * They are included in the save so nothing typed is lost, and the form is cleared
+   * as if the user had added them. `strict` (Save & Next): a half-filled certification
+   * shows the usual error and stops; Previous only keeps complete entries.
+   */
+  function withPendingInputs(strict: boolean): ProfileWizardData | null {
+    let nextLocation = location;
+    let nextCertifications = certifications;
+    if (step === 3) {
+      const typed = (tagInputRef.current?.value ?? "").trim().replace(/,$/, "").trim();
+      if (typed) {
+        if (!location.serviceableAreas.includes(typed)) {
+          nextLocation = { ...location, serviceableAreas: [...location.serviceableAreas, typed] };
+          setLocation(nextLocation);
+        }
+        if (tagInputRef.current) tagInputRef.current.value = "";
+      }
+    }
+    if (step === 4 && (certName.trim() || certBody.trim())) {
+      if (certName.trim() && certBody.trim()) {
+        nextCertifications = [
+          ...certifications,
+          { name: certName.trim(), body: certBody.trim(), fileName: certFileName, status: "Pending" as const },
+        ];
+        setCertifications(nextCertifications);
+        setCertName("");
+        setCertBody("");
+        setCertFileName("");
+        setCertError("");
+      } else if (strict) {
+        setCertError("Certification name and issuing body are both required.");
+        return null;
+      }
+    }
+    return { company, location: nextLocation, certifications: nextCertifications, infra, faqs };
+  }
+
   async function goNext() {
     if (savingRef.current || !validateStep(step)) return;
-    const nextData: ProfileWizardData = { company, location, certifications, infra, faqs };
+    const nextData = withPendingInputs(true);
+    if (!nextData) return;
     const saved = await saveStep(nextData, { completed: true, nextStep: Math.min(step + 1, EPIC2_TOTAL) });
     if (!saved) return;
     persist(nextData);
@@ -252,7 +291,8 @@ export function ProfileWizard({
   }
 
   async function handleBack() {
-    const current: ProfileWizardData = { company, location, certifications, infra, faqs };
+    if (savingRef.current) return;
+    const current = withPendingInputs(false) ?? { company, location, certifications, infra, faqs };
     // Keep what was typed on this step (not marked complete) before leaving it.
     const saved = await saveStep(current, { completed: false, nextStep: Math.max(step - 1, 1) });
     if (!saved) return;

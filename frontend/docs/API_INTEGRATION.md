@@ -54,8 +54,12 @@ New, separate area; no existing page, style or behaviour changed.
 - Route: `src/app/admin/[[...slug]]/page.tsx` (+ `layout.tsx`). Sub-pages: `/admin`,
   `/admin/users[/id]`, `/admin/manufacturers[/id]?tab=`, `/admin/review`, `/admin/analytics`,
   `/admin/support`. Filters are kept in the URL, so every list is linkable.
-- Clerk protects the route (`proxy.ts` treats it as private); the backend decides who is an
-  admin (`GET /admin/me` → 403 shows "Admin access only").
+- Sign-in page `/admin/login` (`AdminLogin.tsx`) with two methods: **Admin account**
+  (email + password checked by the backend, session token kept in sessionStorage —
+  `src/lib/admin/session.ts`) and **X!Y account** (Clerk email + password). `/admin` is public
+  in `proxy.ts` so staff without a Clerk account can reach the sign-in page; every admin API
+  call is still checked by the backend. Not signed in / session ended (401) → `/admin/login`
+  and back to the same page after sign-in; signed in but not an admin (403) → "Admin access only".
 - Styling reuses the Manufacturer site's XY classes (`manufacturer.css`, scoped `.mfg-root`)
   plus `src/app/admin/admin.css` (scoped `.adm-root`).
 - Code: `src/components/admin/*`, `src/lib/admin/*` (`api.ts` = token + fetch hooks,

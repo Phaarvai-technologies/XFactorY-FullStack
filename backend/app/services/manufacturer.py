@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.core.schema_check import MIGRATION_HINT
 from app.repositories.manufacturer import ManufacturerRepository, profile_flags
 from app.storage.supabase import SupabaseStorage, decode_data_url
+from app.core.welcome import send_welcome_soon
 
 
 log = logging.getLogger("xy.manufacturer")
@@ -104,13 +105,20 @@ class ManufacturerService:
             await self.repo.db.rollback()
             code = getattr(exc.orig, "pgcode", None) or ""
             detail = str(getattr(exc.orig, "args", [exc])[0]).split(">: ", 1)[-1]
+            # In production the database's own message (table / column names) stays in the
+            # server log; users get a plain message. Development keeps the details.
+            show = self.settings.environment.lower() != "production"
             if code in SCHEMA_ERROR_CODES:
                 log.error("Database schema is out of date: %s. %s", detail, MIGRATION_HINT)
-                raise HTTPException(500, f"Database schema is out of date ({detail}). {MIGRATION_HINT}") from exc
+                raise HTTPException(500, f"Database schema is out of date ({detail}). {MIGRATION_HINT}" if show
+                                    else "The server is being updated. Please try again shortly.") from exc
             if code.startswith("22") or code == "23514":  # bad value / check constraint
-                raise HTTPException(422, f"Invalid value: {detail}") from exc
+                log.warning("Invalid value: %s", detail)
+                raise HTTPException(422, f"Invalid value: {detail}" if show
+                                    else "One of the values is not valid. Please check and try again.") from exc
             log.exception("Database error")
-            raise HTTPException(500, f"Database error: {detail}") from exc
+            raise HTTPException(500, f"Database error: {detail}" if show
+                                else "Something went wrong on our side. Please try again.") from exc
 
     async def ensure_actor(self, actor: Actor) -> dict:
         """Returns the DB context; creates the rows on first use (webhook may be late)."""
@@ -122,6 +130,7 @@ class ManufacturerService:
             profile = await self.clerk.actor_profile(actor)
             await self._run(self.repo.sync_actor(actor, profile))
             ctx = await self._run(self.repo.context(actor))
+            send_welcome_soon(ctx["user_id"])  # new user: welcome email (once, in the background)
         await self.repo.touch_last_seen(actor.clerk_user_id)
         return ctx
 

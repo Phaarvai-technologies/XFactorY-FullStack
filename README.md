@@ -1,189 +1,168 @@
-# X!Y — The Explorer Factory
+# XY Factory (X!Y)
 
-Frontend for the X!Y manufacturing marketplace: Next.js (App Router), React, TypeScript, Tailwind CSS, and Clerk authentication.
+X!Y connects people with product ideas (Visionaries) to Manufacturers. This repository holds
+the whole platform: a Next.js frontend, a FastAPI backend, and the Postgres (Supabase)
+schema and migrations.
 
-The home page is a faithful port of the reference landing HTML (`xy-landing-page`).
-
-## Prerequisites
-
-- Node.js 20.9+ recommended
-- npm 10+
-- A Clerk application (dev keys are written by `clerk init`, or paste keys from the [Clerk Dashboard](https://dashboard.clerk.com/))
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env.local
-```
-
-Fill `.env.local` with your Clerk keys (or run `npx clerk@latest init -y --accountless --no-skills`).
-
-### Environment variables
-
-| Variable | Purpose |
-| --- | --- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (public) |
-| `CLERK_SECRET_KEY` | Clerk secret key (server only — never expose to the client) |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL` | Post sign-in redirect (`/onboarding/roles`) |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL` | Post sign-up redirect (`/onboarding/roles`) |
-
-In the Clerk Dashboard, set the sign-in and sign-up paths to `/sign-in` and `/sign-up`.
-
-### Clerk password policy (minimum 8 characters)
-
-The custom Sign Up form validates passwords with a **minimum length of 8 characters**. Clerk must use the same minimum, or sign-up will fail with a Clerk API error (for example, “password must contain at least 15 characters”) shown in the password field.
-
-**Clerk Dashboard:**
-
-1. Open the [Clerk Dashboard](https://dashboard.clerk.com/) for this project.
-2. Go to **User & Authentication**.
-3. Open **Password** or **Authentication** settings.
-4. Change the **minimum password length** from **15** to **8**.
-5. Save the configuration.
-6. Restart the Next.js development server if required (`npm run dev`).
-
-There is no 15-character minimum in the frontend code. If you still see a 15-character error after submitting the form, the Clerk Dashboard policy has not been updated yet.
-
-## Run
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-```bash
-npm run build
-npm start
-```
-
-## Routes
-
-| Route | Access |
-| --- | --- |
-| `/` | Public home page |
-| `/sign-in` | Public Clerk sign-in |
-| `/sign-up` | Public Clerk sign-up |
-| `/account/verify` | Authenticated account verification helper |
-| `/onboarding/roles` | Authenticated role selection |
-| `/onboarding/organization` | Authenticated placeholder |
-| `/onboarding/profile` | Authenticated placeholder |
-| `/organization/verification` | Authenticated placeholder |
-| `/app` | Authenticated workspace shell |
-| `/notifications` | Authenticated placeholder |
-| `/help` | Authenticated help shell |
-
-Protection is enforced in `src/proxy.ts` via `clerkMiddleware` + `auth.protect()` (Next.js 16 proxy convention).
-
-## Personas / roles
-
-TypeScript personas live in `src/types/personas.ts`. The role selection UI at `/onboarding/roles` stores selections in `localStorage` for this MVP (`src/lib/auth/roles.ts`). Replace with Clerk metadata / backend authorization later — do not hardcode real permissions in the frontend.
-
-## Design notes
-
-- Landing styles are preserved from the reference HTML in `src/app/globals.css`.
-- Hero blueprint asset: `public/images/hero-blueprint.png` (extracted from the reference HTML).
-- Sign-in / sign-up use the split-panel auth layout from the reference (`AuthShell`, `AuthBrandPanel`) with Clerk embedded in the right panel.
-- Fonts: Space Grotesk, Inter, IBM Plex Mono via `next/font`.
-
-## Project structure (key paths)
+| Portal | Who uses it | Frontend | Backend API |
+|---|---|---|---|
+| **Manufacturer** | Companies offering production capacity | `/manufacturer` (landing, account details, company profile wizard, machinery, availability, dashboard with booking requests) | `/api/v1/manufacturer/*` |
+| **Visionaries** | People with a product idea | `/visionaries` (overview), `/visionaries/flow` (profile, idea, stage, requirements, find a manufacturer, send a request, my project) | `/api/v1/visionary/*` |
+| **Admin** | X!Y staff | `/admin` (own sign-in page, manufacturer records, review queue, users, support, analytics) | `/api/v1/admin/*` |
+| Shared | Everyone | Home, sign-in / sign-up (Clerk, with new-device verification code), role selection, onboarding | `/api/v1/identity/*`, `/api/v1/webhooks/clerk` |
 
 ```
-src/
+Browser ── Next.js (Vercel) ── Clerk (sign-in)
+   │
+   └─ Bearer <Clerk session token> ──> FastAPI (Render) ──> Postgres (Supabase)
+                                                     └──> Supabase Storage (images)
+```
+
+## Repository layout
+
+```
+backend/                FastAPI app
   app/
-    page.tsx                    # Home (public)
-    layout.tsx                  # ClerkProvider + fonts
-    sign-in/[[...sign-in]]/     # Clerk sign-in
-    sign-up/[[...sign-up]]/     # Clerk sign-up
-    account/verify/             # Post-sign-up verification helper
-    onboarding/roles/           # Role selection (protected)
-    app/                        # Authenticated workspace shell
-  components/
-    auth/                       # Sign-in reference layout
-    home/                       # Hero, personas, process, scope, trust
-    layout/                     # Header, Footer, Logo, PilotStrip
-    onboarding/RoleSelection.tsx
-  lib/auth/                     # Role localStorage + Clerk appearance
-  types/personas.ts             # Persona TypeScript model
-  proxy.ts                      # Clerk route protection (Next.js 16)
-public/images/hero-blueprint.png
+    api/routes/         HTTP routes: identity, manufacturer, visionary, admin, admin_auth, webhooks
+    core/               config, Clerk token check, database, email, schema check
+    identity/           users and roles
+    repositories/, services/, schemas/   Manufacturer portal
+    visionary/          Visionaries portal (schemas, repository, service)
+    admin/              Admin portal
+    storage/            Supabase Storage uploads
+    migrate.py          applies the schema + migrations
+    admin_account.py    create / manage admin email+password accounts
+    grant_admin.py      give an X!Y user admin access
+  database/
+    XY_Database_Schema.sql   base schema (empty database only)
+    migrations/              004 … 012, idempotent, applied in order
+    seeds/                   optional sample data
+  tests/                pytest (unit, contract and database end-to-end tests)
+frontend/               Next.js 16 app (App Router, Clerk)
+  src/app/              pages: home, sign-in/up, onboarding, manufacturer, visionaries, admin
+  src/components/       UI per portal (manufacturer, visionary, admin, auth, home, layout, ui)
+  src/lib/              API client (lib/api.ts) and per-portal helpers
+  tests/                component tests (see tests/README.md)
+VISIONARIES_PORTAL.md   Visionaries portal: database design, ER diagram, API reference
 ```
 
-# XY Factory API (FastAPI) — Manufacturer backend
+More detail: `backend/README.md` (backend, admin access, email, troubleshooting),
+`backend/infrastructure/API_CONTRACT.md` (Manufacturer endpoints), `VISIONARIES_PORTAL.md`.
 
-Serves the Next.js frontend (`frontend/`). The backend was shaped to the
-frontend: every request/response uses the frontend's own field names
-(`ManufacturerState`, `ProfileWizardData`, `MachineryDraft`, `AccountSubmission`).
+## Requirements
 
-```
-Browser (Next.js + Clerk) --Bearer JWT--> FastAPI --> Supabase Postgres
-                                              \--> Supabase Storage (images)
-```
+- Python 3.12 and Node.js 20 or newer
+- A Postgres database: Supabase (production) or a local Postgres 16 with PostGIS
+- A Clerk application (publishable + secret key)
 
-## 1. Database (Supabase)
+## Set up and run locally (Windows PowerShell)
 
-Either run the SQL files in the Supabase SQL editor, in order:
-
-1. `database/XY_Database_Schema.sql` (only on an empty database)
-2. `database/migrations/004_manufacturer_api_support.sql` (also creates the `manufacturer-assets` storage bucket)
-3. `database/migrations/005_minimal_reference_seed.sql`
-4. `database/migrations/006_frontend_field_support.sql`
-
-or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
-schema only if the database is empty, then runs all migrations (they are idempotent).
-
-## 2. Configure and run
+### 1. Backend
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
+cd backend
+py -3.12 -m venv myenv
+.\myenv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item .env.example .env      # or keep your existing .env - it is compatible
+Copy-Item .env.example .env        # then fill in your own values (see below)
 $env:PYTHONPATH="."
-python -m app.migrate
+python -m app.migrate              # creates / updates the database (safe to re-run)
 uvicorn app.main:app --reload --port 8000
 ```
 
-macOS/Linux: same, with `source .venv/bin/activate` and `PYTHONPATH=. uvicorn app.main:app --reload --port 8000`.
+Check `http://localhost:8000/health/ready`, which should return `{"status":"ok"}`.
+API docs are at `http://localhost:8000/docs` (development only).
 
-Check `http://localhost:8000/health/live` and `http://localhost:8000/docs`.
+### 2. Frontend (second terminal)
 
-`CORS_ORIGINS` and `CLERK_AUTHORIZED_PARTIES` must contain the frontend
-origin (`http://localhost:3000`). `CLERK_SECRET_KEY` is required: on a user's
-first request the backend reads their email/name from Clerk and creates the
-`users` / `organizations` / `memberships` rows (the Clerk webhook is optional).
-
-## 3. Frontend
-
-In `frontend/.env.local` set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`,
-then `npm install && npm run dev`.
-
-## Sample booking requests (optional)
-
-New manufacturers start with an empty Booking Requests list (real data only).
-To load the four sample bookings the UI used to hardcode, run
-`database/seeds/sample_booking_requests.sql` once in the Supabase SQL editor, then:
-
-```sql
-SELECT xy_seed_sample_bookings('manufacturer@example.com');  -- email of a user who filled the details form
+```powershell
+cd frontend
+npm install
+Copy-Item .env.example .env.local  # then fill in your own values
+npm run dev
 ```
 
-It returns how many rows were added; running it again adds nothing.
+Open `http://localhost:3000`. The portals are at `/manufacturer`, `/visionaries` and `/admin`.
 
-## Endpoints used by the frontend
+macOS / Linux: the same steps, using `source myenv/bin/activate` and
+`PYTHONPATH=. uvicorn app.main:app --reload --port 8000`.
 
-See `infrastructure/API_CONTRACT.md`.
+## Environment variables
+
+Templates with placeholders: `backend/.env.example` and `frontend/.env.example`. Real values
+go in `backend/.env` and `frontend/.env.local` locally, and in the Render and Vercel
+dashboards in production. **Never commit them.** Both `.gitignore` files exclude them.
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | frontend | Backend URL, e.g. `http://localhost:8000/api/v1` |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | frontend | Clerk (public) |
+| `CLERK_SECRET_KEY` | frontend + backend | Clerk server key (secret) |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `..._SIGN_UP_URL`, `..._FALLBACK_REDIRECT_URL` | frontend | Clerk page routes |
+| `ENVIRONMENT` | backend | `development` locally, `production` on Render (hides `/docs` and database error details) |
+| `DATABASE_URL` | backend | Postgres, `postgresql+asyncpg://...` (secret) |
+| `CORS_ORIGINS` | backend | Frontend origin(s), e.g. `["http://localhost:3000"]` |
+| `CLERK_ISSUER`, `CLERK_JWKS_URL`, `CLERK_AUTHORIZED_PARTIES` | backend | Clerk session-token verification |
+| `CLERK_WEBHOOK_SIGNING_SECRET` | backend | Clerk webhook signature (secret, optional) |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET` | backend | Image storage (service key is secret) |
+| `ADMIN_EMAILS`, `ADMIN_*` | backend | Admin access and admin session rules |
+| `SMTP_*`, `EMAIL_FROM`, `APP_BASE_URL` | backend | Outgoing email (off when `SMTP_HOST` is empty) |
+| `GATEWAY_SHARED_SECRET` | backend | Only when an API gateway sits in front; leave empty otherwise |
+
+## Database
+
+`python -m app.migrate` applies `XY_Database_Schema.sql` on an empty database and then every
+file in `database/migrations/` in order. The migrations are idempotent and never remove data.
+On Supabase you can instead run the same files, in order, in the SQL editor.
+
+| Migration | Adds |
+|---|---|
+| 004 – 007 | Manufacturer portal fields, reference data, form progress, storage bucket |
+| 008 – 011 | Admin dashboard, admin accounts, email log, welcome email |
+| 012 | Visionaries portal: profiles, projects, request details, request drafts |
+
+## Admin access
+
+- **Staff account (email + password):**
+  `PYTHONPATH=. python -m app.admin_account create you@company.com --name "Your Name"`
+- **Existing X!Y user:**
+  - `PYTHONPATH=. python -m app.grant_admin you@company.com`
+  - Revoke: add `--revoke`.
+  - Or list the email in `ADMIN_EMAILS`.
+
+See `backend/README.md` → *Admin Dashboard* for the full details.
 
 ## Tests
 
-```bash
-PYTHONPATH=. python -m pytest                    # unit + contract tests
-# full end-to-end test against a disposable Postgres with PostGIS and the schema loaded:
-E2E_DATABASE_URL=postgresql+asyncpg://postgres@localhost:5432/xy_test PYTHONPATH=. python -m pytest
+```powershell
+cd backend; $env:PYTHONPATH="."; python -m pytest -q
+# database end-to-end tests too (use a disposable test database, never production):
+$env:E2E_DATABASE_URL="postgresql+asyncpg://postgres:PASSWORD@localhost:5432/xy_test"; python -m pytest -q
+
+cd frontend; npx tsc --noEmit; npm run lint; npm run build
 ```
 
-Tests never read `.env` values (see `tests/conftest.py`), so they cannot touch
-your real database. Never point `E2E_DATABASE_URL` at production — the test inserts rows.
+Frontend component tests: see `frontend/tests/README.md`.
+
+## Deployment
+
+- **Frontend: Vercel.** Root directory `frontend`. Set the frontend variables above, with
+  `NEXT_PUBLIC_API_URL` pointing at the backend.
+- **Backend: Render web service.**
+  - Root directory: `backend`
+  - Build command: `pip install -r requirements.txt`
+  - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+  - Variables: the backend ones above, with `ENVIRONMENT=production` and `CORS_ORIGINS` /
+    `CLERK_AUTHORIZED_PARTIES` set to the Vercel URL.
+- **Database: Supabase.** Run the migrations before deploying a backend that needs them.
+  `/health/ready` reports anything missing.
+- **Clerk webhook (optional):** `https://<backend>/api/v1/webhooks/clerk`
+
+## Security notes
+
+- Secrets live only in `.env` / `.env.local` and the hosting dashboards. Never commit or share
+  them, including in zip files.
+- If a secret is ever committed, rotate it at its source (Supabase, Clerk), then update Render
+  and Vercel.
+- The backend verifies every Clerk token itself. Every Visionary and Manufacturer query is
+  limited to the signed-in user's own records.

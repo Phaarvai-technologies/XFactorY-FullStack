@@ -33,6 +33,14 @@ REQUIRED = [
     ("admin_internal_notes", None, "008_admin_dashboard.sql"),
     ("user_activity_events", None, "008_admin_dashboard.sql"),
     ("admin_manufacturer_overview", "completeness", "008_admin_dashboard.sql"),
+    ("admin_accounts", None, "009_admin_accounts.sql"),
+    ("admin_sessions", None, "009_admin_accounts.sql"),
+    ("email_deliveries", None, "010_email_deliveries.sql"),
+    ("users", "welcome_email_sent_at", "011_welcome_email.sql"),
+    ("visionary_profiles", None, "012_visionary_portal.sql"),
+    ("visionary_projects", None, "012_visionary_portal.sql"),
+    ("visionary_request_details", None, "012_visionary_portal.sql"),
+    ("visionary_request_drafts", None, "012_visionary_portal.sql"),
 ]
 
 

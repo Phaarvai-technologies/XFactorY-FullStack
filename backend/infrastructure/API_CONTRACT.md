@@ -125,12 +125,20 @@ A step that fails validation returns 422 and saves nothing from that request.
 
 ## Admin Dashboard (`/api/v1/admin/...`)
 
-Every endpoint needs a Clerk token of a user with an active platform role (see
-`backend/README.md`); others get 403. Screens live at `/admin` in the frontend.
+Every endpoint needs `Authorization: Bearer <token>` of a user with an active platform role:
+either a Clerk session token (X!Y account) or an admin session token `xya_...` from
+`POST /admin/auth/login` (admin account). Others get 401 (not signed in / session ended) or
+403 (not an admin / suspended). Screens live at `/admin`; sign-in at `/admin/login`.
+
+| Sign-in | Method + path | Notes |
+| --- | --- | --- |
+| Admin account | `POST /admin/auth/login` `{email, password}` | 200 `{token, expiresAt, idleMinutes}`; 401 "Incorrect email or password."; 429 locked (Retry-After); 403 disabled/suspended |
+| Sign out | `POST /admin/auth/logout` | ends that admin session (204) |
+| Change password | `POST /admin/auth/change-password` `{current_password, new_password}` | admin-account sessions only; signs out other devices |
 
 | Screen / ticket | Method + path | Notes |
 | --- | --- | --- |
-| Access (01) | `GET /admin/me` | 200 `{id,name,email,roles}` or 403 |
+| Access (01) | `GET /admin/me` | 200 `{id,name,email,roles,authMethod}` or 401/403 |
 | Overview (02) | `GET /admin/overview` | cards (real records only) + recent / updated / needs-attention lists |
 | Users (03) | `GET /admin/users?q=&account_status=&onboarding_status=&page=` | onboarding_status also `NO_PROFILE` |
 | User detail + troubleshooting (03/10) | `GET /admin/users/{id}` | last login, last save, last section, recent failed operations with error reference |

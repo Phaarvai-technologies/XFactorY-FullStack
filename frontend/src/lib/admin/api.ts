@@ -1,19 +1,36 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { clearAdminSession, currentAdminToken } from "@/lib/admin/session";
+import { api, ApiError } from "@/lib/api";
+
+export type ClerkSignInResult =
+  | { ok: true }
+  | { ok: false; message: string; field?: "email" | "password" | "code" }
+  /** Clerk wants a one-time code first (new device / two-step verification). */
+  | { ok: false; needsCode: true; message: string };
 
 /**
- * Everything the admin screens need from their host: navigation and a Clerk token.
- * The Next.js page supplies router-backed values (AdminRoot); keeping it as a
+ * Everything the admin screens need from their host: navigation and Clerk.
+ * The Next.js page supplies router/Clerk-backed values (AdminRoot); keeping it as a
  * context lets the screens stay plain React components.
  */
 export type AdminHost = {
+  /** false while Clerk is still loading (do not decide "signed out" yet). */
+  ready: boolean;
   path: string; // e.g. "/admin/manufacturers/123"
   search: URLSearchParams;
   go: (href: string, options?: { replace?: boolean }) => void;
-  getToken: () => Promise<string | null>;
-  signOut: () => void;
+  /** Clerk session token of the signed-in X!Y user, or null. */
+  getClerkToken: () => Promise<string | null>;
+  /** Email of the signed-in X!Y (Clerk) user, or null. */
+  clerkEmail: string | null;
+  clerkSignIn: (email: string, password: string) => Promise<ClerkSignInResult>;
+  /** Second step after `needsCode`: the code from the email / text / authenticator app. */
+  clerkVerifyCode: (code: string) => Promise<ClerkSignInResult>;
+  /** Sends the email / text code again (no-op for authenticator apps). */
+  clerkResendCode: () => Promise<void>;
+  clerkSignOut: () => Promise<void>;
 };
 
 export const AdminHostContext = createContext<AdminHost | null>(null);
@@ -24,15 +41,43 @@ export function useAdminHost(): AdminHost {
   return host;
 }
 
-/** Authenticated call to /api/v1/admin/... */
+/** The admin-account session token if there is one, otherwise the Clerk token. */
+export async function adminToken(host: Pick<AdminHost, "getClerkToken">): Promise<string> {
+  return currentAdminToken() ?? (await host.getClerkToken()) ?? "";
+}
+
+export function loginHref(path: string, search: URLSearchParams, expired = false): string {
+  const here = `${path}${search.toString() ? `?${search.toString()}` : ""}`;
+  const q = new URLSearchParams();
+  if (here !== "/admin" && !here.startsWith("/admin/login")) q.set("next", here);
+  if (expired) q.set("expired", "1");
+  return `/admin/login${q.toString() ? `?${q.toString()}` : ""}`;
+}
+
+/**
+ * Authenticated call to /api/v1/admin/... When the session is missing or has
+ * ended (401), the admin is sent to /admin/login and returns here after signing in.
+ */
 export function useAdminApi() {
-  const { getToken } = useAdminHost();
+  const { getClerkToken, go, path, search } = useAdminHost();
+  const where = useRef({ path, search });
+  useEffect(() => {
+    where.current = { path, search };
+  }, [path, search]);
   return useCallback(
-    async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
-      const token = (await getToken()) ?? "";
-      return api<T>(`/admin${path}`, token, init);
+    async <T,>(apiPath: string, init: RequestInit = {}): Promise<T> => {
+      const hadAdminSession = !!currentAdminToken();
+      try {
+        return await api<T>(`/admin${apiPath}`, await adminToken({ getClerkToken }), init);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401 && !where.current.path.startsWith("/admin/login")) {
+          clearAdminSession();
+          go(loginHref(where.current.path, where.current.search, hadAdminSession), { replace: true });
+        }
+        throw e;
+      }
     },
-    [getToken],
+    [getClerkToken, go],
   );
 }
 

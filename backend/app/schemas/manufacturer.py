@@ -14,6 +14,7 @@ class _Model(BaseModel):
 # ---------------------------------------------------------------- account
 class AccountPayload(_Model):
     """AccountScreen `AccountSubmission`."""
+    # Prefilled from the saved user record; saved only if the user changed them.
     firstName: str = Field(min_length=1, max_length=100)
     lastName: str = Field(min_length=1, max_length=100)
     contact: str = Field(min_length=3, max_length=320)

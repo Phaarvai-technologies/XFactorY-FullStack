@@ -4,6 +4,7 @@ Every public method takes the frontend's own data shapes (camelCase keys from
 `ManufacturerState` / `ProfileWizardData` / `MachineryDraft`) and maps them to
 the canonical tables in XY_Database_Schema.sql (+ migrations 004-006).
 """
+import hashlib
 import json
 import re
 from datetime import date
@@ -199,22 +200,12 @@ class ManufacturerRepository:
         return dict(row._mapping)
 
     async def touch_last_seen(self, clerk_user_id: str) -> None:
-        await self.db.execute(
-            text(
-                """
-                UPDATE public.users
-                SET last_seen_at = now()
-                WHERE clerk_user_id = :clerk_user_id
-                AND (
-                    last_seen_at IS NULL
-                    OR last_seen_at < now() - interval '5 minutes'
-                )
-                """
-            ),
-            {
-                "clerk_user_id": clerk_user_id,
-            },
-        )
+        """Last activity for the admin Users / Support pages (at most every 5 minutes)."""
+        await self.db.execute(text("""
+            UPDATE users SET last_seen_at=now()
+            WHERE clerk_user_id=:c AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
+        """), {"c": clerk_user_id})
+        await self.db.commit()
 
     async def _country_code(self, name: str) -> str | None:
         code = COUNTRY_CODES.get((name or "").strip().lower())
@@ -485,16 +476,37 @@ class ManufacturerRepository:
             body = str(item.get("body") or "").strip()
             if not name or (name, body) in reviewed:
                 continue
-            cert_type = await self.db.scalar(text("""
-                INSERT INTO certification_types(code,name,issuer) VALUES (:code,:name,:issuer)
-                ON CONFLICT (code) DO UPDATE SET name=certification_types.name RETURNING id
-            """), {"code": slug(name), "name": name, "issuer": body or None})
+            cert_type = await self._certification_type(name, body)
             await self.db.execute(text("""
                 INSERT INTO organization_certifications
                   (organization_id,facility_id,certification_type_id,issuer,document_file_name,status,created_at)
                 VALUES (:organization_id,:facility,:type,:issuer,:file_name,'declared',clock_timestamp())
             """), {**ctx, "facility": facility_id, "type": cert_type, "issuer": body or None,
                     "file_name": item.get("fileName") or None})
+
+    async def _certification_type(self, name: str, body: str) -> UUID:
+        """The certification type with exactly this name, created when missing.
+
+        Types are shared by code (a slug of the name). Two spellings with the same slug
+        ("ISO 9001" / "iso 9001") must not share a row, or the manufacturer would get the
+        other spelling back when the profile is reloaded; the second one gets its own code."""
+        existing = await self.db.scalar(text(
+            "SELECT id FROM certification_types WHERE name=:name ORDER BY (code=:code) DESC, id LIMIT 1"
+        ), {"name": name, "code": slug(name)})
+        if existing:
+            return existing
+        params = {"code": slug(name), "name": name, "issuer": body or None}
+        created = await self.db.scalar(text("""
+            INSERT INTO certification_types(code,name,issuer) VALUES (:code,:name,:issuer)
+            ON CONFLICT (code) DO NOTHING RETURNING id
+        """), params)
+        if created:
+            return created
+        params["code"] = f'{slug(name)[:70]}_{hashlib.md5(name.encode()).hexdigest()[:8].upper()}'
+        return await self.db.scalar(text("""
+            INSERT INTO certification_types(code,name,issuer) VALUES (:code,:name,:issuer)
+            ON CONFLICT (code) DO UPDATE SET name=certification_types.name RETURNING id
+        """), params)
 
     async def _replace_infrastructure(self, ctx: dict, facility_id: UUID, values: dict) -> None:
         """Updates only the infrastructure answers that were sent (partial)."""

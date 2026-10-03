@@ -1,3 +1,4 @@
+import { Show } from "@clerk/nextjs";
 import { Button } from "@/components/ui/Button";
 
 export function Hero() {
@@ -15,9 +16,13 @@ export function Hero() {
             factory floor.
           </p>
           <div className="cta-row">
-            <Button href="/sign-up" variant="primary">
-              Sign in / Create account
-            </Button>
+            {/* Only for signed-out visitors: any signed-in user is already registered,
+                whether or not they have a Manufacturer account. */}
+            <Show when="signed-out">
+              <Button href="/sign-up" variant="primary">
+                Sign in / Create account
+              </Button>
+            </Show>
             <Button href="/#how-it-works" variant="ghost">
               Browse how X!Y works
             </Button>

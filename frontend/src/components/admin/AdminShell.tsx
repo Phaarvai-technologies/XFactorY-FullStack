@@ -4,6 +4,7 @@ import {
   BarChart3,
   ClipboardCheck,
   Factory,
+  KeyRound,
   LayoutDashboard,
   LifeBuoy,
   LogOut,
@@ -14,7 +15,9 @@ import {
 } from "lucide-react";
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { FactoryMark } from "@/components/layout/Logo";
+import { AdminLogin } from "@/components/admin/AdminLogin";
 import { Analytics } from "@/components/admin/Analytics";
+import { ChangePasswordModal } from "@/components/admin/ChangePasswordModal";
 import { ManufacturerDetail } from "@/components/admin/ManufacturerDetail";
 import { Manufacturers } from "@/components/admin/Manufacturers";
 import { Overview } from "@/components/admin/Overview";
@@ -24,8 +27,9 @@ import { UserDetailView, Users as UsersScreen } from "@/components/admin/Users";
 import { ErrorBox, Loading } from "@/components/admin/ui";
 import { useAdminHost, useResource } from "@/lib/admin/api";
 import { initials } from "@/lib/admin/format";
+import { clearAdminSession, currentAdminToken } from "@/lib/admin/session";
 import type { AdminMe } from "@/lib/admin/types";
-import { ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 const NAV = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
@@ -47,6 +51,7 @@ function route(path: string): { screen: string; id?: string } {
   const parts = path.replace(/\/+$/, "").split("/").filter(Boolean); // ["admin", ...]
   const [, section, id] = parts;
   if (!section) return { screen: "overview" };
+  if (section === "login") return { screen: "login" };
   if (section === "manufacturers") return id ? { screen: "manufacturer", id } : { screen: "manufacturers" };
   if (section === "users") return id ? { screen: "user", id } : { screen: "users" };
   if (["review", "analytics", "support"].includes(section)) return { screen: section };
@@ -55,14 +60,19 @@ function route(path: string): { screen: string; id?: string } {
 
 export function AdminShell() {
   const host = useAdminHost();
-  const meRes = useResource<AdminMe>("/me");
-  const me = meRes.data ?? null;
+  const { screen, id } = route(host.path);
+  const meRes = useResource<AdminMe>(screen === "login" || !host.ready ? null : "/me");
+  // Never show a previous admin's data while the current sign-in is being checked.
+  const me = meRes.loading || meRes.error ? null : (meRes.data ?? null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const err = meRes.error;
-  const denied = err instanceof ApiError && (err.status === 403 || err.status === 401);
-  const state = me ? "ok" : meRes.loading ? "loading" : denied ? "denied" : "error";
+  // 401 (not signed in / session ended) is sent to /admin/login by useAdminApi.
+  const signedOut = err instanceof ApiError && err.status === 401;
+  const denied = err instanceof ApiError && err.status === 403;
+  const state = me ? "ok" : meRes.loading || signedOut || !host.ready ? "loading" : denied ? "denied" : "error";
   const error = err?.message ?? "";
   const load = meRes.reload;
 
@@ -72,10 +82,41 @@ export function AdminShell() {
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }, []);
 
-  const { screen, id } = route(host.path);
+  /** Signs out of the admin: ends the admin-account session, or the X!Y (Clerk) session. */
+  const logout = useCallback(async () => {
+    const local = currentAdminToken();
+    if (local) {
+      try {
+        await api("/admin/auth/logout", local, { method: "POST" });
+      } catch {
+        /* the session is cleared locally anyway */
+      }
+      clearAdminSession();
+    } else {
+      await host.clerkSignOut();
+    }
+    host.go("/admin/login", { replace: true });
+  }, [host]);
+
   const active = NAV.slice()
     .reverse()
     .find((n) => (n.href === "/admin" ? host.path === "/admin" || host.path === "/admin/" : host.path.startsWith(n.href)));
+
+  if (screen === "login") {
+    return (
+      <div className="mfg-root adm-root adm-center">
+        <AdminLogin
+          onSignedIn={() => {
+            meRes.reload();
+            const next = host.search.get("next");
+            host.go(next && next.startsWith("/admin") && !next.startsWith("/admin/login") ? next : "/admin", {
+              replace: true,
+            });
+          }}
+        />
+      </div>
+    );
+  }
 
   if (state === "loading") {
     return (
@@ -103,7 +144,7 @@ export function AdminShell() {
             <button type="button" className="btn-ghost" onClick={() => host.go("/")}>
               Go to X!Y home
             </button>
-            <button type="button" className="btn-ghost" onClick={host.signOut}>
+            <button type="button" className="btn-ghost" onClick={() => void logout()}>
               Sign out
             </button>
           </div>
@@ -183,7 +224,15 @@ export function AdminShell() {
                   <span>{me?.email}</span>
                 </div>
               </div>
-              <button type="button" className="adm-logout" onClick={host.signOut}>
+              <p className="adm-signin-method">
+                {me?.authMethod === "password" ? "Signed in with admin account" : "Signed in with X!Y account"}
+              </p>
+              {me?.authMethod === "password" && (
+                <button type="button" className="adm-logout adm-change-pw" onClick={() => setChangingPassword(true)}>
+                  <KeyRound size={16} /> Change password
+                </button>
+              )}
+              <button type="button" className="adm-logout" onClick={() => void logout()}>
                 <LogOut size={16} /> Log out
               </button>
             </div>
@@ -212,6 +261,15 @@ export function AdminShell() {
             </div>
             <main className="adm-main">{content}</main>
           </div>
+          {changingPassword && (
+            <ChangePasswordModal
+              onClose={() => setChangingPassword(false)}
+              onDone={() => {
+                setChangingPassword(false);
+                showToast("Password changed. Other devices were signed out.");
+              }}
+            />
+          )}
           <div className={`toast${toast ? " show" : ""}`} role="status" aria-live="polite">
             {toast}
           </div>
