@@ -23,9 +23,9 @@ export function Hero() {
                 Sign in / Create account
               </Button>
             </Show>
-            <Button href="/#how-it-works" variant="ghost">
+            <a className="btn btn-ghost" href="#how-it-works">
               Browse how X!Y works
-            </Button>
+            </a>
           </div>
         </div>
         <div />

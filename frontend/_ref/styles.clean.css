@@ -241,7 +241,7 @@
 
   /* ---------- footer ---------- */
   footer{background:var(--navy);padding:64px 0 48px;}
-  .footer-top{display:grid;grid-template-columns:1.3fr repeat(3,1fr);gap:32px 40px;}
+  .footer-top{display:grid;grid-template-columns:1.3fr repeat(2,1fr);gap:32px 40px;}
   .footer-nav-cols{display:contents;}
   .footer-brand{display:flex;align-items:center;gap:8px;font-family:'Space Grotesk';font-weight:700;font-size:20px;color:#FFFFFF;}
   .footer-brand svg{width:26px;height:22px;flex:none;color:var(--blue-bright);}

@@ -25,43 +25,43 @@ const HOME_PERSONAS: HomePersona[] = [
     title: "Vendor",
     job: "Connect with manufacturers and businesses that need the materials, components, and services you provide.",
     iconId: "ico-vendor",
-    href: "/sign-up",
+    href: "/explore/vendor",
   },
   {
     title: "Investor",
     job: "Discover promising manufacturing opportunities, businesses, and emerging market potential.",
     iconId: "ico-investor",
-    href: "/sign-up",
+    href: "/explore/investor",
   },
   {
     title: "Labour Supplier",
     job: "Connect skilled workers and labour teams with manufacturers that need reliable production support.",
     iconId: "ico-labour",
-    href: "/sign-up",
+    href: "/explore/labour-supplier",
   },
   {
     title: "Logistics Supplier",
     job: "Move materials and finished goods efficiently across the manufacturing and supply chain network.",
     iconId: "ico-logistics",
-    href: "/sign-up",
+    href: "/explore/logistics-supplier",
   },
   {
     title: "Legal Auditor",
     job: "Support manufacturing businesses with contracts, legal documentation, compliance, and audit requirements.",
     iconId: "ico-legal",
-    href: "/sign-up",
+    href: "/explore/legal-auditor",
   },
   {
     title: "Market Lead",
     job: "Connect products and manufacturing capabilities with buyers, markets, and distribution opportunities.",
     iconId: "ico-market",
-    href: "/sign-up",
+    href: "/explore/market-lead",
   },
 ];
 
 export function PersonasSection() {
   return (
-    <section className="personas" id="personas">
+    <section className="personas" id="explore">
       <div className="wrap">
         <div className="section-head">
           <h2>One ecosystem. Eight ways to participate.</h2>
