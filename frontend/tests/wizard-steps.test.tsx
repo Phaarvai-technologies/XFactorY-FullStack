@@ -1,17 +1,10 @@
-import "./setup";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { describe, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { createBlankProfileData, ProfileWizard, type ProfileWizardData } from "@/components/manufacturer/ProfileWizard";
 import { MachineryWizard } from "@/components/manufacturer/MachineryWizard";
 import { DashboardScreen } from "@/components/manufacturer/DashboardScreen";
 import { createInitialManufacturerState } from "@/lib/manufacturer/types";
 
-let passed = 0, failed = 0;
-const results: string[] = [];
-async function test(name: string, fn: () => Promise<void>) {
-  try { await fn(); passed++; results.push(`PASS ${name}`); }
-  catch (e) { failed++; results.push(`FAIL ${name}: ${(e as Error).message}`); }
-  finally { cleanup(); }
-}
 function assert(cond: unknown, msg: string) { if (!cond) throw new Error(msg); }
 function deferred() { let resolve!: (v: boolean) => void; const promise = new Promise<boolean>((r) => (resolve = r)); return { promise, resolve }; }
 const heading = () => screen.getByRole("heading", { level: 2 }).textContent ?? "";
@@ -30,9 +23,9 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     showToast={noop} onSaveStep={onSaveStep} />);
 }
 
-(async () => {
+describe("Manufacturer wizards and availability form", () => {
   // ---------------------------------------------------------------- Company profile wizard
-  await test("Profile: Next waits for the save, shows Saving…, blocks double clicks", async () => {
+  it("Profile: Next waits for the save, shows Saving…, blocks double clicks", async () => {
     const d = deferred(); const calls: any[] = [];
     renderProfile((...a: any[]) => { calls.push(a); return d.promise; });
     const next = screen.getByRole("button", { name: "Get started" });
@@ -46,13 +39,13 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(calls[0][0] === 1 && calls[0][2].completed === true && calls[0][2].nextStep === 2, "wrong step payload");
   });
 
-  await test("Profile: failed save keeps the user on the step", async () => {
+  it("Profile: failed save keeps the user on the step", async () => {
     renderProfile(async () => false, { initialStep: 2 });
     fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush(); await flush();
     assert(heading() === "Company details", `moved despite failed save: ${heading()}`);
   });
 
-  await test("Profile: invalid step is not sent to the backend", async () => {
+  it("Profile: invalid step is not sent to the backend", async () => {
     const calls: any[] = [];
     const empty = createBlankProfileData("");
     renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 2, data: empty });
@@ -61,7 +54,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(screen.getByText("Company name is required."), "validation message missing");
   });
 
-  await test("Profile: step data is sent with the save", async () => {
+  it("Profile: step data is sent with the save", async () => {
     const calls: any[] = [];
     renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 2 });
     fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush(); await flush();
@@ -69,7 +62,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(heading() === "Location", `expected Location, got ${heading()}`);
   });
 
-  await test("Profile: Skip saves position only (no data) then moves", async () => {
+  it("Profile: Skip saves position only (no data) then moves", async () => {
     const calls: any[] = [];
     renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 3 });
     fireEvent.click(screen.getByRole("button", { name: "Skip" })); await flush(); await flush();
@@ -77,12 +70,12 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(heading() === "Certifications", `expected Certifications, got ${heading()}`);
   });
 
-  await test("Profile: resumes at the step given by the backend", async () => {
+  it("Profile: resumes at the step given by the backend", async () => {
     renderProfile(async () => true, { initialStep: 4 });
     assert(heading() === "Certifications", `expected Certifications, got ${heading()}`);
   });
 
-  await test("Profile: Previous saves edits (not completed) before going back", async () => {
+  it("Profile: Previous saves edits (not completed) before going back", async () => {
     const calls: any[] = [];
     renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 3 });
     fireEvent.click(screen.getByRole("button", { name: "Previous" })); await flush(); await flush();
@@ -100,14 +93,14 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
       hasSavedDraft={p.hasSavedDraft ?? false} />);
   }
 
-  await test("Machinery: step 1 is validated before any save", async () => {
+  it("Machinery: step 1 is validated before any save", async () => {
     const calls: any[] = [];
     renderMachine({ onSaveStep: async (...a: any[]) => { calls.push(a); return true; } });
     fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush();
     assert(calls.length === 0 && heading() === "Machinery details", "saved or moved without industry/type");
   });
 
-  await test("Machinery: Next saves (creates draft) and moves only after success", async () => {
+  it("Machinery: Next saves (creates draft) and moves only after success", async () => {
     const d = deferred(); const calls: any[] = [];
     renderMachine({ initialDraft: machine, onSaveStep: (...a: any[]) => { calls.push(a); return d.promise; } });
     fireEvent.click(screen.getByRole("button", { name: "Save & Next" })); await flush();
@@ -118,12 +111,12 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(calls[0][0] === 1 && calls[0][1].type === "Lathe" && calls[0][2].completed === true, "wrong payload");
   });
 
-  await test("Machinery: resumes a saved draft at its last incomplete step", async () => {
+  it("Machinery: resumes a saved draft at its last incomplete step", async () => {
     renderMachine({ initialDraft: machine, initialStep: 5, hasSavedDraft: true });
     assert(heading() === "Logistics", `expected Logistics, got ${heading()}`);
   });
 
-  await test("Machinery: closing before the first save says nothing was saved", async () => {
+  it("Machinery: closing before the first save says nothing was saved", async () => {
     const toasts: string[] = []; let closed = false; const calls: any[] = [];
     renderMachine({ showToast: (m: string) => toasts.push(m), onClose: () => { closed = true; },
       onSaveStep: async (...a: any[]) => { calls.push(a); return true; } });
@@ -131,7 +124,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(closed && calls.length === 0 && toasts[0].startsWith("Draft discarded"), `got ${toasts}`);
   });
 
-  await test("Machinery: closing a saved draft keeps it", async () => {
+  it("Machinery: closing a saved draft keeps it", async () => {
     const toasts: string[] = []; let closed = false; const calls: any[] = [];
     renderMachine({ initialDraft: machine, hasSavedDraft: true, showToast: (m: string) => toasts.push(m),
       onClose: () => { closed = true; }, onSaveStep: async (...a: any[]) => { calls.push(a); return true; } });
@@ -139,7 +132,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(closed && calls.length === 1 && calls[0][2].completed === false && toasts[0].startsWith("Progress saved"), `got ${toasts}`);
   });
 
-  await test("Machinery: Publish is sent once and waits for the save", async () => {
+  it("Machinery: Publish is sent once and waits for the save", async () => {
     const d = deferred(); let publishes = 0;
     renderMachine({ initialDraft: machine, initialStep: 7, hasSavedDraft: true, onPublish: () => { publishes++; return d.promise; } });
     const publish = screen.getByRole("button", { name: "Publish" });
@@ -150,7 +143,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
   });
 
   // ---------------------------------------------------------------- saved values are not lost
-  await test("Profile: an area typed without Enter is saved with Save & Next", async () => {
+  it("Profile: an area typed without Enter is saved with Save & Next", async () => {
     const calls: any[] = [];
     const d = profileData();
     d.location = { ...d.location, address: "4 Ring Rd", city: "Coimbatore", country: "India", serviceableAreas: ["Chennai"] };
@@ -162,7 +155,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(JSON.stringify(areas) === '["Chennai","South India"]', `areas sent: ${JSON.stringify(areas)}`);
   });
 
-  await test("Profile: a certification typed without + Add is saved with Save & Next", async () => {
+  it("Profile: a certification typed without + Add is saved with Save & Next", async () => {
     const calls: any[] = [];
     renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 4 });
     fireEvent.change(document.getElementById("cert-name")!, { target: { value: "ISO 9001:2015" } });
@@ -173,7 +166,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(calls[0][2].completed === true, "step not marked complete");
   });
 
-  await test("Profile: a half-filled certification is not skipped silently", async () => {
+  it("Profile: a half-filled certification is not skipped silently", async () => {
     const calls: any[] = [];
     renderProfile(async (...a: any[]) => { calls.push(a); return true; }, { initialStep: 4 });
     fireEvent.change(document.getElementById("cert-name")!, { target: { value: "ISO 14001" } });
@@ -182,7 +175,7 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(screen.getAllByText("Certification name and issuing body are both required.").length > 0, "no error shown");
   });
 
-  await test("Availability: Machine Name lists the manufacturer's own machinery", async () => {
+  it("Availability: Machine Name lists the manufacturer's own machinery", async () => {
     const state = createInitialManufacturerState();
     state.machinery = [
       { ...(machine as any), id: 1, type: "VMC 850", status: "Published" },
@@ -201,6 +194,4 @@ function renderProfile(onSaveStep: any, extra: Partial<{ initialStep: number; da
     assert(select.value === "VMC 850", `saved plan not selected: ${select.value}`);
   });
 
-  console.log(results.join("\n") + `\n\n${passed}/${passed + failed} component tests passed`);
-  process.exit(failed ? 1 : 0);
-})();
+});

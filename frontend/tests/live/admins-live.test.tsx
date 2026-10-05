@@ -2,20 +2,13 @@
 // Signs in with the built-in admin@phaarvai.com admin account (no Clerk involved).
 // Needs a running backend on :8000 with a TEST database (it adds an admin) and
 // ADMIN_TEST_PASSWORD set to the built-in admin's password on that test database.
-// Build and run like the other tests (see tests/README.md), file tests/live/admins-live.test.tsx.
-import "../setup";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+// Run: npm run test:live (skipped when ADMIN_TEST_PASSWORD is not set).
+import { describe, it } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { AdminHostContext, type AdminHost } from "@/lib/admin/api";
 import { clearAdminSession, saveAdminSession } from "@/lib/admin/session";
 
-let passed = 0, failed = 0;
-const results: string[] = [];
-async function test(name: string, fn: () => Promise<void>) {
-  try { await fn(); passed++; results.push(`PASS ${name}`); }
-  catch (e) { failed++; results.push(`FAIL ${name}: ${(e as Error).message}`); }
-  finally { cleanup(); }
-}
 function assert(cond: unknown, msg: string) { if (!cond) throw new Error(msg); }
 const opts = { timeout: 8000 };
 const API = process.env.ADMIN_TEST_API ?? "http://localhost:8000/api/v1";
@@ -43,8 +36,8 @@ const rowOf = async (email: string) => { await screen.findByRole("table", {}, op
 const newEmail = `ops-${Date.now()}@example.com`;
 let temporary = "";
 
-(async () => {
-  await test("Admins tab lists the built-in admin; Add admin shows a temporary password once", async () => {
+describe.skipIf(!process.env.ADMIN_TEST_PASSWORD)("Admins tab (live backend)", () => {
+  it("Admins tab lists the built-in admin; Add admin shows a temporary password once", async () => {
     clearAdminSession();
     await signIn("admin@phaarvai.com", ROOT_PASSWORD);
     show("/admin/admins");
@@ -65,7 +58,7 @@ let temporary = "";
     assert(within(opsRow).getByText("Temporary password"), "status not shown");
   });
 
-  await test("Admins are not in Users", async () => {
+  it("Admins are not in Users", async () => {
     show("/admin/users");
     await screen.findByRole("heading", { name: "Users" }, opts);
     await act(async () => { await new Promise((r) => setTimeout(r, 600)); });
@@ -75,7 +68,7 @@ let temporary = "";
     assert(!text.includes("admin@phaarvai.com") && !text.includes(newEmail), "an admin is listed in Users");
   });
 
-  await test("New admin must choose a password first, then the portal opens", async () => {
+  it("New admin must choose a password first, then the portal opens", async () => {
     clearAdminSession();
     await signIn(newEmail, temporary);
     show("/admin");
@@ -89,7 +82,7 @@ let temporary = "";
     assert(!screen.queryByRole("heading", { name: "Choose your password" }), "modal still open");
   });
 
-  await test("Administrator revokes and restores the new admin from the list", async () => {
+  it("Administrator revokes and restores the new admin from the list", async () => {
     clearAdminSession();
     await signIn("admin@phaarvai.com", ROOT_PASSWORD);
     show("/admin/admins");
@@ -109,6 +102,4 @@ let temporary = "";
     assert(ok.status === 200, `restored admin cannot sign in: ${ok.status}`);
   });
 
-  console.log(results.join("\n") + `\n\n${passed}/${passed + failed} live admin tests passed`);
-  process.exit(failed ? 1 : 0);
-})();
+});

@@ -1,17 +1,10 @@
 // Manufacturer dashboard bell: messages from the X!Y team. The popup appears once for anything
 // new; "Open notifications" shows the correction note, shared notes and edits and marks them read;
 // "Later" only hides the popup. Backend answers are shaped like GET /manufacturer/notifications.
-import "./setup";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { describe, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { NotificationBell } from "@/components/manufacturer/NotificationBell";
 
-let passed = 0, failed = 0;
-const results: string[] = [];
-async function test(name: string, fn: () => Promise<void>) {
-  try { await fn(); passed++; results.push(`PASS ${name}`); }
-  catch (e) { failed++; results.push(`FAIL ${name}: ${(e as Error).message}`); }
-  finally { cleanup(); }
-}
 function assert(cond: unknown, msg: string) { if (!cond) throw new Error(msg); }
 const flush = () => act(async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0)); });
 
@@ -43,8 +36,8 @@ const sent: { url: string; method: string; body: string }[] = [];
 function reset(next: unknown) { answer = next; sent.length = 0; }
 const bell = () => screen.getByRole("button", { name: /Notifications/ });
 
-(async () => {
-  await test("Needs correction: popup on arrival, red dot on the bell", async () => {
+describe("Manufacturer notification bell", () => {
+  it("Needs correction: popup on arrival, red dot on the bell", async () => {
     reset(withNews);
     render(<NotificationBell onOpenProfile={() => undefined} />);
     await flush();
@@ -55,7 +48,7 @@ const bell = () => screen.getByRole("button", { name: /Notifications/ });
     assert(bell().querySelector(".dot"), "no unread dot");
   });
 
-  await test("Open notifications: shows the correction note, shared notes and edits, then marks read", async () => {
+  it("Open notifications: shows the correction note, shared notes and edits, then marks read", async () => {
     reset(withNews);
     let opened = 0;
     render(<NotificationBell onOpenProfile={() => { opened++; }} />);
@@ -76,7 +69,7 @@ const bell = () => screen.getByRole("button", { name: /Notifications/ });
     assert(opened === 1 && !screen.queryByRole("dialog", { name: "Notifications" }), "Update my profile did not open the profile");
   });
 
-  await test("Later: hides the popup and keeps the messages unread", async () => {
+  it("Later: hides the popup and keeps the messages unread", async () => {
     reset(withNews);
     render(<NotificationBell />);
     await flush();
@@ -87,7 +80,7 @@ const bell = () => screen.getByRole("button", { name: /Notifications/ });
     assert(!sent.some((s) => s.url.endsWith("/notifications/read")), "Later marked them read");
   });
 
-  await test("Nothing new: no popup, no dot, empty panel says so", async () => {
+  it("Nothing new: no popup, no dot, empty panel says so", async () => {
     reset(quiet);
     render(<NotificationBell />);
     await flush();
@@ -100,13 +93,11 @@ const bell = () => screen.getByRole("button", { name: /Notifications/ });
     assert(!screen.queryByRole("dialog", { name: "Notifications" }), "Escape did not close");
   });
 
-  await test("A bad answer from the server leaves the bell quiet", async () => {
+  it("A bad answer from the server leaves the bell quiet", async () => {
     reset({ detail: "Internal Server Error" });
     render(<NotificationBell />);
     await flush();
     assert(!screen.queryByRole("alertdialog") && !bell().querySelector(".dot"), "bad answer shown");
   });
 
-  console.log(results.join("\n") + `\n\n${passed}/${passed + failed} notification tests passed`);
-  process.exit(failed ? 1 : 0);
-})();
+});
