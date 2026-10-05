@@ -198,6 +198,18 @@ python -m app.lookup --wide user you@example.com    # long values in full
 with your test email, then select one query and Run. Q1 lists every table with how many rows that person
 has and when it last changed.
 
+
+## Admin access
+
+- **Staff account (email + password):**
+  `PYTHONPATH=. python -m app.admin_account create you@company.com --name "Your Name"`
+- **Existing X!Y user:**
+  - `PYTHONPATH=. python -m app.grant_admin you@company.com`
+  - Revoke: add `--revoke`.
+  - Or list the email in `ADMIN_EMAILS`.
+
+See `backend/README.md` → *Admin Dashboard* for the full details.
+
 ## Tests
 
 ```powershell
