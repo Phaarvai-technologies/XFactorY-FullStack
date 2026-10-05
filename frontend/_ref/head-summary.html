@@ -1,0 +1,96 @@
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>X!Y — Why own it when you can make it</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0B2545;
+    --blue-deep:#14498C;
+    --blue-bright:#2F6FED;
+    --blue-pale:#EAF1FB;
+    --blueprint-line:#C7D9F0;
+    --blueprint-line-strong:#9FBBE0;
+    --white:#FFFFFF;
+    --ink-soft:#4A5C74;
+    --amber:#9A6A00;
+    --amber-bg:#FDF3E1;
+    --card-bg:#F3F8FF;
+    --card-border:#C5DDF5;
+    --max:1180px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--white);
+    color:var(--navy);
+    font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    color:var(--navy);
+    margin:0;
+    letter-spacing:-0.01em;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  a{color:inherit;text-decoration:none;}
+  :focus-visible{outline:2px solid var(--blue-bright);outline-offset:3px;}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 28px;}
+
+  /* ---------- blueprint texture ---------- */
+  .blueprint-bg{
+    background-image:
+      linear-gradient(var(--blueprint-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--blueprint-line) 1px, transparent 1px);
+    background-size:40px 40px;
+    background-color:var(--blue-pale);
+  }
+
+  /* ---------- header ---------- */
+  header{
+    border-bottom:1px solid var(--blueprint-line);
+    background:var(--white);
+    position:sticky;top:0;z-index:50;
+  }
+  .nav-row{
+    display:flex;align-items:center;justify-content:space-between;
+    height:72px;
+  }
+  .logo{
+    font-family:'Space Grotesk';font-weight:700;font-size:22px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .logo svg.factory-mark{width:30px;height:26px;flex:none;color:var(--blue-bright);}
+  nav.primary-links{display:flex;gap:32px;font-size:14.5px;font-weight:500;color:var(--ink-soft);}
+  nav.primary-links a:hover{color:var(--blue-bright);}
+  .header-actions{display:flex;gap:12px;align-items:center;}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:11px 20px;font-size:14.5px;font-weight:600;
+    border:1.5px solid transparent;cursor:pointer;
+    font-family:'Inter';transition:background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .btn-primary{background:var(--blue-deep);color:var(--white);}
+  .btn-primary:hover{background:var(--navy);}
+  .btn-ghost{background:transparent;color:var(--navy);border-color:var(--navy);}
+  .btn-ghost:hover{border-color:var(--blue-bright);color:var(--blue-bright);}
+  .btn-text{background:transparent;color:var(--blue-deep);padding:11px 4px;}
+  .btn-text:hover{color:var(--blue-bright);}
+
+  /* ---------- pilot notice ---------- */
+  .pilot-strip{
+    background:var(--amber-bg);border-bottom:1px solid #F0DDAF;
+    color:var(--amber);font-size:13.5px;font-weight:500;
+  }
+  .pilot-strip .wrap{display:flex;align-items:center;gap:10px;padding-top:9px;padding-bottom:9px;}
+  .pilot-dot{width:7px;height:7px;background:var(--amber);flex:none;}
+
+  /* ---------- hero ---------- */
+  .hero{
+    position:relative;overflow:hidden;
+    padding:120px 0 130px;
+    background-image:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABgAAAAQACAIAAACoEwUVAAAQAElEQVR4AbT9B7glyXXfCYZJe93zr1756vLV5avad6O9hyMM4QiAAAlKlEhRFGUpUobyHH4jjcxqpJ3Vp5WhRGk0kmZ2RqI05AxBDSnCEbMkARIeaKAb7bvLvnfvzczYX8S5NyrrvleFJqWN7/9O/s+JExEnTEZmxq0GzD//d5/4uX//yX/x859q41/+h0//j//7p/7VL3z6X//vHv/mFz4T8T//H5/9t7/460As/9N//NS/+g+f/Jf//tf+xb/7zz/3v/3qP/v//OrP/i+/8k/+7X/6R//64//wX/2f/+Bf/uLf++f/8e/+7M//nX/y7/7WP/pf/7t/+L/+9X/wv/zM//Pf/PTf+5/+4t/5uT//N3/2z/z1f/ynf+Yf/qmf/gd/4q/+D3/sL//9H/uL//2P/Lm//UM/+d/94I//t7/vT/7Mx/74T3/0x/7Kh//wX/zgH/qp9//BP/u+P/Bnvvv3/el3fexPfddH//jbvvePvvmDP/rUB37ksff8wUfe/YMPvuMH7n/797/pbd9371s+cvfTH7zzyQ/c/vj7zj/6nrMPv/vMQ+86/eA7T97/XSfe9Pbj970N3HrvW8Gxe95y9O43H7nr6SN3vaWNo3e/9eg9bzt279tvve+7wIn733nygXeBUw+++/RD333m4fecfeS94NyjHwDnH/ueGZx97EMej3/P2ce/58xjHzj96PtPPfK+kw+/l3qOv+kdVEvlh+96y8E7nj5wxxO33PbYLWce2Xf64T0nH9x94oFdJ+7befzeXcfu2XHkrm0Hb189cNvK/nPLt5wFS/vOgMW9pwULe04J5nefFCzuObU1pkWkoEiqElCzgIYEqwfObzt429qh25ERqIJowU2w7cDZGawdPAd2Hjy/69Btuw+d23P4/N5DZ8H+w2cPHDl3+PCZI0fOHjty7taj508cO3fy1vNnbz137vi524+fv/3E2btOnLn75Nl7T5wGbzp56v5Tpx84fS7gzAOnzzx06szDp88+cvpMG4+eOfvImXOPnj3/2LnbwBO33fHk7Xc+dcc9T99571N33f/UPQ88dc9DT9778FP3P/6kx1NPPPD04w++5YmH3goee/itjz/6zscefefDj77D47F3P/j4ux964r0PPfm+B558/4NPfeCBpz/44Js/9NBbPvzI2z7y6Ds+9sg7f+DJ9/4wq+7NH/zRt374x1iH7/6BH3/vD/4ki/NDP/IXvvdH/9L3/7G/9vv+5M+wev/gT/yNP/Rn/9aP/Lm//Yf//N/50Z/6f/yRv/B3IT/8Z//WD/2Zv/mDf/qv/8Cf/Jnv+2N/7SM/9lc+9If/8vt/6Kfe84N/9t2/7yff8f0//vaP/sk3f+iPPv3BH3vyAz/6+Pt+5NH3/PDD7/6DD7zjB9709u+/5y0fuevpD9/x5Advf+J7bnvs/ecee

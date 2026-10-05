@@ -1,0 +1,42 @@
+# XY Factory backend (FastAPI / Python)
+
+# ---------- Secrets: never commit ----------
+# Real values live only in .env (local) and the Render dashboard (production).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---------- Python environments ----------
+myenv/
+venv/
+.venv/
+env/
+
+# ---------- Python generated files ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# ---------- Tests and tools ----------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- Logs and local databases ----------
+*.log
+*.sqlite3
+
+# ---------- Editors / operating system ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
