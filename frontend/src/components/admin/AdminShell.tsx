@@ -10,12 +10,14 @@ import {
   LogOut,
   Menu,
   ShieldAlert,
+  ShieldCheck,
   Users,
   X,
 } from "lucide-react";
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { FactoryMark } from "@/components/layout/Logo";
 import { AdminLogin } from "@/components/admin/AdminLogin";
+import { Admins } from "@/components/admin/Admins";
 import { Analytics } from "@/components/admin/Analytics";
 import { ChangePasswordModal } from "@/components/admin/ChangePasswordModal";
 import { ManufacturerDetail } from "@/components/admin/ManufacturerDetail";
@@ -34,6 +36,7 @@ import { api, ApiError } from "@/lib/api";
 const NAV = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/admins", label: "Admins", icon: ShieldCheck },
   { href: "/admin/manufacturers", label: "Manufacturers", icon: Factory },
   { href: "/admin/review", label: "Onboarding & review", icon: ClipboardCheck },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
@@ -54,7 +57,7 @@ function route(path: string): { screen: string; id?: string } {
   if (section === "login") return { screen: "login" };
   if (section === "manufacturers") return id ? { screen: "manufacturer", id } : { screen: "manufacturers" };
   if (section === "users") return id ? { screen: "user", id } : { screen: "users" };
-  if (["review", "analytics", "support"].includes(section)) return { screen: section };
+  if (["review", "analytics", "support", "admins"].includes(section)) return { screen: section };
   return { screen: "notfound" };
 }
 
@@ -154,7 +157,10 @@ export function AdminShell() {
   }
 
   let content;
-  switch (screen) {
+  switch (me?.mustChangePassword ? "password-required" : screen) {
+    case "password-required":
+      content = <Loading label="Choose a new password to continue…" />;
+      break;
     case "overview":
       content = <Overview />;
       break;
@@ -178,6 +184,9 @@ export function AdminShell() {
       break;
     case "support":
       content = <Support />;
+      break;
+    case "admins":
+      content = <Admins />;
       break;
     default:
       content = <ErrorBox message="This admin page does not exist." />;
@@ -261,14 +270,27 @@ export function AdminShell() {
             </div>
             <main className="adm-main">{content}</main>
           </div>
-          {changingPassword && (
+          {me?.mustChangePassword ? (
+            // Signed in with a temporary password (given from the Admins tab): choose a new one
+            // before using the portal. The backend refuses other admin requests until then.
             <ChangePasswordModal
-              onClose={() => setChangingPassword(false)}
+              required
+              onClose={() => undefined}
               onDone={() => {
-                setChangingPassword(false);
-                showToast("Password changed. Other devices were signed out.");
+                load();
+                showToast("Password changed. Welcome to the admin portal.");
               }}
             />
+          ) : (
+            changingPassword && (
+              <ChangePasswordModal
+                onClose={() => setChangingPassword(false)}
+                onDone={() => {
+                  setChangingPassword(false);
+                  showToast("Password changed. Other devices were signed out.");
+                }}
+              />
+            )
           )}
           <div className={`toast${toast ? " show" : ""}`} role="status" aria-live="polite">
             {toast}

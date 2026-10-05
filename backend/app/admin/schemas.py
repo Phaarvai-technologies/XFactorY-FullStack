@@ -32,6 +32,7 @@ class AdminFields(_Model):
 
 class NoteIn(_Model):
     note: str = Field(min_length=1, max_length=4000)
+    share: bool = False  # True: the manufacturer sees it and gets a notification
 
 
 class ArchiveIn(_Model):
@@ -62,3 +63,21 @@ class ChangePasswordIn(BaseModel):
 
 class TestEmailIn(_Model):
     to: str | None = Field(default=None, max_length=320)
+
+
+AdminRole = Literal["platform_administrator", "platform_operator", "support_specialist", "verification_analyst"]
+
+
+class AdminAddIn(_Model):
+    """Admins tab -> Add admin."""
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    name: str = Field(default="", max_length=120)
+    role: AdminRole = "platform_administrator"
+
+
+class AdminRoleIn(_Model):
+    role: AdminRole
+
+
+class AdminRestoreIn(_Model):
+    role: AdminRole | None = None

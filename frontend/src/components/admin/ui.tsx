@@ -149,27 +149,32 @@ export function Modal({
   onClose,
   children,
   wide = false,
+  closable = true,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** false: no close button, Esc and backdrop clicks do nothing (a required step). */
+  closable?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && closable) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, closable]);
   return (
-    <div className="modal-backdrop show" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop show" onMouseDown={(e) => closable && e.target === e.currentTarget && onClose()}>
       <div className={`modal-card adm-modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="adm-modal-head">
           <h3>{title}</h3>
-          <button type="button" className="adm-modal-close" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
+          {closable && (
+            <button type="button" className="adm-modal-close" onClick={onClose} aria-label="Close">
+              <X size={18} />
+            </button>
+          )}
         </div>
         {children}
       </div>

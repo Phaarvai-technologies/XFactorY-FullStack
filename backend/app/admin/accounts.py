@@ -182,7 +182,8 @@ async def change_password(db: AsyncSession, account_id: UUID, current_token: str
         raise LoginError(422, "Choose a password different from the current one.")
     hashed = await asyncio.to_thread(hash_password, new)
     await db.execute(text("""
-        UPDATE admin_accounts SET password_hash=:p, password_changed_at=now(), updated_at=now() WHERE id=:a
+        UPDATE admin_accounts SET password_hash=:p, password_changed_at=now(), must_change_password=false,
+               updated_at=now() WHERE id=:a
     """), {"p": hashed, "a": account_id})
     # Sign out every other device.
     await db.execute(text("""
@@ -198,3 +199,12 @@ async def revoke_user_sessions(db: AsyncSession, user_id) -> None:
         UPDATE admin_sessions SET revoked_at=now()
         WHERE revoked_at IS NULL AND account_id IN (SELECT id FROM admin_accounts WHERE user_id=CAST(:u AS uuid))
     """), {"u": str(user_id)})
+
+
+def temporary_password() -> str:
+    """A random temporary password that meets `password_problem` (letters + digits, 16 chars)."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+    while True:
+        value = "".join(secrets.choice(alphabet) for _ in range(16))
+        if any(c.isdigit() for c in value) and any(c.isalpha() for c in value):
+            return value

@@ -6,8 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.admin.admins import AdminManager
 from app.admin.auth import AdminContext, current_admin
-from app.admin.schemas import AccountStatusIn, AdminFields, ArchiveIn, BatchArchiveIn, FieldEdit, NoteIn, TestEmailIn
+from app.admin.schemas import (AccountStatusIn, AdminAddIn, AdminFields, AdminRestoreIn, AdminRoleIn, ArchiveIn,
+                               BatchArchiveIn, FieldEdit, NoteIn, TestEmailIn)
 from app.admin.service import AdminService
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
@@ -33,6 +35,48 @@ async def me(admin: Admin, svc: Svc):
 @router.get("/admins")
 async def admins(admin: Admin, svc: Svc):
     return await svc.admins()
+
+
+# ---------------------------------------------------------------- Admins tab
+def manager(session: AsyncSession = Depends(get_session), settings: Settings = Depends(get_settings)):
+    return AdminManager(session, settings)
+
+
+Mgr = Annotated[AdminManager, Depends(manager)]
+
+
+@router.get("/admin-users")
+async def admin_users(admin: Admin, mgr: Mgr):
+    """Every admin (active and revoked), for the Admins tab."""
+    return await mgr.list(admin)
+
+
+@router.post("/admin-users", status_code=201)
+async def add_admin_user(body: AdminAddIn, admin: Admin, mgr: Mgr):
+    """Grant admin access. Returns {admin, temporaryPassword}; the temporary password is shown
+    once and must be changed at the first sign-in. Administrators only."""
+    return await mgr.add(admin, body.email, body.name, body.role)
+
+
+@router.post("/admin-users/{user_id}/revoke")
+async def revoke_admin_user(user_id: UUID, admin: Admin, mgr: Mgr):
+    return await mgr.revoke(admin, user_id)
+
+
+@router.post("/admin-users/{user_id}/restore")
+async def restore_admin_user(user_id: UUID, body: AdminRestoreIn, admin: Admin, mgr: Mgr):
+    return await mgr.restore(admin, user_id, body.role)
+
+
+@router.patch("/admin-users/{user_id}/role")
+async def change_admin_role(user_id: UUID, body: AdminRoleIn, admin: Admin, mgr: Mgr):
+    return await mgr.change_role(admin, user_id, body.role)
+
+
+@router.post("/admin-users/{user_id}/reset-password")
+async def reset_admin_password(user_id: UUID, admin: Admin, mgr: Mgr):
+    """New temporary password (shown once). Administrators only."""
+    return await mgr.reset_password(admin, user_id)
 
 
 @router.get("/overview")
@@ -101,7 +145,7 @@ async def archive_batch(body: BatchArchiveIn, admin: Admin, svc: Svc):
 
 @router.post("/manufacturers/{org_id}/notes", status_code=201)
 async def add_note(org_id: UUID, body: NoteIn, admin: Admin, svc: Svc):
-    return await svc.add_note(admin, str(org_id), body.note)
+    return await svc.add_note(admin, str(org_id), body.note, body.share)
 
 
 @router.get("/users")

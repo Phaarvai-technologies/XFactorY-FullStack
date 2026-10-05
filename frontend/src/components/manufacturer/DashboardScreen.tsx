@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { AccountMenu } from "@/components/manufacturer/AccountMenu";
+import { NotificationBell } from "@/components/manufacturer/NotificationBell";
 import { FactoryMark } from "@/components/layout/Logo";
 import {
-  BellIcon,
   CalendarDaysIcon,
   CheckIcon,
   DocumentIcon,
@@ -111,18 +112,11 @@ export function DashboardScreen({
           </div>
           <div className="topbar-actions">
             <span className="pct-badge">{pct}% complete</span>
-            <button className="icon-btn" type="button" title="Notifications">
-              <BellIcon size={17} />
-              <span className="dot" />
-            </button>
-            <button
-              className="avatar-chip"
-              type="button"
-              onClick={() => showToast("Account menu — demo only.")}
-            >
+            <NotificationBell onOpenProfile={() => showPanel("profile")} />
+            <AccountMenu>
               <span className="avatar-circle">{initials}</span>
               <span>{fullName}</span>
-            </button>
+            </AccountMenu>
           </div>
         </div>
       </div>
@@ -482,6 +476,8 @@ export function DashboardScreen({
 
             <div className="card">
               <CapacityForm
+                // Re-reads the saved plan when it arrives from / is saved to the database.
+                key={JSON.stringify(state.capacity ?? null)}
                 machinery={state.machinery}
                 capacity={state.capacity}
                 onSave={onSaveCapacity}
@@ -647,6 +643,10 @@ function CapacityForm({
   const [count, setCount] = useState(capacity?.count ?? "");
   const [start, setStart] = useState(capacity?.start ?? "");
   const [end, setEnd] = useState(capacity?.end ?? "");
+  const listed = machinery
+    .filter((m) => m.status !== "Archived")
+    .map((m) => m.type.trim() || "Untitled machinery");
+  const machineOptions = [...new Set(machine && !listed.includes(machine) ? [machine, ...listed] : listed)];
 
   function handleSave() {
   if (!machine || !count.trim() || !start || !end) {
@@ -672,14 +672,23 @@ function CapacityForm({
     <div className="form-grid">
       <div>
         <label htmlFor="cap-machine">Machine Name</label>
-        <input
+        {/* The signed-in manufacturer's own machinery (loaded from the database with the
+            dashboard). A plan saved earlier for a machine no longer listed stays selectable. */}
+        <select
           id="cap-machine"
-          type="text"
           className={machine ? "" : "placeholder-shown"}
           value={machine}
           onChange={(e) => setMachine(e.target.value)}
-          placeholder="Enter machine name"
-        />
+        >
+          <option value="" disabled>
+            {machineOptions.length ? "Select a machine" : "Add machinery first"}
+          </option>
+          {machineOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
       </div>
         <div>
           <label htmlFor="cap-count">No. of Machines</label>

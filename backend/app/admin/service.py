@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import notifications
 from app.admin import accounts
 from app.admin.auth import AdminContext
 from app.admin.repository import (
@@ -117,7 +118,7 @@ class AdminService:
     # ------------------------------------------------------------------ XY-ADMIN-01
     async def me(self, admin: AdminContext) -> dict:
         return {"id": str(admin.user_id), "name": admin.name, "email": admin.email, "roles": list(admin.roles),
-                "authMethod": admin.auth_method}
+                "authMethod": admin.auth_method, "mustChangePassword": admin.must_change_password}
 
     async def admins(self) -> list[dict]:
         return [{"id": str(a["id"]), "name": a["name"], "email": a["email"]} for a in await self.repo.admins()]
@@ -297,6 +298,11 @@ class AdminService:
                     raise LookupError("Machinery listing not found")
                 await self.mrepo._apply_machinery_changes(machine_id, changes, None)
             await self.repo.add_history(org_id, self._label(field), old, new, admin.user_id, reason)
+            label = self._label(field)
+            await notifications.notify_company(
+                self.db, org_id, "profile_edit",
+                "The X!Y team updated a machinery listing" if kind == "machinery" else "The X!Y team updated your profile",
+                f"{label}: {self._shown(old)} → {self._shown(new)}\nReason: {reason.strip()}", admin.user_id)
             await self.db.commit()
         await self._run(apply())
 
@@ -310,6 +316,15 @@ class AdminService:
     @staticmethod
     async def _async(fn, *args):
         return fn(*args)
+
+    @staticmethod
+    def _shown(value: Any) -> str:
+        if value in (None, "", [], {}):
+            return "(empty)"
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value)
+        text_value = str(value)
+        return f"“{text_value[:200]}{'…' if len(text_value) > 200 else ''}”"
 
     # ------------------------------------------------------------------ XY-ADMIN-07 / 08
     async def admin_fields(self, admin: AdminContext, org_id: str, body: dict) -> dict:
@@ -350,7 +365,12 @@ class AdminService:
                 await self.repo.add_history(org_id, "Review status", REVIEW_LABELS[old], REVIEW_LABELS[new],
                                             admin.user_id, reason)
                 if new == "NEEDS_CORRECTION" and (reason or "").strip():
-                    await self.repo.add_note(org_id, admin.user_id, f"Correction requested: {reason.strip()}")
+                    # The correction note is always shown to the manufacturer.
+                    await self.repo.add_note(org_id, admin.user_id, f"Correction requested: {reason.strip()}",
+                                             shared=True)
+                    await notifications.notify_company(
+                        self.db, org_id, "needs_correction", "Your profile needs a few corrections",
+                        reason.strip(), admin.user_id)
                 if new in ("NEEDS_CORRECTION", "REVIEWED"):
                     review_email = (new, (reason or "").strip())
                 changed = True
@@ -399,9 +419,12 @@ class AdminService:
         await self.db.commit()
         return {"changed": done, "skippedReal": skipped}
 
-    async def add_note(self, admin: AdminContext, org_id: str, note: str) -> dict:
+    async def add_note(self, admin: AdminContext, org_id: str, note: str, share: bool = False) -> dict:
         await self._ctx(org_id)
-        await self.repo.add_note(org_id, admin.user_id, note)
+        await self.repo.add_note(org_id, admin.user_id, note, shared=share)
+        if share:
+            await notifications.notify_company(self.db, org_id, "admin_note", "Message from the X!Y team",
+                                               note.strip(), admin.user_id)
         await self.db.commit()
         return {"notes": [{**n, "id": str(n["id"])} for n in await self.repo.notes(org_id)]}
 

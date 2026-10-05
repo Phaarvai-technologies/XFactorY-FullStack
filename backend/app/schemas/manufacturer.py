@@ -299,3 +299,8 @@ class AvailabilityPatchPayload(_Model):
 
     def changes(self) -> dict:
         return self.model_dump(mode="json", exclude_unset=True)
+
+
+class NotificationsReadPayload(_Model):
+    """ids: the notifications opened; omit (or null) to mark all as read."""
+    ids: list[UUID] | None = Field(default=None, max_length=200)

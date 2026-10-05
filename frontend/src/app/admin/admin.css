@@ -752,3 +752,15 @@
 .adm-root .adm-change-pw:hover { background: var(--blue-50); border-color: var(--blue-100); color: var(--blue-700); }
 .adm-root .adm-pw-rules { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12.5px; color: var(--slate-500); }
 .adm-root .adm-pw-rules li.ok { color: var(--emerald-600); font-weight: 600; }
+
+/* Admins tab */
+.adm-root .adm-table-foot { padding: 12px 18px; margin: 0; border-top: 1px solid var(--slate-100); }
+.adm-root .adm-temp-password {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; margin-bottom: 6px; border-radius: 12px;
+  background: var(--slate-50); border: 1px dashed var(--slate-300);
+}
+.adm-root .adm-temp-password code { font-size: 16px; font-weight: 600; letter-spacing: 0.04em; color: var(--slate-900); word-break: break-all; }
+
+/* notes shared with the manufacturer */
+.adm-root .adm-share-toggle { margin-top: 10px; white-space: normal; }

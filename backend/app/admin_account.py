@@ -1,10 +1,17 @@
 """Manage admin email + password accounts (the "Admin account" sign-in at /admin/login).
 
-    PYTHONPATH=. python -m app.admin_account create  you@company.com --name "Priya Nair"
+    PYTHONPATH=. python -m app.admin_account setup                         # built-in admin@phaarvai.com (first time)
+    PYTHONPATH=. python -m app.admin_account create  you@company.com --name "Priya Nair" [--role ROLE]
+    PYTHONPATH=. python -m app.admin_account grant   you@company.com [--role ROLE]   # give / restore access
+    PYTHONPATH=. python -m app.admin_account revoke  you@company.com     # remove access, end sessions
     PYTHONPATH=. python -m app.admin_account password you@company.com     # set a new password
     PYTHONPATH=. python -m app.admin_account disable  you@company.com     # blocks sign-in, ends sessions
     PYTHONPATH=. python -m app.admin_account enable   you@company.com     # also clears a lockout
     PYTHONPATH=. python -m app.admin_account list
+
+ROLE: platform_administrator (default), platform_operator, support_specialist, verification_analyst.
+After the first administrator exists, admins are usually managed in the admin portal's
+Admins tab instead (Add admin, Revoke, Restore, Change role, Reset password).
 
 The password is asked for (hidden input), never passed on the command line.
 For scripts, add --password-stdin and pipe it in.
@@ -48,7 +55,10 @@ def read_password(email: str, from_stdin: bool) -> str:
         return password
 
 
-async def create(email: str, name: str | None, from_stdin: bool) -> int:
+ROLES = ("platform_administrator", "platform_operator", "support_specialist", "verification_analyst")
+
+
+async def create(email: str, name: str | None, from_stdin: bool, role: str = "platform_administrator") -> int:
     async with SessionFactory() as db:
         if await db.scalar(text("SELECT 1 FROM admin_accounts WHERE email=CAST(:e AS citext)"), {"e": email}):
             print(f"An admin account for {email} already exists. Use 'password' to change its password.")
@@ -70,7 +80,7 @@ async def create(email: str, name: str | None, from_stdin: bool) -> int:
         await db.execute(text("""
             INSERT INTO admin_accounts (user_id, email, password_hash) VALUES (:u, :e, :p)
         """), {"u": user_id, "e": email, "p": hash_password(password)})
-        await grant(db, user_id)
+        await grant(db, user_id, role)
         await db.commit()
         settings = get_settings()
         subject, text_body, html = tpl.admin_account_created(
@@ -123,14 +133,78 @@ async def list_accounts() -> int:
     async with SessionFactory() as db:
         rows = (await db.execute(text("""
             SELECT a.email::text, a.status, a.last_login_at, a.locked_until > now() AS locked,
-                   u.clerk_user_id NOT LIKE 'local-admin:%' AS linked
+                   u.clerk_user_id NOT LIKE 'local-admin:%' AS linked,
+                   (SELECT string_agg(platform_role, ',') FROM platform_role_assignments p
+                     WHERE p.user_id=u.id AND p.status='active' AND p.revoked_at IS NULL) AS roles
             FROM admin_accounts a JOIN users u ON u.id=a.user_id ORDER BY a.email
         """))).all()
     if not rows:
-        print("No admin accounts yet.")
+        print("No admin accounts yet. First time? Run: python -m app.admin_account setup")
     for r in rows:
-        print(f"{r[0]:40} {r[1]:9} {'locked ' if r[3] else ''}{'linked to X!Y sign-in ' if r[4] else ''}"
-              f"last sign-in: {r[2] or 'never'}")
+        print(f"{r[0]:36} {r[1]:9} {(r[5] or 'no access (revoked)'):24} {'locked ' if r[3] else ''}"
+              f"{'linked to X!Y sign-in ' if r[4] else ''}last sign-in: {r[2] or 'never'}")
+    return 0
+
+
+async def setup(name: str | None, from_stdin: bool) -> int:
+    """First-time setup: the built-in administrator (ADMIN_DEFAULT_EMAIL, admin@phaarvai.com)."""
+    email = get_settings().admin_default_email.strip()
+    async with SessionFactory() as db:
+        exists = await db.scalar(text("SELECT 1 FROM admin_accounts WHERE email=CAST(:e AS citext)"), {"e": email})
+    if not exists:
+        print(f"Creating the built-in administrator {email}.")
+        return await create(email, name or "Phaarvai Admin", from_stdin)
+    print(f"{email} already has an admin account; making sure it is enabled and an administrator.")
+    return await grant_access(email, "platform_administrator")
+
+
+async def grant_access(email: str, role: str) -> int:
+    async with SessionFactory() as db:
+        acct = (await db.execute(text("SELECT id, user_id FROM admin_accounts WHERE email=CAST(:e AS citext)"),
+                                 {"e": email})).first()
+        user_id = acct.user_id if acct else await db.scalar(
+            text("SELECT id FROM users WHERE email=CAST(:e AS citext)"), {"e": email})
+        if not user_id:
+            print(f"No admin account or user for {email}. Create one: python -m app.admin_account create {email}")
+            return 1
+        await db.execute(text("""
+            UPDATE platform_role_assignments SET status='revoked', revoked_at=now()
+            WHERE user_id=:u AND status='active' AND revoked_at IS NULL AND platform_role<>:r
+              AND platform_role = ANY(:roles)
+        """), {"u": user_id, "r": role, "roles": list(ROLES)})
+        await grant(db, user_id, role)
+        if acct:
+            await db.execute(text("""
+                UPDATE admin_accounts SET status='active', failed_attempts=0, locked_until=NULL, updated_at=now()
+                WHERE id=:a
+            """), {"a": acct.id})
+        await db.commit()
+    print(f"{email} now has admin access ({role})."
+          + ("" if acct else " They sign in with their X!Y account (no admin password yet)."))
+    return 0
+
+
+async def revoke_access(email: str) -> int:
+    if email.lower() == get_settings().admin_default_email.strip().lower():
+        print("The built-in administrator cannot be revoked. Use 'password' or 'disable' if you must.")
+        return 1
+    async with SessionFactory() as db:
+        user_id = await db.scalar(text("SELECT id FROM users WHERE email=CAST(:e AS citext)"), {"e": email})
+        if not user_id:
+            print(f"No user with email {email}.")
+            return 1
+        await db.execute(text("""
+            UPDATE platform_role_assignments SET status='revoked', revoked_at=now()
+            WHERE user_id=:u AND status='active' AND revoked_at IS NULL AND platform_role = ANY(:roles)
+        """), {"u": user_id, "roles": list(ROLES)})
+        await db.execute(text("UPDATE admin_accounts SET status='disabled', updated_at=now() WHERE user_id=:u"),
+                         {"u": user_id})
+        await db.execute(text("""
+            UPDATE admin_sessions SET revoked_at=now() WHERE revoked_at IS NULL
+              AND account_id IN (SELECT id FROM admin_accounts WHERE user_id=:u)
+        """), {"u": user_id})
+        await db.commit()
+    print(f"Admin access revoked for {email}. Their admin sessions were ended.")
     return 0
 
 
@@ -140,7 +214,15 @@ def main() -> int:
     c = sub.add_parser("create")
     c.add_argument("email")
     c.add_argument("--name")
+    c.add_argument("--role", choices=ROLES, default="platform_administrator")
     c.add_argument("--password-stdin", action="store_true")
+    st = sub.add_parser("setup")
+    st.add_argument("--name")
+    st.add_argument("--password-stdin", action="store_true")
+    g = sub.add_parser("grant")
+    g.add_argument("email")
+    g.add_argument("--role", choices=ROLES, default="platform_administrator")
+    sub.add_parser("revoke").add_argument("email")
     pw = sub.add_parser("password")
     pw.add_argument("email")
     pw.add_argument("--password-stdin", action="store_true")
@@ -149,7 +231,13 @@ def main() -> int:
     sub.add_parser("list")
     a = p.parse_args()
     if a.cmd == "create":
-        return asyncio.run(create(a.email.strip(), a.name, a.password_stdin))
+        return asyncio.run(create(a.email.strip(), a.name, a.password_stdin, a.role))
+    if a.cmd == "setup":
+        return asyncio.run(setup(a.name, a.password_stdin))
+    if a.cmd == "grant":
+        return asyncio.run(grant_access(a.email.strip(), a.role))
+    if a.cmd == "revoke":
+        return asyncio.run(revoke_access(a.email.strip()))
     if a.cmd == "password":
         return asyncio.run(set_password(a.email.strip(), a.password_stdin))
     if a.cmd in ("disable", "enable"):

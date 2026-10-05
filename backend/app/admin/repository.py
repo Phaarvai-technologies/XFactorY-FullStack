@@ -112,7 +112,9 @@ class AdminRepository:
     async def overview(self) -> dict:
         cards = await self.row("""
             SELECT
-              (SELECT count(*) FROM users WHERE status<>'deactivated' AND clerk_user_id NOT LIKE 'local-admin:%') AS total_users,
+              (SELECT count(*) FROM users u WHERE u.status<>'deactivated' AND u.clerk_user_id NOT LIKE 'local-admin:%'
+                 AND NOT EXISTS (SELECT 1 FROM platform_role_assignments pa WHERE pa.user_id=u.id
+                                 AND pa.status='active' AND pa.revoked_at IS NULL)) AS total_users,
               count(*) FILTER (WHERE record_type='REAL') AS total_manufacturers,
               count(*) FILTER (WHERE record_type='REAL' AND completeness=100) AS completed,
               count(*) FILTER (WHERE record_type='REAL' AND completeness<100) AS incomplete,
@@ -243,7 +245,7 @@ class AdminRepository:
 
     async def notes(self, org_id: str) -> list[dict]:
         return await self.rows("""
-            SELECT n.id, n.note, n.created_at,
+            SELECT n.id, n.note, n.created_at, n.shared_with_manufacturer AS shared,
                    coalesce(nullif(btrim(concat_ws(' ', u.first_name, u.last_name)), ''), u.display_name) AS admin_name
             FROM admin_internal_notes n LEFT JOIN users u ON u.id=n.admin_id
             WHERE n.manufacturer_id=CAST(:o AS uuid) ORDER BY n.created_at DESC
@@ -257,10 +259,11 @@ class AdminRepository:
         """), {"o": org_id, "f": field, "old": to_text(old), "new": to_text(new), "by": admin_id,
                 "reason": (reason or "").strip() or None})
 
-    async def add_note(self, org_id: str, admin_id: UUID, note: str) -> None:
+    async def add_note(self, org_id: str, admin_id: UUID, note: str, shared: bool = False) -> None:
         await self.db.execute(text("""
-            INSERT INTO admin_internal_notes (manufacturer_id, admin_id, note) VALUES (CAST(:o AS uuid), :a, :n)
-        """), {"o": org_id, "a": admin_id, "n": note.strip()})
+            INSERT INTO admin_internal_notes (manufacturer_id, admin_id, note, shared_with_manufacturer)
+            VALUES (CAST(:o AS uuid), :a, :n, :s)
+        """), {"o": org_id, "a": admin_id, "n": note.strip(), "s": shared})
 
     # ------------------------------------------------------------------ admin-owned fields (XY-ADMIN-07/08)
     async def org_meta(self, org_id: str) -> dict | None:
@@ -353,8 +356,14 @@ class AdminRepository:
         FROM users u LEFT JOIN mf ON mf.user_id=u.id LEFT JOIN admin_accounts aa ON aa.user_id=u.id
     """
 
+    # Admins (an active admin role, or a staff-only admin account) are listed in the Admins tab,
+    # not among registered users.
+    NOT_ADMIN = """(u.clerk_user_id NOT LIKE 'local-admin:%' AND NOT EXISTS (
+        SELECT 1 FROM platform_role_assignments pa WHERE pa.user_id=u.id
+          AND pa.status='active' AND pa.revoked_at IS NULL))"""
+
     async def users(self, f: dict, page: int, page_size: int) -> dict:
-        where, p = [], {}
+        where, p = [self.NOT_ADMIN], {}
         if f.get("q"):
             where.append("(concat_ws(' ', u.first_name, u.last_name) ILIKE :q OR u.display_name ILIKE :q "
                          "OR u.email::text ILIKE :q OR mf.company_name ILIKE :q)")
@@ -450,10 +459,10 @@ class AdminRepository:
             SELECT count(*) AS manufacturers,
                    count(*) FILTER (WHERE completeness=100) AS completed,
                    count(*) FILTER (WHERE completeness<100) AS incomplete,
-                   (SELECT count(*) FROM users WHERE status<>'deactivated' AND clerk_user_id NOT LIKE 'local-admin:%'
-                      AND (CAST(:from AS date) IS NULL OR created_at >= CAST(:from AS date))
-                      AND (CAST(:to AS date) IS NULL OR created_at < CAST(:to AS date) + 1)) AS users,
-                   (SELECT count(*) FROM users u WHERE u.status<>'deactivated' AND u.clerk_user_id NOT LIKE 'local-admin:%'
+                   (SELECT count(*) FROM users u WHERE u.status<>'deactivated' AND {self.NOT_ADMIN}
+                      AND (CAST(:from AS date) IS NULL OR u.created_at >= CAST(:from AS date))
+                      AND (CAST(:to AS date) IS NULL OR u.created_at < CAST(:to AS date) + 1)) AS users,
+                   (SELECT count(*) FROM users u WHERE u.status<>'deactivated' AND {self.NOT_ADMIN}
                       AND (CAST(:from AS date) IS NULL OR u.created_at >= CAST(:from AS date))
                       AND (CAST(:to AS date) IS NULL OR u.created_at < CAST(:to AS date) + 1)
                       AND NOT EXISTS (SELECT 1 FROM memberships m JOIN organizations o ON o.id=m.organization_id

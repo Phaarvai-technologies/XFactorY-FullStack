@@ -11,6 +11,30 @@ export type AdminMe = {
   email: string;
   roles: string[];
   authMethod: "clerk" | "password";
+  /** Signed in with a temporary password: must choose a new one first. */
+  mustChangePassword?: boolean;
+};
+
+export type AdminRole = "platform_administrator" | "platform_operator" | "support_specialist" | "verification_analyst";
+
+/** GET /admin/admin-users (Admins tab). */
+export type AdminUser = {
+  id: string;
+  name: string | null;
+  email: string;
+  role: AdminRole | "";
+  roleLabel: string;
+  status: "active" | "revoked" | "suspended";
+  hasAdminAccount: boolean;
+  hasXyAccount: boolean;
+  mustChangePassword: boolean;
+  locked: boolean;
+  grantedAt: string | null;
+  grantedBy: string | null;
+  revokedAt: string | null;
+  lastSignIn: string | null;
+  isDefault: boolean;
+  isYou: boolean;
 };
 export type AdminUserRef = { id: string; name: string | null; email: string };
 
@@ -116,7 +140,7 @@ export type ChangeEntry = {
   changed_by: string | null;
 };
 
-export type Note = { id: string; note: string; created_at: string; admin_name: string | null };
+export type Note = { id: string; note: string; created_at: string; admin_name: string | null; shared?: boolean };
 
 export type ManufacturerDetail = {
   manufacturer: ManufacturerRow;
