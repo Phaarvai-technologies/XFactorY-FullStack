@@ -41,6 +41,9 @@ REQUIRED = [
     ("visionary_projects", None, "012_visionary_portal.sql"),
     ("visionary_request_details", None, "012_visionary_portal.sql"),
     ("visionary_request_drafts", None, "012_visionary_portal.sql"),
+    ("admin_accounts", "must_change_password", "013_admin_management.sql"),
+    ("notifications", "popup_shown_at", "015_manufacturer_notifications.sql"),
+    ("admin_internal_notes", "shared_with_manufacturer", "015_manufacturer_notifications.sql"),
 ]
 
 

@@ -21,6 +21,8 @@ from app.core.database import get_session
 from app.identity.repository import upsert_user
 
 ADMIN_ROLES = ("platform_administrator", "platform_operator", "support_specialist", "verification_analyst")
+# While an admin still has a temporary password, only these admin endpoints work.
+PASSWORD_CHANGE_ALLOWED = ("/admin/me", "/admin/auth/change-password")
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,7 @@ class AdminContext:
     auth_method: str = "clerk"  # "clerk" | "password"
     account_id: UUID | None = None
     session_token: str | None = None
+    must_change_password: bool = False
 
 
 async def _active_roles(session: AsyncSession, user_id: UUID) -> list[str]:
@@ -116,8 +119,12 @@ async def _password_admin(request: Request, token: str, session: AsyncSession, s
     if not roles:
         raise HTTPException(403, "Admin access only. Ask an X!Y administrator to grant you access.")
     request.state.clerk_user_id = row.clerk_user_id
+    must_change = bool(await session.scalar(text(
+        "SELECT must_change_password FROM admin_accounts WHERE id=:a"), {"a": found["account_id"]}))
+    if must_change and not request.url.path.endswith(PASSWORD_CHANGE_ALLOWED):
+        raise HTTPException(403, "Please change your temporary password before continuing.")
     await _touch(session, row.id)
     name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.display_name or str(row.email)
     return AdminContext(user_id=row.id, clerk_user_id=row.clerk_user_id, email=str(row.email), name=name,
                         roles=tuple(roles), auth_method="password", account_id=found["account_id"],
-                        session_token=token)
+                        session_token=token, must_change_password=must_change)

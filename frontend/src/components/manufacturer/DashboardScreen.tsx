@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { AccountMenu } from "@/components/manufacturer/AccountMenu";
+import { NotificationBell } from "@/components/manufacturer/NotificationBell";
 import { FactoryMark } from "@/components/layout/Logo";
 import {
-  BellIcon,
   CalendarDaysIcon,
   CheckIcon,
   DocumentIcon,
@@ -112,10 +112,7 @@ export function DashboardScreen({
           </div>
           <div className="topbar-actions">
             <span className="pct-badge">{pct}% complete</span>
-            <button className="icon-btn" type="button" title="Notifications">
-              <BellIcon size={17} />
-              <span className="dot" />
-            </button>
+            <NotificationBell onOpenProfile={() => showPanel("profile")} />
             <AccountMenu>
               <span className="avatar-circle">{initials}</span>
               <span>{fullName}</span>

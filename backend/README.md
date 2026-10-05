@@ -24,6 +24,8 @@ Either run the SQL files in the Supabase SQL editor, in order:
 8. `database/migrations/010_email_deliveries.sql` and `011_welcome_email.sql`
 9. `database/migrations/012_visionary_portal.sql` (Visionaries portal: profile, project,
    manufacturing requests and request drafts; see `../VISIONARIES_PORTAL.md`)
+10. `database/migrations/013_admin_management.sql` (Admins tab: temporary passwords, who added an admin)
+11. `database/migrations/015_manufacturer_notifications.sql` (notifications to manufacturers, shared admin notes)
 
 or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
 schema only if the database is empty, then runs all migrations (they are idempotent).
@@ -84,11 +86,34 @@ If the email already has an X!Y (Clerk) account, `admin_account create` links th
 to that same user, so the person can use either method. If the person signs up to X!Y later
 with the same (verified) email, their X!Y sign-in joins the same user record.
 
-Managing admin accounts (the password is typed at a hidden prompt, never on the command line;
-add `--password-stdin` for scripts):
+### Admins tab and the built-in administrator
+
+`admin@phaarvai.com` (setting `ADMIN_DEFAULT_EMAIL`) is the built-in administrator. Create it
+the first time with `PYTHONPATH=. python -m app.admin_account setup` (asks for its password;
+running it again re-enables it and makes sure it is an administrator).
+
+The portal's **Admins** tab lists every admin (role, sign-in method, status, last sign-in, who
+granted access). Admins are left out of **Users** and of the user counts. Administrators can:
+
+- **Add admin**: email, name, role. A 16-character temporary password is shown once; the new
+  admin can do nothing else until they choose their own password.
+- **Change role**, **Revoke** (sign-in blocked, sessions ended), **Restore**, **Reset password**
+  (new temporary password).
+
+Other roles can view the list but not change it. Guard rails: nobody can revoke, demote or
+reset themselves from the portal, the built-in administrator cannot be revoked or demoted,
+and the last active administrator cannot be removed. Every change is written to the
+activity log. API: `GET/POST /admin/admin-users`, `POST /admin/admin-users/{id}/revoke|restore|reset-password`,
+`PATCH /admin/admin-users/{id}/role`.
+
+Managing admin accounts from the terminal (the password is typed at a hidden prompt, never on
+the command line; add `--password-stdin` for scripts):
 
 ```bash
-PYTHONPATH=. python -m app.admin_account create   you@company.com --name "Your Name"
+PYTHONPATH=. python -m app.admin_account setup                      # built-in admin@phaarvai.com
+PYTHONPATH=. python -m app.admin_account create   you@company.com --name "Your Name" [--role ROLE]
+PYTHONPATH=. python -m app.admin_account grant    you@company.com [--role ROLE]   # give / restore access
+PYTHONPATH=. python -m app.admin_account revoke   you@company.com   # remove access, end sessions
 PYTHONPATH=. python -m app.admin_account password you@company.com   # reset (signs out all sessions)
 PYTHONPATH=. python -m app.admin_account disable  you@company.com   # blocks sign-in, ends sessions
 PYTHONPATH=. python -m app.admin_account enable   you@company.com   # also clears a lockout
@@ -153,6 +178,42 @@ and emails admins about their admin account. It is **off** unless `SMTP_HOST` is
 set the `SMTP_*` values in `.env` (see `.env.example`) to an email provider to send.
 Admin → Support has a **Send test email** button and the delivery log; each user's page
 lists the emails sent to them. Verification codes are sent by Clerk, not by this backend.
+
+## Notifications to manufacturers
+
+The admin portal tells a manufacturer about changes through the bell on their dashboard. Anything new
+also opens a popup once ("Open notifications" / "Later").
+
+| Admin action | What the manufacturer sees |
+|---|---|
+| Review status set to **Needs correction** (a note is required) | "Your profile needs a few corrections" with the note, plus a yellow *Needs correction* box at the top of the panel with an **Update my profile** button |
+| **Add note** with **Show to manufacturer** ticked (Onboarding tab or review queue) | "Message from the X!Y team" with the note; while corrections are open it is also listed in the yellow box |
+| An admin **edits a profile or machinery field** | "The X!Y team updated your profile" with old → new value and the admin's reason |
+
+Notes without the tick stay private to admins. Tables: `notifications` (one row per company member;
+`read_at`, `popup_shown_at`) and `admin_internal_notes.shared_with_manufacturer` (migration 015).
+API: `GET /manufacturer/notifications`, `POST /manufacturer/notifications/read` (`{ids}` or `{}` for all),
+`POST /manufacturer/notifications/popup-seen`.
+
+## Finding test data
+
+After a test run, look up what was saved without hunting through tables. Both tools are read-only.
+
+**Terminal** (from this folder, PowerShell: `$env:PYTHONPATH="."` first; uses the database in `backend/.env`):
+
+```powershell
+python -m app.lookup user  you@example.com          # everything for one person: account, manufacturer, visionary, admin, errors, emails
+python -m app.lookup user  meera                    # part of an email lists the matches
+python -m app.lookup recent 15                      # newest sign-ups and what each one has
+python -m app.lookup company "Kaveri"               # companies by name, with the owner's email
+python -m app.lookup request REQ-20261001-05DA2C    # one manufacturing request, both sides + status history
+python -m app.lookup errors 20                      # latest failed API calls and who made them
+python -m app.lookup --wide user you@example.com    # long values in full
+```
+
+**Supabase SQL editor:** open `backend/database/debug/find_test_data.sql`, replace `tester@example.com`
+with your test email, then select one query and Run. Q1 lists every table with how many rows that person
+has and when it last changed.
 
 ## Troubleshooting
 

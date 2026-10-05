@@ -120,6 +120,84 @@ On Supabase you can instead run the same files, in order, in the SQL editor.
 | 004 – 007 | Manufacturer portal fields, reference data, form progress, storage bucket |
 | 008 – 011 | Admin dashboard, admin accounts, email log, welcome email |
 | 012 | Visionaries portal: profiles, projects, request details, request drafts |
+| 013 | Admins tab: temporary passwords (must be changed at first sign-in), who added each admin |
+| 015 | Notifications to manufacturers; admin notes can be shared with the manufacturer |
+
+## Admin access
+
+Admins sign in at `/admin/login`, either with an **admin account** (email + password, no X!Y
+sign-up needed) or with their normal **X!Y account** if it has an admin role. Admins are not
+listed under *Users* in the portal; they have their own **Admins** tab.
+
+**First time (from `backend/`, Windows PowerShell in VS Code):**
+
+```powershell
+cd backend
+.\myenv\Scripts\Activate.ps1
+$env:PYTHONPATH = "."
+python -m app.migrate                    # applies migration 013 (and any others not yet applied)
+python -m app.admin_account setup        # creates the built-in admin@phaarvai.com; asks for its password
+python -m app.admin_account list         # check: admin@phaarvai.com  platform_administrator  active
+```
+
+Then start the backend, open `/admin/login`, choose *Admin account* and sign in as
+`admin@phaarvai.com`. From the **Admins** tab an administrator can add an admin (a temporary
+password is shown once; the new admin must change it at first sign-in), change a role, revoke
+or restore access, and reset a password.
+
+The same from the terminal (useful if nobody can sign in):
+
+```powershell
+python -m app.admin_account create  you@company.com --name "Your Name" [--role platform_operator]
+python -m app.admin_account grant   you@company.com [--role ROLE]   # give or restore access
+python -m app.admin_account revoke  you@company.com                 # remove access, end sessions
+python -m app.admin_account password you@company.com                # set a new password
+python -m app.admin_account disable you@company.com                 # / enable
+```
+
+Roles: `platform_administrator` (manages admins), `platform_operator`, `support_specialist`,
+`verification_analyst`. The built-in admin, your own access and the last active administrator
+cannot be revoked or demoted from the portal. The built-in email comes from
+`ADMIN_DEFAULT_EMAIL` (default `admin@phaarvai.com`).
+
+See `backend/README.md` → *Admin Dashboard* for the full details.
+
+## Notifications to manufacturers
+
+The admin portal tells a manufacturer about changes through the bell on their dashboard. Anything new
+also opens a popup once ("Open notifications" / "Later").
+
+| Admin action | What the manufacturer sees |
+|---|---|
+| Review status set to **Needs correction** (a note is required) | "Your profile needs a few corrections" with the note, plus a yellow *Needs correction* box at the top of the panel with an **Update my profile** button |
+| **Add note** with **Show to manufacturer** ticked (Onboarding tab or review queue) | "Message from the X!Y team" with the note; while corrections are open it is also listed in the yellow box |
+| An admin **edits a profile or machinery field** | "The X!Y team updated your profile" with old → new value and the admin's reason |
+
+Notes without the tick stay private to admins. Tables: `notifications` (one row per company member;
+`read_at`, `popup_shown_at`) and `admin_internal_notes.shared_with_manufacturer` (migration 015).
+API: `GET /manufacturer/notifications`, `POST /manufacturer/notifications/read` (`{ids}` or `{}` for all),
+`POST /manufacturer/notifications/popup-seen`.
+
+## Finding test data
+
+After a test run, look up what was saved without hunting through tables. Both tools are read-only.
+
+**Terminal** (from `backend/`, PowerShell: `$env:PYTHONPATH="."` first; uses the database in `backend/.env`):
+
+```powershell
+python -m app.lookup user  you@example.com          # everything for one person: account, manufacturer, visionary, admin, errors, emails
+python -m app.lookup user  meera                    # part of an email lists the matches
+python -m app.lookup recent 15                      # newest sign-ups and what each one has
+python -m app.lookup company "Kaveri"               # companies by name, with the owner's email
+python -m app.lookup request REQ-20261001-05DA2C    # one manufacturing request, both sides + status history
+python -m app.lookup errors 20                      # latest failed API calls and who made them
+python -m app.lookup --wide user you@example.com    # long values in full
+```
+
+**Supabase SQL editor:** open `backend/database/debug/find_test_data.sql`, replace `tester@example.com`
+with your test email, then select one query and Run. Q1 lists every table with how many rows that person
+has and when it last changed.
+
 
 ## Admin access
 

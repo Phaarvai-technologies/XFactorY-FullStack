@@ -152,7 +152,7 @@ export function EditFieldModal({
         placeholder="e.g. Corrected on call with the manufacturer"
         onChange={(e) => setReason(e.target.value)}
       />
-      <p className="field-hint">Saved in the change history with your name and the time.</p>
+      <p className="field-hint">Saved in the change history with your name and the time. The manufacturer gets a notification with the new value and this reason.</p>
       {error && (
         <p className="field-error" role="alert">
           {error}

@@ -3,11 +3,13 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "dev": "next dev",
-        "build": "next build",
-        "start": "next start",
-        "lint": "eslint"
-    },
+  "dev": "next dev",
+  "build": "next build",
+  "start": "next start",
+  "lint": "eslint",
+  "test": "vitest run",
+  "test:watch": "vitest"
+},
     "dependencies": {
         "@clerk/nextjs": "^7.9.8",
         "lucide-react": "^1.46.0",

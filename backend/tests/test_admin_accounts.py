@@ -148,7 +148,7 @@ async def test_disable_suspend_and_link(client, monkeypatch, no_clerk):  # noqa:
     boss = await make_admin(client, f"admin_{uuid.uuid4().hex[:8]}")
     uid = (await client.sql("SELECT user_id FROM admin_accounts WHERE email=:e", e=email))[0][0]
     users = (await client.get("/admin/users", headers=boss, params={"q": email})).json()["rows"]
-    assert users[0]["staffOnly"] is True and users[0]["userType"] == "Admin"
+    assert users == []  # admins are listed in the Admins tab, not among registered users
     r = await client.post(f"/admin/users/{uid}/suspend", headers=boss, json={"reason": "Left the company"})
     assert r.status_code == 200 and r.json()["clerkSynced"] is True
     assert no_clerk == []
@@ -187,4 +187,5 @@ async def test_staff_account_claimed_by_verified_clerk_signup(client, monkeypatc
     assert after["id"] == str(staff_uid)
     token = (await login(client, email, GOOD)).json()["token"]
     cards = (await client.get("/admin/overview", headers=bearer(token))).json()["cards"]
-    assert cards["totalUsers"] == before + 1  # now a real platform user
+    # Linked to a real X!Y sign-in now, but still an admin: counted in the Admins tab, not in users.
+    assert cards["totalUsers"] == before

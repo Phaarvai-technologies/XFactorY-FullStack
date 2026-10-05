@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # administrators on their first visit to /admin (bootstrap the first admins).
     # More admins can then be granted with `python -m app.grant_admin <email>`.
     admin_emails: str = ""
+    # The built-in administrator (created with `python -m app.admin_account setup`). It cannot
+    # be revoked, disabled or have its role changed from the Admins tab.
+    admin_default_email: str = "admin@phaarvai.com"
 
     # Admin email + password sign-in (`python -m app.admin_account create ...`).
     # A session ends after ADMIN_SESSION_HOURS, or earlier after ADMIN_IDLE_MINUTES

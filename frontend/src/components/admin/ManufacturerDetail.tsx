@@ -672,6 +672,7 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
   const [entrySource, setEntrySource] = useState<EntrySource>(m.entrySource);
   const [referral, setReferral] = useState(m.referralSource ?? "");
   const [note, setNote] = useState("");
+  const [shareNote, setShareNote] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<{ where: string; msg: string } | null>(null);
 
@@ -696,10 +697,11 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
     setBusy("note");
     setErr(null);
     try {
-      const res = await call<{ notes: Note[] }>(`/manufacturers/${m.id}/notes`, jsonBody("POST", { note: note.trim() }));
+      const res = await call<{ notes: Note[] }>(`/manufacturers/${m.id}/notes`, jsonBody("POST", { note: note.trim(), share: shareNote }));
       onChange({ ...d, notes: res.notes });
       setNote("");
-      toast("Note added");
+      toast(shareNote ? "Note added and sent to the manufacturer" : "Note added");
+      setShareNote(false);
     } catch (e) {
       setErr({ where: "note", msg: e instanceof Error ? e.message : "Could not add the note" });
     } finally {
@@ -778,6 +780,9 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             )}
           </label>
           <textarea id="rv-reason" rows={2} value={statusReason} onChange={(e) => setStatusReason(e.target.value)} />
+          {status === "NEEDS_CORRECTION" && status !== m.reviewStatus && (
+            <p className="field-hint">The manufacturer gets this note as a notification and a popup on their dashboard.</p>
+          )}
           {err?.where === "status" && <p className="field-error">{err.msg}</p>}
           <div className="adm-btn-row">
             <button
@@ -892,12 +897,16 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
           </div>
         </Section>
 
-        <Section title={`Internal notes (${d.notes.length})`} note={<span className="adm-muted">Only admins can see these</span>}>
-          <textarea rows={3} placeholder="Add a note for other admins…" value={note} onChange={(e) => setNote(e.target.value)} aria-label="New note" />
+        <Section title={`Internal notes (${d.notes.length})`} note={<span className="adm-muted">Private unless shared with the manufacturer</span>}>
+          <textarea rows={3} placeholder={shareNote ? "Write a message for the manufacturer…" : "Add a note for other admins…"} value={note} onChange={(e) => setNote(e.target.value)} aria-label="New note" />
+          <label className="adm-toggle adm-share-toggle">
+            <input id="note-share" type="checkbox" checked={shareNote} onChange={(e) => setShareNote(e.target.checked)} />
+            Show to manufacturer (they get a notification)
+          </label>
           {err?.where === "note" && <p className="field-error">{err.msg}</p>}
           <div className="adm-btn-row">
             <button type="button" className="btn-primary adm-btn-sm" disabled={busy !== null || !note.trim()} onClick={() => void addNote()}>
-              Add note
+              {shareNote ? "Send to manufacturer" : "Add note"}
             </button>
           </div>
           <ul className="adm-notes">
@@ -906,6 +915,7 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
                 <p>{n.note}</p>
                 <span>
                   {n.admin_name || "Admin"} · {fmtDateTime(n.created_at)}
+                  {n.shared && <span className="badge badge-info adm-inline-badge">Shown to manufacturer</span>}
                 </span>
               </li>
             ))}

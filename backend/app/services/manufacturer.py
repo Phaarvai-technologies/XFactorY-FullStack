@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import notifications
 from app.core.auth import Actor
 from app.core.clerk import ClerkManagement
 from app.core.config import Settings
@@ -393,6 +394,21 @@ class ManufacturerService:
         await self.ensure_actor(actor)
         await self._run(self.repo.save_availability(actor, data))
         return await self.bootstrap(actor)
+
+    # ---------------------------------------------------------------- notifications from X!Y admins
+    async def notifications(self, actor: Actor) -> dict:
+        ctx = await self.ensure_actor(actor)
+        return await notifications.for_user(self.repo.db, ctx["user_id"], ctx["organization_id"])
+
+    async def mark_notifications_read(self, actor: Actor, ids: list[str] | None) -> dict:
+        ctx = await self.ensure_actor(actor)
+        await notifications.mark_read(self.repo.db, ctx["user_id"], ids)
+        return await notifications.for_user(self.repo.db, ctx["user_id"], ctx["organization_id"])
+
+    async def notifications_popup_seen(self, actor: Actor) -> dict:
+        ctx = await self.ensure_actor(actor)
+        await notifications.popup_seen(self.repo.db, ctx["user_id"])
+        return await notifications.for_user(self.repo.db, ctx["user_id"], ctx["organization_id"])
 
     async def decide_booking(self, actor: Actor, booking_id: str, status: str) -> dict:
         await self.ensure_actor(actor)

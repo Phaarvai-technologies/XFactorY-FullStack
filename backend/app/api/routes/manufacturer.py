@@ -15,6 +15,7 @@ from app.schemas.manufacturer import (
     MachineryPatch,
     MachineryPayload,
     MachineryStatusPayload,
+    NotificationsReadPayload,
     ProfilePatchPayload,
     ProfilePayload,
 )
@@ -107,3 +108,25 @@ async def save_availability(body: AvailabilityPayload, actor: Actor = Depends(cu
 async def decide_booking(booking_id: UUID, body: BookingStatusPayload, actor: Actor = Depends(current_actor),
                          svc: ManufacturerService = Depends(service)):
     return await svc.decide_booking(actor, str(booking_id), body.status)
+
+
+@router.get("/notifications")
+async def notifications(actor: Actor = Depends(current_actor), svc: ManufacturerService = Depends(service)):
+    """Dashboard bell: messages from the X!Y team (needs correction, profile edits, shared notes),
+    unread count, whether to show the popup, and the open correction request with shared notes."""
+    return await svc.notifications(actor)
+
+
+@router.post("/notifications/read")
+async def notifications_read(body: NotificationsReadPayload, actor: Actor = Depends(current_actor),
+                             svc: ManufacturerService = Depends(service)):
+    """Opened in the panel: marks the given notifications (or all) as read."""
+    ids = [str(i) for i in body.ids] if body.ids is not None else None
+    return await svc.mark_notifications_read(actor, ids)
+
+
+@router.post("/notifications/popup-seen")
+async def notifications_popup_seen(actor: Actor = Depends(current_actor),
+                                   svc: ManufacturerService = Depends(service)):
+    """The new-messages popup was shown and closed with "Later"."""
+    return await svc.notifications_popup_seen(actor)

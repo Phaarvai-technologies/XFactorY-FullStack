@@ -39,6 +39,7 @@ export function ReviewQueue() {
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
   const [pending, setPending] = useState<Pending | null>(null);
   const [text, setText] = useState("");
+  const [share, setShare] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -63,10 +64,11 @@ export function ReviewQueue() {
     if (pending.kind === "note") {
       if (!text.trim()) return setErr("Write a note first.");
       try {
-        await call(`/manufacturers/${pending.row.id}/notes`, jsonBody("POST", { note: text.trim() }));
-        toast("Note added");
+        await call(`/manufacturers/${pending.row.id}/notes`, jsonBody("POST", { note: text.trim(), share }));
+        toast(share ? "Note added and sent to the manufacturer" : "Note added");
         setPending(null);
         setText("");
+        setShare(false);
       } catch (e) {
         setErr(e instanceof Error ? e.message : "Could not add the note");
       }
@@ -276,7 +278,7 @@ export function ReviewQueue() {
           </p>
           <label htmlFor="q-text">
             {pending.kind === "note" ? (
-              "Note (only admins can see this)"
+              share ? "Message for the manufacturer" : "Note (only admins can see this)"
             ) : pending.status === "NEEDS_CORRECTION" ? (
               <>
                 What needs correcting? <span className="adm-req">*</span>
@@ -288,13 +290,22 @@ export function ReviewQueue() {
             )}
           </label>
           <textarea id="q-text" rows={3} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+          {pending.kind === "note" && (
+            <label className="adm-toggle adm-share-toggle">
+              <input id="q-share" type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
+              Show to manufacturer (they get a notification)
+            </label>
+          )}
+          {pending.kind === "status" && pending.status === "NEEDS_CORRECTION" && (
+            <p className="field-hint">The manufacturer gets this note as a notification and a popup on their dashboard.</p>
+          )}
           {err && <p className="field-error">{err}</p>}
           <div className="modal-actions">
             <button type="button" className="btn-secondary-full" onClick={() => setPending(null)}>
               Cancel
             </button>
             <button type="button" className="btn-primary" disabled={busy !== null} onClick={() => void submitPending()}>
-              {pending.kind === "note" ? "Add note" : "Save status"}
+              {pending.kind === "note" ? (share ? "Send to manufacturer" : "Add note") : "Save status"}
             </button>
           </div>
         </Modal>

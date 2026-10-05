@@ -5,7 +5,16 @@ import { Modal } from "@/components/admin/ui";
 import { jsonBody, useAdminApi } from "@/lib/admin/api";
 
 /** For admin-account (email + password) sign-ins. Other devices are signed out. */
-export function ChangePasswordModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function ChangePasswordModal({
+  onClose,
+  onDone,
+  required = false,
+}: {
+  onClose: () => void;
+  onDone: () => void;
+  /** Temporary password: the modal cannot be dismissed until a new password is saved. */
+  required?: boolean;
+}) {
   const call = useAdminApi();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -34,8 +43,13 @@ export function ChangePasswordModal({ onClose, onDone }: { onClose: () => void; 
   }
 
   return (
-    <Modal title="Change password" onClose={onClose}>
-      <label htmlFor="cp-current">Current password</label>
+    <Modal title={required ? "Choose your password" : "Change password"} onClose={onClose} closable={!required}>
+      {required && (
+        <p className="adm-modal-text">
+          You signed in with a temporary password. Choose your own password to continue.
+        </p>
+      )}
+      <label htmlFor="cp-current">{required ? "Temporary password" : "Current password"}</label>
       <input id="cp-current" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus />
       <label htmlFor="cp-new" style={{ marginTop: 14 }}>
         New password
@@ -59,11 +73,13 @@ export function ChangePasswordModal({ onClose, onDone }: { onClose: () => void; 
         </p>
       )}
       <div className="modal-actions">
-        <button type="button" className="btn-secondary-full" onClick={onClose}>
-          Cancel
-        </button>
+        {!required && (
+          <button type="button" className="btn-secondary-full" onClick={onClose}>
+            Cancel
+          </button>
+        )}
         <button type="button" className="btn-primary" disabled={busy} onClick={() => void save()}>
-          {busy ? "Saving…" : "Change password"}
+          {busy ? "Saving…" : required ? "Save and continue" : "Change password"}
         </button>
       </div>
     </Modal>
