@@ -1,3 +1,5 @@
+import { stripBase } from "@/lib/basePath";
+
 /**
  * Where to send the user after signing in / up. Only addresses on THIS site are allowed:
  * a path ("/manufacturer/dashboard") or a full URL with the same origin (Clerk sends
@@ -14,7 +16,8 @@ export function safeRedirectPath(raw: string | string[] | null | undefined, orig
   try {
     const url = new URL(value, origin);
     if (url.origin !== origin || (url.protocol !== "http:" && url.protocol !== "https:")) return null;
-    return `${url.pathname}${url.search}${url.hash}`;
+    // Clerk sends the full address (with /xfactory inside the Phaarvai website); the router adds it itself.
+    return stripBase(`${url.pathname}${url.search}${url.hash}`);
   } catch {
     return null;
   }
@@ -22,6 +25,9 @@ export function safeRedirectPath(raw: string | string[] | null | undefined, orig
 
 /** The origin of the current request (server components) from the proxy headers. */
 export function requestOrigin(headers: { get(name: string): string | null }): string {
+  // Inside the Phaarvai website the browser's address is the website's, not this deployment's.
+  const site = process.env.NEXT_PUBLIC_SITE_ORIGIN?.trim().replace(/\/+$/, "");
+  if (site) return site;
   const host = headers.get("x-forwarded-host") ?? headers.get("host") ?? "localhost:3000";
   const proto = headers.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   return `${proto.split(",")[0].trim()}://${host.split(",")[0].trim()}`;

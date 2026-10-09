@@ -1,6 +1,7 @@
 "use client";
 
 import { useSignIn } from "@clerk/nextjs/legacy";
+import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -445,8 +446,8 @@ async function handleResendDeviceCode() {
       setIsSubmitting(true);
       await signIn.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: redirectTo,
+        redirectUrl: withBase("/sso-callback"),
+        redirectUrlComplete: withBase(redirectTo),
       });
     } catch (error) {
       const parsed = parseClerkError(error);

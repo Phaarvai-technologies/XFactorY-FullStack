@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 
 type LogoProps = {
@@ -33,7 +34,7 @@ export function FactoryMark({ className = "factory-mark" }: { className?: string
 export function Logo({ href = "/", className = "logo", markClassName }: LogoProps) {
   const content = (
     <Image
-      src="/images/xy-logo.png"
+      src={withBase("/images/xy-logo.png")}
       alt="X!Y"
       width={156}
       height={46}

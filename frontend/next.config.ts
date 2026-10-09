@@ -4,6 +4,10 @@ import { fileURLToPath } from "url";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
+// Empty: the app lives at the root of its own domain (default).
+// "/xfactory": the app lives inside the Phaarvai website at /xfactory (see src/lib/basePath.ts).
+const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").trim().replace(/\/+$/, "");
+
 // Browser security headers for every page. They change nothing visible:
 // - no other site may show these pages inside a frame (clickjacking),
 // - files are used only as the type the server says (no MIME sniffing),
@@ -20,11 +24,16 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // Hide the Next.js route indicator (circular "N") that overlays bottom-left UI in dev.
   devIndicators: false,
+  ...(basePath ? { basePath } : {}),
   turbopack: {
     root: projectRoot,
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
+  },
+  async redirects() {
+    // With a base path, this deployment's own root sends visitors to the app.
+    return basePath ? [{ source: "/", destination: basePath, basePath: false, permanent: false }] : [];
   },
 };
 

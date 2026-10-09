@@ -1,6 +1,7 @@
 "use client";
 
 import { useSignUp } from "@clerk/nextjs/legacy";
+import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -321,8 +322,8 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
       setIsSubmitting(true);
       await signUp.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: redirectTo,
+        redirectUrl: withBase("/sso-callback"),
+        redirectUrlComplete: withBase(redirectTo),
         emailAddress: email.trim() || undefined,
         legalAccepted: consent,
       });

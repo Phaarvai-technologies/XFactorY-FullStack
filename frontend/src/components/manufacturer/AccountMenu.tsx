@@ -3,6 +3,7 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import { LogOut, Settings } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { withBase } from "@/lib/basePath";
 
 /**
  * Account menu for the dashboard's name button (same options and layout as the
@@ -78,7 +79,7 @@ export function AccountMenu({ children }: { children: ReactNode }) {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              void clerk.signOut({ redirectUrl: "/" });
+              void clerk.signOut({ redirectUrl: withBase("/") });
             }}
           >
             <LogOut size={16} aria-hidden="true" />
