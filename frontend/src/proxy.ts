@@ -1,3 +1,4 @@
+import "@/lib/clerkConfig";
 import { clerkFrontendApiProxy, clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextRequest, type NextFetchEvent } from "next/server";
 
