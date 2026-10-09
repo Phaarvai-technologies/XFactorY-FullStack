@@ -54,6 +54,9 @@ app.include_router(admin_auth_router, prefix="/api/v1")
 activity.install(app)
 app.include_router(clerk_webhook_router, prefix="/api/v1")
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to XY Factory API", "status": "running"}
 
 @app.get("/health")
 @app.get("/health/live")
