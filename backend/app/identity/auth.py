@@ -25,7 +25,7 @@ def verify_clerk_token(token: str, settings: Settings) -> dict:
             options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(401, "Invalid or expired Clerk token") from exc
+        raise HTTPException(401, core_auth.describe_token_error(exc, token, settings)) from exc
     azp = claims.get("azp")
     if azp and azp not in settings.clerk_authorized_parties:
         raise HTTPException(401, "Token authorized party is not allowed")

@@ -27,6 +27,21 @@ def _jwks_client(url: str) -> PyJWKClient:
     return PyJWKClient(url, cache_keys=True, lifespan=3600)
 
 
+def describe_token_error(exc: Exception, token: str, settings) -> str:
+    """Short, safe reason for a rejected Clerk token (no token contents beyond the issuer)."""
+    try:
+        claimed = jwt.decode(token, options={"verify_signature": False}).get("iss")
+    except Exception:  # noqa: BLE001
+        claimed = None
+    if isinstance(exc, jwt.ExpiredSignatureError):
+        return "Clerk token expired"
+    if isinstance(exc, jwt.InvalidIssuerError):
+        return f"Clerk token issuer {claimed!r} is not in CLERK_ISSUER {settings.clerk_issuers!r}"
+    if isinstance(exc, jwt.PyJWKClientError):
+        return f"Clerk signing key not found at CLERK_JWKS_URL (token issuer {claimed!r})"
+    return f"Invalid Clerk token ({type(exc).__name__})"
+
+
 async def current_actor(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -48,7 +63,7 @@ async def current_actor(
             options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )
     except Exception as exc:  # noqa: BLE001 - any failure is an auth failure
-        raise HTTPException(401, "Invalid or expired Clerk token") from exc
+        raise HTTPException(401, describe_token_error(exc, token, settings)) from exc
 
     if claims.get("azp") and claims["azp"] not in settings.clerk_authorized_parties:
         raise HTTPException(401, "Token authorized party is not allowed")
