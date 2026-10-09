@@ -45,3 +45,6 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
+src/proxy.ts
+src/app/layout.tsx
+src/lib/clerkConfig.ts
