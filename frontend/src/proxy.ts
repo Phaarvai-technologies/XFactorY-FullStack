@@ -1,5 +1,5 @@
 import { clerkFrontendApiProxy, clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import type { NextFetchEvent, NextRequest } from "next/server";
+import { NextRequest, type NextFetchEvent } from "next/server";
 
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -17,11 +17,24 @@ const isPublicRoute = createRouteMatcher([
   "/visionaries",
 ]);
 
+// Inside the website the sign-in pages live under the base path (/xfactory/sign-in).
+const underBase = (path: string | undefined, fallback: string) => {
+  const p = path?.trim() || fallback;
+  const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").trim().replace(/\/+$/, "");
+  return base && p.startsWith("/") && !p.startsWith(`${base}/`) ? `${base}${p}` : p;
+};
+const clerkPaths = process.env.NEXT_PUBLIC_BASE_PATH?.trim()
+  ? {
+      signInUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL, "/sign-in"),
+      signUpUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL, "/sign-up"),
+    }
+  : {};
+
 const clerk = clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {
     await auth.protect();
   }
-});
+}, clerkPaths);
 
 /*
  * Inside the Phaarvai website (NEXT_PUBLIC_BASE_PATH=/xfactory) Clerk runs through
@@ -42,6 +55,14 @@ const clerkProxy = (() => {
   return { host: url.host, proto: url.protocol.replace(":", ""), publicPath, localPath };
 })();
 
+/* NEXT_PUBLIC_SITE_ORIGIN (only set when running inside the website). */
+const siteOrigin = (() => {
+  const value = process.env.NEXT_PUBLIC_SITE_ORIGIN?.trim();
+  if (!BASE || !value || !/^https?:\/\//i.test(value)) return null;
+  const url = new URL(value);
+  return { host: url.host, proto: url.protocol.replace(":", "") };
+})();
+
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
   if (clerkProxy) {
     const url = new URL(request.url);
@@ -60,6 +81,15 @@ export default function middleware(request: NextRequest, event: NextFetchEvent) 
       } as RequestInit);
       return clerkFrontendApiProxy(forwarded, { proxyPath: clerkProxy.publicPath });
     }
+  }
+  if (siteOrigin) {
+    // Served through the website (e.g. https://www.phaarvai.com/xfactory): Clerk must see the
+    // address the browser uses, so its sign-in checks and redirects stay on the website.
+    const headers = new Headers(request.headers);
+    headers.set("x-forwarded-host", siteOrigin.host);
+    headers.set("x-forwarded-proto", siteOrigin.proto);
+    const viaSite = new NextRequest(request, { headers, nextConfig: BASE ? { basePath: BASE } : undefined });
+    return clerk(viaSite, event);
   }
   return clerk(request, event);
 }
