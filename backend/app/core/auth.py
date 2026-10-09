@@ -43,7 +43,7 @@ async def current_actor(
             token,
             key,
             algorithms=["RS256"],
-            issuer=settings.clerk_issuer,
+            issuer=settings.clerk_issuers,
             leeway=10,
             options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )

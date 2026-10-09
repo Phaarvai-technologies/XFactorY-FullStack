@@ -21,7 +21,7 @@ def verify_clerk_token(token: str, settings: Settings) -> dict:
     try:
         key = core_auth._jwks_client(settings.clerk_jwks_url).get_signing_key_from_jwt(token).key
         claims = jwt.decode(
-            token, key, algorithms=["RS256"], issuer=settings.clerk_issuer, leeway=10,
+            token, key, algorithms=["RS256"], issuer=settings.clerk_issuers, leeway=10,
             options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )
     except Exception as exc:  # noqa: BLE001

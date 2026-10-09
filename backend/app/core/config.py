@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     clerk_webhook_signing_secret: str = ""
     clerk_authorized_parties: list[str] = ["http://localhost:3000"]
 
+    @property
+    def clerk_issuers(self) -> list[str]:
+        """CLERK_ISSUER may list several issuers separated by commas, e.g.
+        "https://clerk.phaarvai.com,https://phaarvai.com/__clerk" (Clerk uses the proxy URL as
+        the issuer while a proxy is configured for the instance). Trailing "/" is ignored."""
+        return [i.strip().rstrip("/") for i in (self.clerk_issuer or "").split(",") if i.strip()]
+
     # Supabase Storage (logo, cover and machinery images)
     supabase_url: str = ""
     supabase_service_role_key: str = ""
