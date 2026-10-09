@@ -25,33 +25,40 @@ const clerk = clerkMiddleware(async (auth, request) => {
 
 /*
  * Inside the Phaarvai website (NEXT_PUBLIC_BASE_PATH=/xfactory) Clerk runs through
- * NEXT_PUBLIC_CLERK_PROXY_URL, e.g. https://phaarvai-website.vercel.app/xfactory/__clerk.
- * The website forwards those requests here; this sends them on to Clerk and tells Clerk the
- * address the browser sees, so its cookies belong to the website. Without that setting,
- * Clerk's own automatic /__clerk proxy is used exactly as before.
+ * NEXT_PUBLIC_CLERK_PROXY_URL=https://phaarvai-website.vercel.app/__clerk — the same /__clerk
+ * shape as Clerk's own automatic proxy on *.vercel.app, which Clerk accepts without any
+ * dashboard setting. The website forwards /__clerk/... to /xfactory/__clerk/... here; this sends
+ * it on to Clerk and tells Clerk the address the browser sees, so its cookies belong to the
+ * website. Without that setting, Clerk's own automatic /__clerk proxy is used exactly as before.
  */
+const BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").trim().replace(/\/+$/, "");
 const clerkProxy = (() => {
   const value = process.env.NEXT_PUBLIC_CLERK_PROXY_URL?.trim();
   if (!value || !/^https?:\/\//i.test(value)) return null;
   const url = new URL(value);
-  return { origin: url.origin, host: url.host, proto: url.protocol.replace(":", ""), path: url.pathname.replace(/\/+$/, "") };
+  const publicPath = url.pathname.replace(/\/+$/, "") || "/__clerk"; // what the browser and Clerk see
+  // Where those requests arrive in this app (Next.js serves everything under the base path).
+  const localPath = BASE && !publicPath.startsWith(`${BASE}/`) ? `${BASE}${publicPath}` : publicPath;
+  return { host: url.host, proto: url.protocol.replace(":", ""), publicPath, localPath };
 })();
 
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
   if (clerkProxy) {
-    const { pathname } = new URL(request.url);
-    if (pathname === clerkProxy.path || pathname.startsWith(`${clerkProxy.path}/`)) {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    if (pathname === clerkProxy.localPath || pathname.startsWith(`${clerkProxy.localPath}/`)) {
+      url.pathname = `${clerkProxy.publicPath}${pathname.slice(clerkProxy.localPath.length)}`;
       const headers = new Headers(request.headers);
       headers.set("x-forwarded-host", clerkProxy.host);
       headers.set("x-forwarded-proto", clerkProxy.proto);
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
-      const forwarded = new Request(request.url, {
+      const forwarded = new Request(url.toString(), {
         method: request.method,
         headers,
         body: hasBody ? request.body : undefined,
         ...(hasBody ? { duplex: "half" } : {}),
       } as RequestInit);
-      return clerkFrontendApiProxy(forwarded, { proxyPath: clerkProxy.path });
+      return clerkFrontendApiProxy(forwarded, { proxyPath: clerkProxy.publicPath });
     }
   }
   return clerk(request, event);
