@@ -14,6 +14,11 @@ const isPublicRoute = createRouteMatcher([
   "/admin(.*)",
   // Public Visionary overview. The Visionary flow (/visionaries/flow) stays behind sign-in.
   "/visionaries",
+  "/privacy-policy",
+  "/terms",
+  "/help",
+  "/contact",
+  "/explore/(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

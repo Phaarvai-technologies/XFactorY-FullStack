@@ -19,27 +19,13 @@ export function Footer() {
           </div>
           <div className="footer-nav-cols">
             <div className="footer-col">
-              <h4>Platform</h4>
-              <ul>
-                <li>
-                  <Link href="/#personas">Personas</Link>
-                </li>
-                <li>
-                  <Link href="/#how-it-works">How it works</Link>
-                </li>
-                <li>
-                  <Link href="/#trust">Platform scope</Link>
-                </li>
-              </ul>
-            </div>
-            <div className="footer-col">
               <h4>Legal</h4>
               <ul>
                 <li>
-                  <a href="#privacy">Privacy policy</a>
+                  <Link href="/privacy-policy">Privacy policy</Link>
                 </li>
                 <li>
-                  <a href="#terms">Terms of service</a>
+                  <Link href="/terms">Terms of service</Link>
                 </li>
               </ul>
             </div>
@@ -50,7 +36,7 @@ export function Footer() {
                   <Link href="/help">Help center</Link>
                 </li>
                 <li>
-                  <a href="#contact">Contact us</a>
+                  <Link href="/contact">Contact us</Link>
                 </li>
               </ul>
             </div>

@@ -1,11 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@clerk/nextjs";
-import {
-  MANUFACTURER_ACCOUNT_PATH,
-  MANUFACTURER_OVERVIEW_PATH,
-} from "@/lib/auth/manufacturerAccess";
+import { MANUFACTURER_OVERVIEW_PATH } from "@/lib/auth/manufacturerAccess";
 
 type ManufacturerExploreCardProps = {
   title: string;
@@ -13,20 +9,15 @@ type ManufacturerExploreCardProps = {
   iconId: string;
 };
 
+/** Same persona-card markup; Explore always opens the Manufacturer overview. */
 export function ManufacturerExploreCard({
   title,
   job,
   iconId,
 }: ManufacturerExploreCardProps) {
-  const { isSignedIn } = useAuth();
-
-  const manufacturerPath = isSignedIn
-    ? MANUFACTURER_ACCOUNT_PATH
-    : MANUFACTURER_OVERVIEW_PATH;
-
   return (
     <Link
-      href={manufacturerPath}
+      href={MANUFACTURER_OVERVIEW_PATH}
       className="p-card"
       aria-label={`${title} — ${job}`}
     >
@@ -35,7 +26,6 @@ export function ManufacturerExploreCard({
           <use href={`#${iconId}`} />
         </svg>
       </div>
-
       <div className="p-title">{title}</div>
       <div className="p-job">{job}</div>
       <div className="p-link">Explore role →</div>

@@ -1,6 +1,6 @@
 export function TrustStrip() {
   return (
-    <section className="trust" id="trust">
+    <section className="trust">
       <div className="wrap">
         <div className="icon" aria-hidden="true">
           i

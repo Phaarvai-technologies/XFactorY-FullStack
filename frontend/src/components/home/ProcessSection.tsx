@@ -28,7 +28,7 @@ const STEPS = [
 
 export function ProcessSection() {
   return (
-    <section className="process" id="process">
+    <section className="process" id="how-it-works">
       <div className="wrap">
         <div className="section-head">
           <h2>From idea to opportunity</h2>

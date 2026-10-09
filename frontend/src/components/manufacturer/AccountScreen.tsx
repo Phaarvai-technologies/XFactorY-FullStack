@@ -420,8 +420,8 @@ export function AccountScreen({ onBack, onAccountCreated }: AccountScreenProps) 
                     onChange={(e) => setAgree(e.target.checked)}
                   />
                   <label htmlFor="acc-agree">
-                    I agree to the <a href="#">Terms &amp; Conditions</a> and{" "}
-                    <a href="#">Privacy Policy</a>.
+                    I agree to the <a href="/terms">Terms &amp; Conditions</a> and{" "}
+                    <a href="/privacy-policy">Privacy Policy</a>.
                   </label>
                 </div>
               </div>

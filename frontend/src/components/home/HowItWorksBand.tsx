@@ -1,8 +1,6 @@
-import { Button } from "@/components/ui/Button";
-
 export function HowItWorksBand() {
   return (
-    <section className="band" id="how-it-works">
+    <section className="band">
       <div className="wrap">
         <div>
           <h3>Not sure where you fit yet?</h3>
@@ -11,9 +9,9 @@ export function HowItWorksBand() {
             you create an account.
           </p>
         </div>
-        <Button href="/#how-it-works" variant="ghost">
+        <a className="btn btn-ghost" href="#how-it-works">
           Browse how X!Y works
-        </Button>
+        </a>
       </div>
     </section>
   );
