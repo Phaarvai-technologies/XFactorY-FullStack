@@ -13,7 +13,10 @@ settings = get_settings()
 
 engine = create_async_engine(
     settings.database_url,
-    pool_pre_ping=True,
+    # No extra "is the connection alive?" query before every request (one round trip saved);
+    # connections are replaced every few minutes instead. See DB_POOL_* in config.py.
+    pool_pre_ping=settings.db_pool_pre_ping,
+    pool_recycle=settings.db_pool_recycle_seconds,
 )
 
 SessionFactory = async_sessionmaker(

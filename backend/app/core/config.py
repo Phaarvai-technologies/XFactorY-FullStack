@@ -11,6 +11,11 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 class Settings(BaseSettings):
     environment: str = "development"
     database_url: str
+    # Database connections. Checking each connection before use costs one extra round trip on
+    # every request; instead connections are renewed after DB_POOL_RECYCLE_SECONDS.
+    # Set DB_POOL_PRE_PING=true to bring the check back (e.g. if "connection closed" errors appear).
+    db_pool_pre_ping: bool = False
+    db_pool_recycle_seconds: int = 300
     cors_origins: list[str] = ["http://localhost:3000"]
 
     # Clerk
