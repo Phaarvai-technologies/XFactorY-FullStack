@@ -7,7 +7,7 @@ the canonical tables in XY_Database_Schema.sql (+ migrations 004-006).
 import hashlib
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -94,6 +94,11 @@ def profile_flags(data: dict) -> dict[str, bool]:
         "faq": bool(data.get("faqs")),
     }
 
+
+
+def _json_value(value):
+    """A json column from the database: already decoded by the driver, or a JSON string."""
+    return json.loads(value) if isinstance(value, (str, bytes)) else value
 
 class ManufacturerRepository:
     def __init__(self, session: AsyncSession):
@@ -826,9 +831,15 @@ class ManufacturerRepository:
         await self.db.commit()
 
     # ------------------------------------------------------------------ read model
+    # Every list the Manufacturer dashboard needs, fetched in the SAME statement as the profile:
+    # one database round trip instead of ten (each trip to the database costs network time).
+    _SNAPSHOT_LISTS = (
+        "certifications", "infrastructure", "faqs", "machines", "images", "availability", "bookings", "progress",
+    )
+
     async def snapshot(self, actor: Actor | None, ctx: dict | None = None) -> dict:
         ctx = ctx or await self.context(actor)
-        profile = (await self.db.execute(text("""
+        row = (await self.db.execute(text("""
             SELECT o.display_name,op.company_category,op.stated_production_capacity,op.production_capacity_label,
                    op.country_name account_country,op.contact_email,op.contact_phone,
                    op.about_company,op.vision,op.establishment_year,op.employee_count,
@@ -837,7 +848,45 @@ class ManufacturerRepository:
                    f.postal_code,f.sez_status,f.serviceable_areas,f.map_pin,
                    logo.object_key logo_object_key,cover.object_key cover_object_key,
                    mo.personal_information_completed,mo.company_information_completed,mo.location_completed,
-                   mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage
+                   mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage,
+                   (SELECT COALESCE(json_agg(x ORDER BY x.created_at, x.id), '[]'::json) FROM (
+                      SELECT ct.name,COALESCE(oc.issuer,ct.issuer) body,oc.status,oc.document_file_name,
+                             oc.created_at,oc.id
+                      FROM organization_certifications oc
+                      JOIN certification_types ct ON ct.id=oc.certification_type_id
+                      WHERE oc.organization_id=o.id) x) AS certifications,
+                   (SELECT COALESCE(json_object_agg(ii.code, COALESCE(mi.text_value,'')), '{}'::json)
+                      FROM manufacturer_infrastructure mi
+                      JOIN infrastructure_items ii ON ii.id=mi.infrastructure_item_id
+                      WHERE mi.organization_id=o.id) AS infrastructure,
+                   (SELECT COALESCE(json_agg(x ORDER BY x.display_order, x.created_at), '[]'::json) FROM (
+                      SELECT q.question_text q,a.text_value a,a.display_order,a.created_at
+                      FROM manufacturer_faq_answers a JOIN manufacturer_faq_questions q ON q.id=a.question_id
+                      WHERE a.organization_id=o.id) x) AS faqs,
+                   (SELECT COALESCE(json_agg(x ORDER BY x.created_at DESC, x.id), '[]'::json) FROM (
+                      SELECT m.id,m.name,m.description,m.status,m.publication_status,m.created_at,
+                             COALESCE(jsonb_object_agg(ms.spec_code,ms.value_text)
+                                      FILTER (WHERE ms.spec_code IS NOT NULL), '{}'::jsonb) specs
+                      FROM machines m LEFT JOIN machine_specs ms ON ms.machine_id=m.id
+                      WHERE m.organization_id=o.id GROUP BY m.id) x) AS machines,
+                   (SELECT COALESCE(json_agg(x ORDER BY x.machine_id, x.display_order), '[]'::json) FROM (
+                      SELECT mi.machine_id,f2.object_key,mi.display_order FROM machine_images mi
+                      JOIN files f2 ON f2.id=mi.file_id JOIN machines m ON m.id=mi.machine_id
+                      WHERE m.organization_id=o.id) x) AS images,
+                   (SELECT row_to_json(x) FROM (
+                      SELECT calendar,recurring,capacity FROM manufacturer_availability_preferences
+                      WHERE organization_id=o.id LIMIT 1) x) AS availability,
+                   (SELECT COALESCE(json_agg(x ORDER BY x.created_at DESC), '[]'::json) FROM (
+                      SELECT br.id,COALESCE(bo.display_name,'Buyer') buyer,
+                             COALESCE(cl.title,br.requirements,'Capacity request') item,
+                             br.requested_start_date,br.status,br.created_at
+                      FROM manufacturer_booking_requests br
+                      JOIN organizations bo ON bo.id=br.demand_organization_id
+                      LEFT JOIN manufacturer_capacity_listings cl ON cl.id=br.capacity_listing_id
+                      WHERE br.manufacturer_organization_id=o.id) x) AS bookings,
+                   (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
+                      SELECT form_key, record_id, current_step, completed_steps, total_steps, status, updated_at
+                      FROM manufacturer_form_progress WHERE organization_id=o.id) x) AS progress
             FROM organizations o
             LEFT JOIN organization_profiles op ON op.organization_id=o.id
             LEFT JOIN facilities f ON f.organization_id=o.id AND f.is_headquarters=true AND f.status<>'suspended'
@@ -846,56 +895,23 @@ class ManufacturerRepository:
             LEFT JOIN manufacturer_onboarding mo ON mo.organization_id=o.id
             WHERE o.id=:organization_id
         """), ctx)).first()
-        certs = await self.db.execute(text("""
-            SELECT ct.name,COALESCE(oc.issuer,ct.issuer) body,oc.status,oc.document_file_name
-            FROM organization_certifications oc JOIN certification_types ct ON ct.id=oc.certification_type_id
-            WHERE oc.organization_id=:organization_id ORDER BY oc.created_at, oc.id
-        """), ctx)
-        infra = await self.db.execute(text("""
-            SELECT ii.code,mi.text_value FROM manufacturer_infrastructure mi
-            JOIN infrastructure_items ii ON ii.id=mi.infrastructure_item_id
-            WHERE mi.organization_id=:organization_id
-        """), ctx)
-        faqs = await self.db.execute(text("""
-            SELECT q.question_text q,a.text_value a FROM manufacturer_faq_answers a
-            JOIN manufacturer_faq_questions q ON q.id=a.question_id
-            WHERE a.organization_id=:organization_id ORDER BY a.display_order, a.created_at
-        """), ctx)
-        machines = await self.db.execute(text("""
-            SELECT m.id,m.name,m.description,m.status,m.publication_status,
-                   COALESCE(jsonb_object_agg(ms.spec_code,ms.value_text) FILTER (WHERE ms.spec_code IS NOT NULL),
-                            '{}'::jsonb) specs
-            FROM machines m LEFT JOIN machine_specs ms ON ms.machine_id=m.id
-            WHERE m.organization_id=:organization_id
-            GROUP BY m.id ORDER BY m.created_at DESC, m.id
-        """), ctx)
-        images = await self.db.execute(text("""
-            SELECT mi.machine_id,f.object_key,mi.display_order FROM machine_images mi
-            JOIN files f ON f.id=mi.file_id JOIN machines m ON m.id=mi.machine_id
-            WHERE m.organization_id=:organization_id ORDER BY mi.machine_id,mi.display_order
-        """), ctx)
-        availability = (await self.db.execute(text("""
-            SELECT calendar,recurring,capacity FROM manufacturer_availability_preferences
-            WHERE organization_id=:organization_id
-        """), ctx)).first()
-        bookings = await self.db.execute(text("""
-            SELECT br.id,COALESCE(o.display_name,'Buyer') buyer,
-                   COALESCE(cl.title,br.requirements,'Capacity request') item,
-                   br.requested_start_date,br.status
-            FROM manufacturer_booking_requests br
-            JOIN organizations o ON o.id=br.demand_organization_id
-            LEFT JOIN manufacturer_capacity_listings cl ON cl.id=br.capacity_listing_id
-            WHERE br.manufacturer_organization_id=:organization_id ORDER BY br.created_at DESC
-        """), ctx)
+        data = dict(row._mapping) if row else {}
+        lists = {k: _json_value(data.pop(k, None)) for k in self._SNAPSHOT_LISTS}
+        for booking in lists["bookings"] or []:
+            if booking.get("requested_start_date"):
+                booking["requested_start_date"] = date.fromisoformat(booking["requested_start_date"])
+        for progress in lists["progress"] or []:
+            if progress.get("updated_at"):
+                progress["updated_at"] = datetime.fromisoformat(progress["updated_at"])
         return {
             "context": ctx,
-            "profile": dict(profile._mapping) if profile else {},
-            "certifications": [dict(r._mapping) for r in certs],
-            "infrastructure": {r.code: r.text_value or "" for r in infra},
-            "faqs": [dict(r._mapping) for r in faqs],
-            "machines": [dict(r._mapping) for r in machines],
-            "images": [dict(r._mapping) for r in images],
-            "availability": dict(availability._mapping) if availability else {},
-            "bookings": [dict(r._mapping) for r in bookings],
-            "progress": await self.form_progress(ctx),
+            "profile": data,
+            "certifications": lists["certifications"] or [],
+            "infrastructure": lists["infrastructure"] or {},
+            "faqs": lists["faqs"] or [],
+            "machines": lists["machines"] or [],
+            "images": lists["images"] or [],
+            "availability": lists["availability"] or {},
+            "bookings": lists["bookings"] or [],
+            "progress": lists["progress"] or [],
         }

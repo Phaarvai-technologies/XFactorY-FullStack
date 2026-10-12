@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 from fastapi import HTTPException
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -15,6 +16,8 @@ from app.storage.supabase import SupabaseStorage, decode_data_url
 from app.core.welcome import send_welcome_soon
 
 
+_TOUCH_EVERY_SECONDS = 300
+_LAST_TOUCH: dict[str, float] = {}  # clerk_user_id -> time of the last 'last seen' write
 log = logging.getLogger("xy.manufacturer")
 
 # Postgres: undefined column / table / function -> migrations not applied.
@@ -132,7 +135,12 @@ class ManufacturerService:
             await self._run(self.repo.sync_actor(actor, profile))
             ctx = await self._run(self.repo.context(actor))
             send_welcome_soon(ctx["user_id"])  # new user: welcome email (once, in the background)
-        await self.repo.touch_last_seen(actor.clerk_user_id)
+        # "Last seen" changes at most every 5 minutes; skip the database write in between
+        # (it costs two round trips on every request otherwise).
+        now = time.monotonic()
+        if now - _LAST_TOUCH.get(actor.clerk_user_id, -1e9) >= _TOUCH_EVERY_SECONDS:
+            await self.repo.touch_last_seen(actor.clerk_user_id)
+            _LAST_TOUCH[actor.clerk_user_id] = now
         return ctx
 
     async def _image_file(self, ctx: dict, data_url: str, purpose: str, folder: str):
@@ -149,6 +157,7 @@ class ManufacturerService:
     async def bootstrap(self, actor: Actor) -> dict:
         """Everything ManufacturerApp needs: `state` (ManufacturerState) and `profileData`."""
         ctx = await self.ensure_actor(actor)
+        names_filled = False
         if not (ctx.get("first_name") and ctx.get("last_name")):
             # No name saved yet (e.g. the user record was created before Clerk had
             # one): copy it from Clerk once so the onboarding form can be prefilled.
@@ -156,9 +165,11 @@ class ManufacturerService:
                 clerk_profile = await self.clerk.actor_profile(actor)
                 await self.repo.fill_missing_names(ctx, clerk_profile.get("first_name"),
                                                    clerk_profile.get("last_name"))
+                names_filled = True
             except Exception as exc:  # noqa: BLE001 - prefill is a convenience
                 log.info("Could not read the name from Clerk: %s", exc)
-        raw = await self._run(self.repo.snapshot(actor))
+        # Reuse the context just read (one database trip less), unless the names were just filled in.
+        raw = await self._run(self.repo.snapshot(actor, ctx=None if names_filled else ctx))
         return self.view(raw)
 
     def view(self, raw: dict) -> dict:

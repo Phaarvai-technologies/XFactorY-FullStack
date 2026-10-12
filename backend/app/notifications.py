@@ -8,6 +8,8 @@ Admin actions that create one (one row per active member of the company):
 The manufacturer dashboard reads them (bell + popup) through /manufacturer/notifications.
 Admin notes that are not shared never leave the admin portal.
 """
+import json
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import text
@@ -15,6 +17,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 KINDS = ("needs_correction", "profile_edit", "admin_note")
 MAX_BODY = 2000
+
+
+
+def _json(value):
+    """A json column: already decoded by the driver, or a JSON string."""
+    return json.loads(value) if isinstance(value, (str, bytes)) else value
+
+
+def _dated(item: dict, key: str) -> dict:
+    """Timestamps come back from json as text; turn them into datetimes again."""
+    if item and isinstance(item.get(key), str):
+        item[key] = datetime.fromisoformat(item[key])
+    return item
 
 
 async def notify_company(db: AsyncSession, org_id: str | UUID, kind: str, title: str, body: str,
@@ -32,21 +47,26 @@ async def notify_company(db: AsyncSession, org_id: str | UUID, kind: str, title:
 
 
 async def for_user(db: AsyncSession, user_id: UUID, org_id: UUID, limit: int = 50) -> dict:
-    rows = (await db.execute(text("""
-        SELECT n.id, n.notification_type AS kind, n.title, n.body, n.created_at, n.read_at, n.popup_shown_at
-        FROM notifications n
-        WHERE n.user_id = :u AND n.organization_id = :o AND n.channel = 'in_app' AND n.status <> 'dismissed'
-        ORDER BY n.created_at DESC LIMIT :n
-    """), {"u": user_id, "o": org_id, "n": limit})).mappings().all()
-    review = (await db.execute(text("""
-        SELECT status, rejection_reason, reviewed_at FROM manufacturer_onboarding WHERE organization_id = :o
-    """), {"o": org_id})).mappings().first()
-    shared = (await db.execute(text("""
-        SELECT id, note, created_at FROM admin_internal_notes
-        WHERE manufacturer_id = :o AND shared_with_manufacturer
-          AND note NOT LIKE 'Correction requested: %'   -- already shown as the reason
-        ORDER BY created_at DESC LIMIT 20
-    """), {"o": org_id})).mappings().all()
+    # One database round trip: the messages, the review state and the shared notes together.
+    row = (await db.execute(text("""
+        SELECT
+          (SELECT COALESCE(json_agg(x ORDER BY x.created_at DESC), '[]'::json) FROM (
+             SELECT n.id, n.notification_type AS kind, n.title, n.body, n.created_at, n.read_at, n.popup_shown_at
+             FROM notifications n
+             WHERE n.user_id = :u AND n.organization_id = :o AND n.channel = 'in_app' AND n.status <> 'dismissed'
+             ORDER BY n.created_at DESC LIMIT :n) x) AS items,
+          (SELECT row_to_json(r) FROM (
+             SELECT status, rejection_reason, reviewed_at FROM manufacturer_onboarding
+             WHERE organization_id = :o LIMIT 1) r) AS review,
+          (SELECT COALESCE(json_agg(s ORDER BY s.created_at DESC), '[]'::json) FROM (
+             SELECT id, note, created_at FROM admin_internal_notes
+             WHERE manufacturer_id = :o AND shared_with_manufacturer
+               AND note NOT LIKE 'Correction requested: %'   -- already shown as the reason
+             ORDER BY created_at DESC LIMIT 20) s) AS shared
+    """), {"u": user_id, "o": org_id, "n": limit})).mappings().first()
+    rows = [_dated(r, "created_at") for r in _json(row["items"]) or []]
+    review = _dated(_json(row["review"]), "reviewed_at") if row["review"] else None
+    shared = [_dated(n, "created_at") for n in _json(row["shared"]) or []]
     items = [{"id": str(r["id"]), "kind": r["kind"], "title": r["title"], "body": r["body"],
               "createdAt": r["created_at"], "read": r["read_at"] is not None} for r in rows]
     unread = [r for r in rows if r["read_at"] is None]
