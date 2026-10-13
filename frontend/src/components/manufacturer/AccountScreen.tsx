@@ -107,33 +107,41 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, }: 
   let cancelled = false;
 
   const timer = window.setTimeout(async () => {
-    setCompanySearchLoading(true);
-    setCompanySearchError("");
+  setCompanySearchLoading(true);
+  setCompanySearchError("");
 
-    try {
-      const companies = await onSearchCompanies(query);
+  try {
+    const companies = await onSearchCompanies(query);
 
-      if (!cancelled) {
-        setCompanySuggestions(companies);
-      }
-    } catch {
-      if (!cancelled) {
-        setCompanySuggestions([]);
-        setCompanySearchError("Unable to search companies.");
-      }
-    } finally {
-      if (!cancelled) {
-        setCompanySearchLoading(false);
-      }
+    if (!cancelled) {
+      const uniqueCompanies = Array.from(
+        new Map(
+          companies.map((company) => [
+            company.companyName.trim().toLowerCase(),
+            company,
+          ])
+        ).values()
+      );
+
+      setCompanySuggestions(uniqueCompanies);
     }
-  }, 300);
+  } catch {
+    if (!cancelled) {
+      setCompanySuggestions([]);
+      setCompanySearchError("Unable to search companies.");
+    }
+  } finally {
+    if (!cancelled) {
+      setCompanySearchLoading(false);
+    }
+  }
+}, 300);
 
-  return () => {
-    cancelled = true;
-    window.clearTimeout(timer);
-  };
+return () => {
+  cancelled = true;
+  window.clearTimeout(timer);
+};
 }, [companyName, companyDropdownOpen, onSearchCompanies]);
-
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
