@@ -286,6 +286,54 @@ class ManufacturerRepository:
         await self.db.commit()
         return {"names_changed": names_changed}
 
+        # ------------------------------------------------------------------ company search
+    async def search_companies(self, query: str, limit: int = 10) -> list[dict]:
+        """Search existing manufacturer organizations by company name."""
+
+        query = query.strip()
+
+        if len(query) < 2:
+            return []
+
+        rows = await self.db.execute(
+            text("""
+                SELECT
+                    o.id,
+                    o.display_name AS company_name,
+                    op.country_name AS country,
+                    op.company_category AS company_type
+                FROM organizations o
+                LEFT JOIN organization_profiles op
+                    ON op.organization_id = o.id
+                WHERE o.organization_type = 'manufacturer'
+                  AND o.status = 'active'
+                  AND o.display_name ILIKE :query
+                ORDER BY
+                    CASE
+                        WHEN LOWER(o.display_name) = LOWER(:exact)
+                        THEN 0
+                        ELSE 1
+                    END,
+                    o.display_name
+                LIMIT :limit
+            """),
+            {
+                "query": f"%{query}%",
+                "exact": query,
+                "limit": max(1, min(limit, 10)),
+            },
+        )
+
+        return [
+            {
+                "id": str(row.id),
+                "companyName": row.company_name,
+                "country": row.country,
+                "companyType": row.company_type,
+            }
+            for row in rows
+        ]
+
     async def fill_missing_names(self, ctx: dict, first: str | None, last: str | None) -> None:
         """Copy the name from Clerk into the user record when the record has none
         (never overwrites a saved name)."""

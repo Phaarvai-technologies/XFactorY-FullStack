@@ -86,6 +86,16 @@ class ManufacturerService:
         self.settings = settings
         self.storage = SupabaseStorage(settings)
         self.clerk = ClerkManagement(settings)
+    async def search_companies(self, query: str) -> list[dict]:
+        """Search existing manufacturer companies."""
+        query = query.strip()
+
+        if len(query) < 2:
+            return []
+
+        return await self._run(
+            self.repo.search_companies(query)
+        )    
 
     # ---------------------------------------------------------------- helpers
     async def _run(self, coro):

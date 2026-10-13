@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import Actor, current_actor
@@ -39,6 +39,16 @@ async def create_account(body: AccountPayload, actor: Actor = Depends(current_ac
                          svc: ManufacturerService = Depends(service)):
     """AccountScreen submit."""
     return await svc.create_account(actor, body.model_dump(mode="json"))
+
+@router.get("/companies/search")
+async def search_companies(
+    q: str = Query(min_length=2, max_length=100),
+    actor: Actor = Depends(current_actor),
+    svc: ManufacturerService = Depends(service),
+):
+    """Search existing manufacturer companies by name."""
+    companies = await svc.search_companies(q)
+    return {"items": companies}
 
 
 @router.patch("/profile")
