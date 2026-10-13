@@ -19,3 +19,32 @@ export async function api<T>(path: string, token: string, options: RequestInit =
   if (!response.ok) throw new ApiError(response.status, payload?.detail ?? "API request failed");
   return payload as T;
 }
+
+
+
+export interface CompanySearchResult {
+  id: string;
+  companyName: string;
+  country: string | null;
+  companyType: string | null;
+}
+
+export interface CompanySearchResponse {
+  items: CompanySearchResult[];
+}
+
+export async function searchManufacturerCompanies(
+  query: string,
+  token: string
+): Promise<CompanySearchResponse> {
+  const trimmedQuery = query.trim();
+
+  if (trimmedQuery.length < 2) {
+    return { items: [] };
+  }
+
+  return api<CompanySearchResponse>(
+    `/manufacturer/companies/search?q=${encodeURIComponent(trimmedQuery)}`,
+    token
+  );
+}
