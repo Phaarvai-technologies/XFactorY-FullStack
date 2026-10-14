@@ -6,8 +6,9 @@ export const REVIEW_LABELS: Record<ReviewStatus, string> = {
   SUBMITTED: "Submitted",
   NEEDS_CORRECTION: "Needs correction",
   REVIEWED: "Reviewed",
+  REJECTED: "Rejected",
 };
-export const REVIEW_ORDER: ReviewStatus[] = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "NEEDS_CORRECTION", "REVIEWED"];
+export const REVIEW_ORDER: ReviewStatus[] = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "NEEDS_CORRECTION", "REVIEWED", "REJECTED"];
 
 export const RECORD_LABELS: Record<RecordType, string> = { REAL: "Real", DEMO: "Demo", TEST: "Test" };
 export const RECORD_ORDER: RecordType[] = ["REAL", "DEMO", "TEST"];
@@ -33,6 +34,7 @@ export function reviewTone(status: ReviewStatus): string {
     case "SUBMITTED":
       return "badge-info";
     case "NEEDS_CORRECTION":
+    case "REJECTED":
       return "badge-rejected";
     case "IN_PROGRESS":
       return "badge-pending";

@@ -24,6 +24,8 @@ type DashboardScreenProps = {
   pct: number;
   flags: ProfileCompletionFlags;
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
+  /** Set when X!Y asked for corrections to the submitted company details. */
+  onFixCompanyDetails?: () => void;
   onOpenMachineryWizard: () => void;
   onEditMachinery: (machine: MachineryListing) => void;
   onSetMachineryStatus: (id: number, status: MachineryListing["status"]) => void;
@@ -61,6 +63,7 @@ export function DashboardScreen({
   pct,
   flags,
   onOpenProfileWizard,
+  onFixCompanyDetails,
   onOpenMachineryWizard,
   onEditMachinery,
   onSetMachineryStatus,
@@ -112,7 +115,7 @@ export function DashboardScreen({
           </div>
           <div className="topbar-actions">
             <span className="pct-badge">{pct}% complete</span>
-            <NotificationBell onOpenProfile={() => showPanel("profile")} />
+            <NotificationBell onOpenProfile={onFixCompanyDetails ?? (() => showPanel("profile"))} />
             <AccountMenu>
               <span className="avatar-circle">{initials}</span>
               <span>{fullName}</span>
