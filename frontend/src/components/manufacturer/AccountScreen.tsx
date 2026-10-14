@@ -107,6 +107,7 @@ export function AccountScreen({ onBack, onAccountCreated, request }: AccountScre
     filled: { country: string; companyType: string; capacity: string };
   } | null>(null);
 
+
   /** Fills the form from the selected company (only fields it has, from that exact record);
    *  with null, removes what a previous selection filled in and restores the user's values. */
   function applyCompany(details: CompanyDetails | null) {
@@ -134,6 +135,7 @@ export function AccountScreen({ onBack, onAccountCreated, request }: AccountScre
     setCompanyType(next.companyType);
     setCapacity(next.capacity);
   }
+
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
