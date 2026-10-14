@@ -4,6 +4,6 @@ import { afterEach } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 // jsdom has no scrolling; the dashboard calls window.scrollTo when it changes panels.
-window.scrollTo = () => undefined;
+if (typeof window !== "undefined") window.scrollTo = () => undefined; // (node-environment tests have no window)
 
 afterEach(() => cleanup());

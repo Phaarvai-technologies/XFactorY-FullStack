@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+
+import type { CompanyDetails, CompanySearchResult } from "@/lib/api";
 import { FactoryMark } from "@/components/layout/Logo";
-import {
-  CompanyClaimPanel,
-  type ClaimRequest,
-  type CompanyDetails,
-} from "@/components/manufacturer/CompanyClaimPanel";
 import {
   BackIcon,
   BuildingIcon,
@@ -27,20 +24,32 @@ export type AccountSubmission = {
   contact: string;
   dob: string;
   companyName: string;
-  selectedCompanyId?: string;
   companyType: string;
   country: string;
   phone: string;
   capacity: string;
+  /** Database id of the company chosen from the search list; null = a new company. */
+  companyId?: string | null;
 };
 
 type AccountScreenProps = {
   onBack: () => void;
   /** May return a promise; if it rejects, the form is re-enabled so the user can retry. */
   onAccountCreated: (submission: AccountSubmission) => void | Promise<void>;
-  /** Signed-in API calls; enables finding and claiming an already listed company. */
-  request?: ClaimRequest;
+  onSearchCompanies: (query: string) => Promise<CompanySearchResult[]>;
+  /** Saved details of exactly the selected record (read-only; selecting grants nothing). */
+  onLoadCompany?: (companyId: string) => Promise<CompanyDetails>;
+  /** Prefill when correcting details already submitted for approval. */
+  initial?: Partial<AccountSubmission>;
 };
+
+type PrefillKey = "companyType" | "country" | "phone" | "capacity";
+
+const MUTED = { padding: 12, color: "#64748b" } as const;
+
+function companyLocation(company: { city?: string | null; state?: string | null; country?: string | null }) {
+  return [company.city, company.state, company.country].filter((part) => part && part.trim()).join(", ");
+}
 
 type FieldErrors = Partial<
   Record<
@@ -81,61 +90,122 @@ const COUNTRIES = [
   "Other",
 ];
 
-export function AccountScreen({ onBack, onAccountCreated, request }: AccountScreenProps) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [contact, setContact] = useState("");
-  const [dob, setDob] = useState("");
-  const [companyName, setCompanyName] = useState("");
-  const [companyType, setCompanyType] = useState("");
-  const [country, setCountry] = useState("");
-  const [phone, setPhone] = useState("");
-  const [capacity, setCapacity] = useState("");
+export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onLoadCompany, initial }: AccountScreenProps) {
+  const [firstName, setFirstName] = useState(initial?.firstName ?? "");
+  const [lastName, setLastName] = useState(initial?.lastName ?? "");
+  const [contact, setContact] = useState(initial?.contact ?? "");
+  const [dob, setDob] = useState(initial?.dob ?? "");
+  const [companyName, setCompanyName] = useState(initial?.companyName ?? "");
+  const [companySuggestions, setCompanySuggestions] = useState<CompanySearchResult[]>([]);
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const [companySearchLoading, setCompanySearchLoading] = useState(false);
+  
+  const companySearchRef = useRef<HTMLDivElement>(null);
+  const [companyType, setCompanyType] = useState(
+    initial?.companyType && COMPANY_TYPES.includes(initial.companyType) ? initial.companyType : "");
+  const [country, setCountry] = useState(initial?.country && COUNTRIES.includes(initial.country) ? initial.country : "");
+  const [phone, setPhone] = useState(initial?.phone ?? "");
+  const [capacity, setCapacity] = useState(initial?.capacity ?? "");
   const [agree, setAgree] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [showFormError, setShowFormError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [companySearchError, setCompanySearchError] = useState("");
+  /** The company picked from the list (its database id). Cleared whenever the text changes. */
+  /** The text whose search finished (so "no matches" is never shown before a search ran). */
+  const [searchedQuery, setSearchedQuery] = useState("");
+  const [selectedCompany, setSelectedCompany] = useState<{ id: string; name: string } | null>(
+    initial?.companyId && initial.companyName ? { id: initial.companyId, name: initial.companyName } : null);
+  const [companyDetailsStatus, setCompanyDetailsStatus] = useState<"idle" | "loading" | "error">("idle");
+  /** Values copied from the selected record, so they can be removed again when it changes. */
+  const prefilled = useRef<Partial<Record<PrefillKey, string>>>({});
+  /** Ignores a details response that arrives after the selection changed. */
+  const detailsRequest = useRef(0);
 
-  // Company picked from the listed-company dropdown: its database id and what it filled in.
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
-  const current = useRef({ country, companyType, capacity });
-  useEffect(() => {
-    current.current = { country, companyType, capacity };
-  }, [country, companyType, capacity]);
-  const prefill = useRef<{
-    before: { country: string; companyType: string; capacity: string };
-    filled: { country: string; companyType: string; capacity: string };
-  } | null>(null);
+  const fieldSetters: Record<PrefillKey, (value: string) => void> = {
+    companyType: setCompanyType,
+    country: setCountry,
+    phone: setPhone,
+    capacity: setCapacity,
+  };
+  const currentValues: Record<PrefillKey, string> = { companyType, country, phone, capacity };
 
-
-  /** Fills the form from the selected company (only fields it has, from that exact record);
-   *  with null, removes what a previous selection filled in and restores the user's values. */
-  function applyCompany(details: CompanyDetails | null) {
-    let next = { ...current.current };
-    const previous = prefill.current;
-    if (previous) {
-      (["country", "companyType", "capacity"] as const).forEach((key) => {
-        if (next[key] === previous.filled[key]) next[key] = previous.before[key];
-      });
-      prefill.current = null;
+  /** Drop the previous selection and any details that came from it (user edits are kept). */
+  function clearCompanySelection() {
+    detailsRequest.current += 1;
+    for (const [key, value] of Object.entries(prefilled.current) as [PrefillKey, string][]) {
+      if (currentValues[key] === value) fieldSetters[key]("");
     }
-    setSelectedCompanyId(details?.id ?? null);
-    if (details) {
-      const before = { ...next };
-      next = {
-        country: details.country && COUNTRIES.includes(details.country) ? details.country : next.country,
-        companyType:
-          details.category && COMPANY_TYPES.includes(details.category) ? details.category : next.companyType,
-        capacity: details.capacity ?? next.capacity,
-      };
-      prefill.current = { before, filled: next };
-    }
-    current.current = next;
-    setCountry(next.country);
-    setCompanyType(next.companyType);
-    setCapacity(next.capacity);
+    prefilled.current = {};
+    setSelectedCompany(null);
+    setCompanyDetailsStatus("idle");
   }
 
+  async function selectCompany(company: CompanySearchResult) {
+    clearCompanySelection();
+    setCompanyName(company.companyName);
+    setCompanyDropdownOpen(false);
+    setSelectedCompany({ id: company.id, name: company.companyName });
+    if (!onLoadCompany) return;
+    const requestId = ++detailsRequest.current;
+    setCompanyDetailsStatus("loading");
+    try {
+      const details = await onLoadCompany(company.id);
+      if (requestId !== detailsRequest.current) return; // selection changed meanwhile
+      const next: Partial<Record<PrefillKey, string>> = {};
+      if (COMPANY_TYPES.includes(details.companyType)) next.companyType = details.companyType;
+      if (COUNTRIES.includes(details.country)) next.country = details.country;
+      if (details.phone) next.phone = details.phone;
+      if (details.capacity) next.capacity = details.capacity;
+      for (const [key, value] of Object.entries(next) as [PrefillKey, string][]) fieldSetters[key](value);
+      prefilled.current = next;
+      setCompanyDetailsStatus("idle");
+    } catch {
+      if (requestId !== detailsRequest.current) return;
+      // Never keep a selection whose saved details could not be read.
+      setSelectedCompany(null);
+      setCompanyDetailsStatus("error");
+    }
+  }
+
+  useEffect(() => {
+  const query = companyName.trim();
+
+  if (query.length < 2 || !companyDropdownOpen) {
+    return;
+  }
+
+  let cancelled = false;
+
+  const timer = window.setTimeout(async () => {
+  setCompanySearchLoading(true);
+  setCompanySearchError("");
+
+  try {
+    const companies = await onSearchCompanies(query);
+
+    if (!cancelled) {
+      // Each result is a separate record (same name in another location stays separate).
+      setCompanySuggestions(companies);
+      setSearchedQuery(query);
+    }
+  } catch {
+    if (!cancelled) {
+      setCompanySuggestions([]);
+      setCompanySearchError("Unable to search companies.");
+    }
+  } finally {
+    if (!cancelled) {
+      setCompanySearchLoading(false);
+    }
+  }
+}, 300);
+
+return () => {
+  cancelled = true;
+  window.clearTimeout(timer);
+};
+}, [companyName, companyDropdownOpen, onSearchCompanies]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -149,6 +219,7 @@ export function AccountScreen({ onBack, onAccountCreated, request }: AccountScre
     }
     if (!dob) nextErrors.dob = "Enter your date of birth.";
     if (!companyName.trim()) nextErrors.companyName = "Enter your company name.";
+    else if (companyDetailsStatus === "loading") nextErrors.companyName = "Loading the selected company's details…";
     if (!companyType) nextErrors.companyType = "Select a company category.";
     if (!country) nextErrors.country = "Select your country.";
     if (phone.trim() && !/^[0-9+\-\s()]{7,15}$/.test(phone.trim())) {
@@ -172,11 +243,11 @@ export function AccountScreen({ onBack, onAccountCreated, request }: AccountScre
         contact: contact.trim(),
         dob,
         companyName: companyName.trim(),
-        ...(selectedCompanyId ? { selectedCompanyId } : {}),
         companyType,
         country,
         phone: phone.trim(),
         capacity: capacity.trim(),
+        companyId: selectedCompany?.id ?? null,
       })).catch(() => setSubmitting(false));
     }, 700);
   }
@@ -348,37 +419,141 @@ export function AccountScreen({ onBack, onAccountCreated, request }: AccountScre
                 <h2>Company info</h2>
               </div>
               <div className="form-grid">
-                <div className="col-span-2" data-selected-company-id={selectedCompanyId ?? undefined}>
-                  <label htmlFor="acc-company">Company name</label>
-                  {request ? (
-                    <CompanyClaimPanel
-                      value={companyName}
-                      onChange={setCompanyName}
-                      hasError={!!errors.companyName}
-                      request={request}
-                      onSelect={applyCompany}
-                      onSelectionChange={setSelectedCompanyId}
-                      onClaimed={setCompanyName}
-                    />
-                  ) : (
-                    <div className="account-input-wrap">
-                      <span className="input-icon">
-                        <BuildingIcon size={16} />
-                      </span>
-                      <input
-                        type="text"
-                        id="acc-company"
-                        placeholder="Acme Manufacturing Co."
-                        className={errors.companyName ? "error" : ""}
-                        value={companyName}
-                        onChange={(e) => setCompanyName(e.target.value)}
-                      />
-                    </div>
-                  )}
-                  {errors.companyName ? (
-                    <p className="field-error">{errors.companyName}</p>
-                  ) : null}
-                </div>
+                <div className="col-span-2">
+  <label htmlFor="acc-company">Company name</label>
+
+  <div
+    className="company-search-container"
+    ref={companySearchRef}
+    style={{ position: "relative" }}
+  >
+    <div className="account-input-wrap">
+      <span className="input-icon">
+        <BuildingIcon size={16} />
+      </span>
+
+      <input
+        type="text"
+        id="acc-company"
+        placeholder="Acme Manufacturing Co."
+        className={errors.companyName ? "error" : ""}
+        value={companyName}
+        autoComplete="off"
+        onFocus={() => setCompanyDropdownOpen(true)}
+        onChange={(e) => {
+          // Any edit makes it a new search: forget the selected company and its details,
+          // and do not show the previous text's results while the new ones load.
+          if (selectedCompany || companyDetailsStatus !== "idle") clearCompanySelection();
+          setCompanyName(e.target.value);
+          setCompanyDropdownOpen(true);
+          setCompanySuggestions([]);
+          setCompanySearchError("");
+          setCompanySearchLoading(e.target.value.trim().length >= 2);
+        }}
+      />
+    </div>
+
+    {companyDropdownOpen && companyName.trim().length >= 2 && (
+      <div
+        className="company-suggestions"
+        style={{
+          position: "absolute",
+          top: "100%",
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          background: "#fff",
+          border: "1px solid #dbe3ef",
+          borderRadius: 8,
+          marginTop: 4,
+          boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
+          maxHeight: 220,
+          overflowY: "auto",
+        }}
+      >
+        {companySearchLoading && (
+          <div style={MUTED}>
+            Searching companies...
+          </div>
+        )}
+
+        {!companySearchLoading && !companySearchError && companySuggestions.length === 0 &&
+          searchedQuery === companyName.trim() && (
+          <div style={MUTED}>No matching companies found.</div>
+        )}
+
+        {!companySearchLoading &&
+          companySuggestions.map((company) => (
+            <button
+              key={company.id}
+              type="button"
+              onClick={() => void selectCompany(company)}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "12px",
+                textAlign: "left",
+                background: "#fff",
+                border: 0,
+                cursor: "pointer",
+              }}
+            >
+              {company.companyName}
+              {companyLocation(company) ? (
+                <span style={{ display: "block", fontSize: 12, color: "#64748b" }}>
+                  {companyLocation(company)}
+                </span>
+              ) : null}
+            </button>
+          ))}
+
+        {!companySearchLoading &&
+          !companySearchError &&
+          !companySuggestions.some(
+            (company) =>
+              company.companyName.toLowerCase() ===
+              companyName.trim().toLowerCase()
+          ) && (
+            <button
+              type="button"
+              onClick={() => {
+                // A new company (not one of the listed records).
+                clearCompanySelection();
+                setCompanyName(companyName.trim());
+                setCompanyDropdownOpen(false);
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "12px",
+                textAlign: "left",
+                background: "#fff",
+                border: 0,
+                borderTop: "1px solid #e2e8f0",
+                cursor: "pointer",
+              }}
+            >
+              {companyName.trim()}
+            </button>
+          )}
+
+        {companySearchError && (
+          <div style={{ padding: 12, color: "#b91c1c" }}>
+            {companySearchError}
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+
+  {errors.companyName ? (
+    <p className="field-error">{errors.companyName}</p>
+  ) : companyDetailsStatus === "error" ? (
+    <p className="field-error">Couldn’t load this company’s saved details. Select it again to retry.</p>
+  ) : companyDetailsStatus === "loading" ? (
+    <p style={{ ...MUTED, padding: "6px 0 0", margin: 0 }}>Loading company details…</p>
+  ) : null}
+</div>
                 <div>
                   <label htmlFor="acc-company-type">Company type / category</label>
                   <div className="account-input-wrap">
@@ -482,8 +657,8 @@ export function AccountScreen({ onBack, onAccountCreated, request }: AccountScre
                     onChange={(e) => setAgree(e.target.checked)}
                   />
                   <label htmlFor="acc-agree">
-                    I agree to the <a href="#">Terms &amp; Conditions</a> and{" "}
-                    <a href="#">Privacy Policy</a>.
+                    I agree to the <a href="/terms">Terms &amp; Conditions</a> and{" "}
+                    <a href="/privacy-policy">Privacy Policy</a>.
                   </label>
                 </div>
               </div>

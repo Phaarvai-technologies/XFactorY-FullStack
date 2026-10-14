@@ -759,6 +759,49 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
       </div>
 
       <div className="adm-col">
+        {d.pendingSubmission ? (
+          <Section
+            title="Submitted for approval"
+            note={
+              <span className={`badge ${d.pendingSubmission.status === "pending" ? "badge-info" : "badge-rejected"}`}>
+                {d.pendingSubmission.status === "pending" ? "Awaiting review" : "Corrections requested"}
+              </span>
+            }
+          >
+            <p className="field-hint">
+              {d.pendingSubmission.kindLabel}
+              {d.pendingSubmission.submittedBy
+                ? ` · ${d.pendingSubmission.submittedBy.name || d.pendingSubmission.submittedBy.email} (${d.pendingSubmission.submittedBy.email})`
+                : ""}
+              {` · ${fmtDateTime(d.pendingSubmission.submittedAt)}`}
+            </p>
+            <div className="adm-table-wrap">
+              <table className="adm-table adm-table-compact">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Submitted</th>
+                    <th>Current record</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.pendingSubmission.fields.map((f) => (
+                    <tr key={f.key}>
+                      <td>{f.label}</td>
+                      <td>{f.submitted || "—"}</td>
+                      <td>{f.current || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="field-hint">
+              Use the review status below: Reviewed approves and applies these details to the record; Needs correction
+              or Rejected leave the record unchanged.
+            </p>
+          </Section>
+        ) : null}
+
         <Section title="Review status" note={<ReviewBadge status={m.reviewStatus} />}>
           <label htmlFor="rv-status">Change status</label>
           <select id="rv-status" value={status} onChange={(e) => setStatus(e.target.value as ReviewStatus)}>
@@ -772,6 +815,10 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             {status === "NEEDS_CORRECTION" ? (
               <>
                 What needs correcting? <span className="adm-req">*</span>
+              </>
+            ) : status === "REJECTED" ? (
+              <>
+                Reason for rejection <span className="adm-req">*</span>
               </>
             ) : (
               <>

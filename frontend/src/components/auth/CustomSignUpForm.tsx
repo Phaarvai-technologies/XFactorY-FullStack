@@ -1,12 +1,23 @@
 "use client";
 
-import { useSignUp } from "@clerk/nextjs/legacy";
+import { useClerk } from "@clerk/nextjs";
+import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
+import { endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
+import {
+  authPageHref,
+  completeRegistration,
+  noticeFor,
+  rememberOAuthIntent,
+  SignUpFlowError,
+  startSignUpFlow,
+} from "@/lib/auth/registration";
 import { safeRedirectPath } from "@/lib/auth/safeRedirect";
+import { NEEDS_SECOND_STEP, pickSecondStep, sendSecondStepCode, type SecondStep } from "@/lib/auth/secondFactor";
 
 type FieldErrors = {
   name?: string;
@@ -121,8 +132,17 @@ function splitName(fullName: string) {
   };
 }
 
-export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?: string } = {}) {
+const START_FAILED = "We couldn't start creating your account right now. Please try again.";
+const TERMS_ERROR = "Please accept the Terms of Service and Privacy Policy to continue.";
+const flowErrorText = (error: unknown) => (error instanceof SignUpFlowError ? error.message : START_FAILED);
+
+export function CustomSignUpForm({
+  redirectTo: checkedRedirect,
+  staleSession = false,
+}: { redirectTo?: string; staleSession?: boolean } = {}) {
   const { isLoaded, setActive, signUp } = useSignUp();
+  const { signIn } = useSignIn();
+  const clerk = useClerk() as unknown as ClerkLike;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [name, setName] = useState("");
@@ -135,8 +155,18 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
   const [showPassword2, setShowPassword2] = useState(false);
   const [needsVerification, setNeedsVerification] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState<StatusState | null>(null);
+  // ?notice=signup_required ("Please sign up first, then sign in to continue.") and other
+  // fixed messages; the text is never taken from the URL.
+  const [status, setStatus] = useState<StatusState | null>(() => noticeFor(searchParams.get("notice")));
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  /** Server-signed token that marks this attempt as an explicit sign-up (needed to register). */
+  const flowToken = useRef<string | null>(null);
+  /** Clerk finished, X!Y registration did not (e.g. server unreachable): "Verify" retries it. */
+  const [pendingSession, setPendingSession] = useState<string | null>(null);
+  /** Existing-account path: the code step is Clerk's second step of a password sign-in. */
+  const [secondStep, setSecondStep] = useState<SecondStep | null>(null);
+  /** Clerk's "email taken" message, shown again if the existing account is already registered. */
+  const existingAccountError = useRef<string | null>(null);
 
   const redirectTo = useMemo(
     // Checked on the server by the page; only this site's own addresses are allowed.
@@ -153,6 +183,150 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
 
   function clearField(field: keyof FieldErrors) {
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
+  }
+
+  // Signed in with an identity that never completed X!Y sign-up (e.g. sent here by the
+  // proxy): end that session so sign-up can run. Only a session present when the page opened.
+  const endStaleSession = useRef(staleSession);
+  useEffect(() => {
+    if (!endStaleSession.current) return;
+    endStaleSession.current = false;
+    void endSession(clerk);
+  }, [clerk]);
+
+  /*
+   * Google sign-up that Clerk could not finish ("missing_requirements"), sent back here by
+   * /sso-callback with ?continue=google-details. Only the missing existing fields are asked
+   * for (Full name, and always the Terms checkbox, unticked); no account exists until it is
+   * complete and registered.
+   */
+  const completingGoogle =
+    searchParams.get("continue") === "google-details" && signUp?.status === "missing_requirements";
+  const missing = signUp?.missingFields ?? [];
+  const needsName = completingGoogle && (missing.includes("first_name") || missing.includes("last_name"));
+
+  async function handleCompleteGoogle(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus(null);
+    const nextErrors: FieldErrors = {};
+    if (needsName && !name.trim()) nextErrors.name = "Please enter your full name.";
+    if (!consent) nextErrors.consent = TERMS_ERROR;
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length || !signUp) return;
+    try {
+      setIsSubmitting(true);
+      let token: string;
+      try {
+        token = await startSignUpFlow("google", redirectTo, consent);
+      } catch (error) {
+        setStatus({ tone: "error", message: flowErrorText(error) });
+        return;
+      }
+      const { firstName, lastName } = splitName(name);
+      const result = await signUp.update({
+        legalAccepted: true,
+        ...(needsName ? { firstName, lastName: lastName || undefined } : {}),
+      });
+      if (result.status === "complete" && result.createdSessionId) {
+        flowToken.current = token;
+        await finishRegistration(result.createdSessionId);
+        return;
+      }
+      setStatus({
+        tone: "error",
+        message: "We still need more information to create your account. Please try again or contact X!Y support.",
+      });
+    } catch (error) {
+      setStatus({ tone: "error", message: parseClerkError(error).message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function ensureFlowToken(): Promise<string> {
+    // Carries the user's explicit Terms acceptance; the backend refuses a token without it.
+    if (!flowToken.current) flowToken.current = await startSignUpFlow("manual", redirectTo, consent);
+    return flowToken.current;
+  }
+
+  /**
+   * Clerk created (or, for an existing identity, signed in) the account and its session.
+   * Registration is finalized by the backend with that session's token BEFORE the session is
+   * ever active; then the session is ended and the user is sent to Sign-in.
+   */
+  async function finishRegistration(sessionId: string) {
+    if (!setActive) return;
+    const { token } = await tokenForCreatedSession(clerk, setActive, sessionId);
+    let result = await completeRegistration(token, await ensureFlowToken());
+    if (!result.ok && (result.code === "flow_expired" || result.code === "invalid_flow" || result.code === "flow_used")) {
+      flowToken.current = null; // long pause on the code step, or a second attempt: fresh token once
+      result = await completeRegistration(token, await ensureFlowToken());
+    }
+    if (result.ok) {
+      flowToken.current = null; // single use: a later attempt on this page gets its own
+      setPendingSession(null);
+      await endSession(clerk, sessionId);
+      if (result.alreadyRegistered && existingAccountError.current) {
+        // Existing, already-registered account on the Sign-up page: unchanged behaviour.
+        const message = existingAccountError.current;
+        existingAccountError.current = null;
+        setNeedsVerification(false);
+        setSecondStep(null);
+        setFieldErrors((current) => ({ ...current, email: message }));
+        return;
+      }
+      router.replace(authPageHref("/sign-in", redirectTo, "registered"));
+      return;
+    }
+    if (result.retryable) {
+      // Keep the Clerk session so "Verify email" can retry; nothing is active meanwhile.
+      setPendingSession(sessionId);
+      setStatus({ tone: "error", message: result.message });
+      return;
+    }
+    setPendingSession(null);
+    await endSession(clerk, sessionId);
+    setStatus({ tone: "error", message: result.message });
+  }
+
+  /**
+   * "Email taken" during manual sign-up: the Clerk identity may exist without ever having
+   * completed X!Y sign-up (an older accidental sign-in, or a sign-up whose last step failed).
+   * Signing in with the password just entered proves ownership; registration then completes.
+   * A wrong password (or a Google-only account) shows Clerk's original message.
+   */
+  async function registerExistingIdentity(takenMessage: string) {
+    if (!signIn) {
+      setFieldErrors((current) => ({ ...current, email: takenMessage }));
+      return;
+    }
+    existingAccountError.current = takenMessage;
+    try {
+      const result = await signIn.create({ identifier: email.trim(), password });
+      if (result.status === "complete" && result.createdSessionId) {
+        await finishRegistration(result.createdSessionId);
+        return;
+      }
+      const step = NEEDS_SECOND_STEP.has(result.status ?? "") ? pickSecondStep(result.supportedSecondFactors) : null;
+      if (step) {
+        await sendSecondStepCode(signIn, step);
+        setSecondStep(step);
+        setNeedsVerification(true);
+        setVerificationCode("");
+        setStatus({
+          tone: "ok",
+          message:
+            step.strategy === "totp"
+              ? "Enter the code from your authenticator app."
+              : "Verification code sent to your email.",
+        });
+        return;
+      }
+    } catch {
+      // Wrong password, Google-only account, rate limit...: fall back to Clerk's message.
+    }
+    existingAccountError.current = null;
+    setFieldErrors((current) => ({ ...current, email: takenMessage }));
   }
 
   function validateForm() {
@@ -212,12 +386,20 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
 
     try {
       setIsSubmitting(true);
+      // No Clerk account is created while the X!Y server cannot register it.
+      try {
+        await ensureFlowToken();
+      } catch (error) {
+        setStatus({ tone: "error", message: flowErrorText(error) });
+        return;
+      }
 
       await signUp.create({
         firstName,
         lastName: lastName || undefined,
         emailAddress: email.trim(),
         password,
+        legalAccepted: consent,
       });
 
       await beginVerification();
@@ -226,6 +408,8 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
 
       if (parsed.paramName === "first_name" || parsed.paramName === "last_name") {
         setFieldErrors((current) => ({ ...current, name: parsed.message }));
+      } else if (parsed.code === "form_identifier_exists") {
+        await registerExistingIdentity(parsed.message);
       } else if (parsed.paramName === "email_address") {
         setFieldErrors((current) => ({ ...current, email: parsed.message }));
       } else if (parsed.paramName === "password") {
@@ -246,6 +430,17 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
     setStatus(null);
     clearField("code");
 
+    if (pendingSession) {
+      // The code was already accepted; only the X!Y registration step needs a retry.
+      try {
+        setIsSubmitting(true);
+        await finishRegistration(pendingSession);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     if (!verificationCode.trim() || !isLoaded || !signUp || !setActive) {
       if (!verificationCode.trim()) {
         setFieldErrors((current) => ({
@@ -258,14 +453,25 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
 
     try {
       setIsSubmitting(true);
+      if (secondStep && signIn) {
+        const signInResult = await signIn.attemptSecondFactor({
+          strategy: secondStep.strategy,
+          code: verificationCode.trim(),
+        });
+        if (signInResult.status === "complete" && signInResult.createdSessionId) {
+          await finishRegistration(signInResult.createdSessionId);
+          return;
+        }
+        setStatus({ tone: "warn", message: "Verification is still required before continuing." });
+        return;
+      }
+
       const result = await signUp.attemptEmailAddressVerification({
         code: verificationCode.trim(),
       });
 
       if (result.status === "complete" && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId });
-        router.push(redirectTo);
-        router.refresh();
+        await finishRegistration(result.createdSessionId);
         return;
       }
 
@@ -290,7 +496,8 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
 
     try {
       setIsSubmitting(true);
-      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      if (secondStep && signIn) await sendSecondStepCode(signIn, secondStep);
+      else await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
       setStatus({
         tone: "ok",
         message: "A new verification code has been sent to your email.",
@@ -320,10 +527,20 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
 
     try {
       setIsSubmitting(true);
+      let googleFlow: string;
+      try {
+        googleFlow = await startSignUpFlow("google", redirectTo, consent);
+      } catch (error) {
+        setStatus({ tone: "error", message: flowErrorText(error) });
+        setIsSubmitting(false);
+        return;
+      }
+      // Explicit sign-up intent for the callback, backed by the server-signed token.
+      rememberOAuthIntent({ purpose: "sign-up", returnPath: redirectTo, flowToken: googleFlow });
       await signUp.authenticateWithRedirect({
         strategy: "oauth_google",
         redirectUrl: withBase("/sso-callback"),
-        redirectUrlComplete: withBase(redirectTo),
+        redirectUrlComplete: withBase("/sso-callback"),
         emailAddress: email.trim() || undefined,
         legalAccepted: consent,
       });
@@ -337,7 +554,7 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
   return (
     <form
       className="auth-form"
-      onSubmit={needsVerification ? handleVerifyEmail : handleCreateAccount}
+      onSubmit={needsVerification ? handleVerifyEmail : completingGoogle ? handleCompleteGoogle : handleCreateAccount}
     >
       <h1 className="auth-card-heading">Create your X!Y Factory account</h1>
 
@@ -353,6 +570,7 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
         <>
           
 
+          {(!completingGoogle || needsName) && (
           <div className="field">
             <label htmlFor="ca-name">Full name</label>
             <div className="input-wrap">
@@ -382,6 +600,9 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
             <FieldError message={fieldErrors.name} />
           </div>
 
+          )}
+          {!completingGoogle && (
+          <>
           <div className="field">
             <label htmlFor="ca-email">Email</label>
             <div className="input-wrap">
@@ -559,6 +780,8 @@ export function CustomSignUpForm({ redirectTo: checkedRedirect }: { redirectTo?:
           </button>
 
 
+          </>
+          )}
           <div className="consent">
             <input
               type="checkbox"

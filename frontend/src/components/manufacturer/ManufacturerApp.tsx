@@ -2,6 +2,11 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { usePathname, useRouter } from "next/navigation";
+import type {
+  CompanySearchResponse,
+  CompanySearchResult,
+  CompanyDetails,
+} from "@/lib/api";
 import {
   useCallback,
   useEffect,
@@ -57,6 +62,13 @@ type ServerSnapshot = {
   profileProgress: ProfileProgress;
   /** Unfinished machinery wizard to continue, or null. */
   machineryDraft: ServerMachineryDraft | null;
+  /** Admin approval of the submitted company details (tracked apart from profile completion). */
+  approval?: {
+    status: "not_submitted" | "pending" | "changes_requested" | "approved" | "rejected";
+    kind: "new_company" | "claim" | "update" | null;
+    selectedCompanyId?: string | null;
+    feedback: string | null;
+  };
 };
 
 type ProfileProgress = {
@@ -156,9 +168,13 @@ export function ManufacturerApp() {
     failed: boolean;
     /** Page where loading failed: moving to another manufacturer page tries again. */
     path?: string;
+    /** Admin approval of the submitted details; corrections reopen the details form. */
+    approval?: ServerSnapshot["approval"] | null;
   } | null>(null);
   const checked =
     server !== null && server.userId === userId && (!server.failed || server.path === pathname);
+  /** The admin asked for corrections to the submitted company details: the form may be reopened. */
+  const canResubmit = server?.approval?.status === "changes_requested";
   /** UI components use numeric ids; the database uses UUIDs. */
   const ids = useRef({ toServer: new Map<number, string>(), toLocal: new Map<string, number>(), next: 1 });
   const profileSaveTimer = useRef<number | null>(null);
@@ -210,6 +226,22 @@ export function ManufacturerApp() {
       return api<T>(path, token, init);
     },
     [getToken],
+  );
+
+  const handleSearchCompanies = useCallback(
+  async (query: string): Promise<CompanySearchResult[]> => {
+    const response = await request<CompanySearchResponse>(
+      `/manufacturer/companies/search?q=${encodeURIComponent(query)}`,
+    );
+
+    return response.items;
+  },
+  [request],
+);
+
+  const handleLoadCompany = useCallback(
+    (companyId: string) => request<CompanyDetails>(`/manufacturer/companies/${encodeURIComponent(companyId)}`),
+    [request],
   );
 
   const localId = useCallback((serverId: string): number => {
@@ -291,13 +323,13 @@ export function ManufacturerApp() {
 
     if (!checked || server.failed) return;
     // Details already saved -> never show the form again; not saved yet -> fill them first.
-    if ((screen === "landing" || isManufacturerAccountPath(pathname)) && server.accountExists) {
+    if ((screen === "landing" || (isManufacturerAccountPath(pathname) && !canResubmit)) && server.accountExists) {
       // Existing Manufacturer account: straight to the portal (data is already loaded).
       router.replace(MANUFACTURER_DASHBOARD_PATH);
     } else if (isManufacturerDashboardPath(pathname) && !server.accountExists) {
       router.replace(MANUFACTURER_ACCOUNT_PATH);
     }
-  }, [checked, isLoaded, isSignedIn, pathname, router, screen, server]);
+  }, [canResubmit, checked, isLoaded, isSignedIn, pathname, router, screen, server]);
 
   // Load the manufacturer's saved data from the backend.
   useEffect(() => {
@@ -328,7 +360,8 @@ export function ManufacturerApp() {
         if (cancelled) return;
         applySnapshot(snapshot);
         if (snapshot.accountExists) markManufacturerProfileComplete();
-        setServer({ userId, accountExists: snapshot.accountExists, failed: false });
+        setServer({ userId, accountExists: snapshot.accountExists, failed: false,
+                    approval: snapshot.approval ?? null });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -369,10 +402,10 @@ export function ManufacturerApp() {
     }
     applySnapshot(snapshot);
     applyAccountSubmission(submission, setState, setProfileData);
-    if (userId) setServer({ userId, accountExists: true, failed: false });
+    if (userId) setServer({ userId, accountExists: true, failed: false, approval: snapshot.approval ?? null });
     markManufacturerProfileComplete();
     router.push(MANUFACTURER_DASHBOARD_PATH);
-    showToast("Account created — let’s build your profile.");
+    showToast("Details sent to X!Y for approval — you can keep building your profile.");
   }
 
   function handleOpenProfileWizard(jumpToNextIncomplete: boolean) {
@@ -699,7 +732,7 @@ export function ManufacturerApp() {
     const redirecting =
       checked &&
       !server.failed &&
-      (screen === "dashboard" ? !server.accountExists : server.accountExists);
+      (screen === "dashboard" ? !server.accountExists : server.accountExists && !(screen === "account" && canResubmit));
     if (!checked || redirecting) {
       return <ManufacturerLoading />;
     }
@@ -722,15 +755,21 @@ export function ManufacturerApp() {
       ) : null}
 
       {screen === "account" ? (
-        <AccountScreen
-          request={request}
-          onBack={() => {
-            router.push(MANUFACTURER_OVERVIEW_PATH);
-            window.scrollTo(0, 0);
-          }}
-          onAccountCreated={handleAccountCreated}
-        />
-      ) : null}
+  <AccountScreen
+    onBack={() => {
+      router.push(MANUFACTURER_OVERVIEW_PATH);
+      window.scrollTo(0, 0);
+    }}
+    onAccountCreated={handleAccountCreated}
+    onSearchCompanies={handleSearchCompanies}
+    onLoadCompany={handleLoadCompany}
+    initial={canResubmit ? {
+      ...state.account,
+      contact: state.contact.email || state.contact.phone || "",
+      companyId: server?.approval?.kind === "new_company" ? null : server?.approval?.selectedCompanyId ?? null,
+    } : undefined}
+  />
+) : null}
 
       {screen === "dashboard" ? (
         <>
@@ -739,6 +778,7 @@ export function ManufacturerApp() {
             pct={pct}
             flags={flags}
             onOpenProfileWizard={handleOpenProfileWizard}
+            onFixCompanyDetails={canResubmit ? () => router.push(MANUFACTURER_ACCOUNT_PATH) : undefined}
             onOpenMachineryWizard={openMachineryWizard}
             onEditMachinery={handleEditMachinery}
             onSetMachineryStatus={handleSetMachineryStatus}

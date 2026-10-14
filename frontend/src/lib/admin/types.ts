@@ -1,6 +1,6 @@
 /** Shapes returned by the Admin API (/api/v1/admin/...). */
 
-export type ReviewStatus = "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "NEEDS_CORRECTION" | "REVIEWED";
+export type ReviewStatus = "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "NEEDS_CORRECTION" | "REVIEWED" | "REJECTED";
 export type RecordType = "REAL" | "DEMO" | "TEST";
 export type EntrySource = "MANUFACTURER" | "ADMIN_ASSISTED" | "IMPORTED";
 export type AccountStatus = "active" | "suspended" | "deactivated";
@@ -170,6 +170,17 @@ export type ManufacturerDetail = {
   notes: Note[];
   history: ChangeEntry[];
   timeline: { at: string; event: string }[];
+  /** Company details awaiting the admin's decision (staged; applied to the record on approval). */
+  pendingSubmission: {
+    id: string;
+    kind: "new_company" | "claim" | "update";
+    kindLabel: string;
+    status: "pending" | "changes_requested";
+    submittedAt: string;
+    submittedBy: { name: string; email: string } | null;
+    feedback: string | null;
+    fields: { key: string; label: string; submitted: string; current: string }[];
+  } | null;
   admins: AdminUserRef[];
   requiredFields: { key: string; label: string; section: string; done: boolean }[];
   sectionsOrder: string[];

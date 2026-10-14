@@ -1,11 +1,19 @@
 "use client";
 
+import { useClerk } from "@clerk/nextjs";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
+import { endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
+import {
+  authPageHref,
+  checkRegistration,
+  noticeFor,
+  rememberOAuthIntent,
+} from "@/lib/auth/registration";
 import { safeRedirectPath } from "@/lib/auth/safeRedirect";
 
 type FieldErrors = {
@@ -69,15 +77,20 @@ function FieldError({ message }: { message?: string }) {
   );
 }
 
-export function CustomSignInForm({ redirectTo: checkedRedirect }: { redirectTo?: string } = {}) {
+export function CustomSignInForm({
+  redirectTo: checkedRedirect,
+  staleSession = false,
+}: { redirectTo?: string; staleSession?: boolean } = {}) {
   const { isLoaded, setActive, signIn } = useSignIn();
+  const clerk = useClerk() as unknown as ClerkLike;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState<StatusState | null>(null);
+  // Fixed messages selected by ?notice= (e.g. "registered" after sign-up); never text from the URL.
+  const [status, setStatus] = useState<StatusState | null>(() => noticeFor(searchParams.get("notice")));
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -106,6 +119,87 @@ export function CustomSignInForm({ redirectTo: checkedRedirect }: { redirectTo?:
   function clearField(field: keyof FieldErrors) {
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
   }
+
+  // A session left over from an identity that never completed X!Y sign-up (the page found it
+  // signed in but not registered): end it so this form can sign in normally. Only for a session
+  // that existed when the page opened, never for one this form creates.
+  const endStaleSession = useRef(staleSession);
+  useEffect(() => {
+    if (!endStaleSession.current) return;
+    endStaleSession.current = false;
+    void endSession(clerk);
+  }, [clerk]);
+
+  function goToSignUp() {
+    router.replace(authPageHref("/sign-up", redirectTo, "signup_required"));
+  }
+
+  /**
+   * Clerk accepted the credentials and created a session. Before that session becomes
+   * active, the backend must confirm the identity completed X!Y sign-up. Registered: activate
+   * and continue. Not registered: end the session and go to Sign-up. Backend unreachable:
+   * end the session and say so (never "sign up first").
+   */
+  async function finishSignIn(sessionId: string) {
+    if (!setActive) return;
+    const { token, activated } = await tokenForCreatedSession(clerk, setActive, sessionId);
+    const check = await checkRegistration(token);
+    if (check.state === "registered") {
+      if (!activated) await setActive({ session: sessionId });
+      router.push(redirectTo);
+      router.refresh();
+      return;
+    }
+    await endSession(clerk, sessionId);
+    if (check.state === "unregistered") {
+      goToSignUp();
+      return;
+    }
+    setStatus({ tone: "error", message: check.message });
+  }
+
+  /** Clerk says this browser already has a session: same registration rule. */
+  async function continueExistingSession() {
+    const current = clerk.session;
+    const check = await checkRegistration(current ? await current.getToken().catch(() => null) : null);
+    if (check.state === "registered") {
+      router.push(redirectTo);
+      router.refresh();
+      return;
+    }
+    if (check.state === "unregistered") {
+      await endSession(clerk);
+      goToSignUp();
+      return;
+    }
+    setStatus({ tone: "error", message: check.message });
+  }
+
+  // Google sign-in that still needs a second step (MFA / new device) comes back here from
+  // /sso-callback with ?continue=second-factor: show the existing code step.
+  const resumeSecondFactor = searchParams.get("continue") === "second-factor";
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!resumeSecondFactor || !isLoaded || !signIn || resumed.current) return;
+    resumed.current = true;
+    if (signIn.status !== "needs_second_factor" && signIn.status !== "needs_client_trust") return;
+    const step = pickDeviceStep(signIn.supportedSecondFactors);
+    if (!step) return;
+    const identifier = signIn.identifier ?? "";
+    sendDeviceCode(signIn, step)
+      .then(() => {
+        setEmail(identifier);
+        setDeviceStep(step);
+        setStatus({
+          tone: "ok",
+          message:
+            step.strategy === "totp"
+              ? "Enter the code from your authenticator app."
+              : "Verification code sent to your email.",
+        });
+      })
+      .catch((error: unknown) => setStatus({ tone: "error", message: parseClerkError(error).message }));
+  }, [resumeSecondFactor, isLoaded, signIn]);
 
   function validateFields() {
     const nextErrors: FieldErrors = {};
@@ -141,9 +235,7 @@ export function CustomSignInForm({ redirectTo: checkedRedirect }: { redirectTo?:
       });
 
       if (result.status === "complete" && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId });
-        router.push(redirectTo);
-        router.refresh();
+        await finishSignIn(result.createdSessionId);
         return;
       }
 
@@ -172,10 +264,13 @@ export function CustomSignInForm({ redirectTo: checkedRedirect }: { redirectTo?:
     } catch (error) {
       const parsed = parseClerkError(error);
 
-      if (
+      if (parsed.code === "form_identifier_not_found") {
+        // Clerk has no such account: registration comes first.
+        goToSignUp();
+        return;
+      } else if (
         parsed.paramName === "identifier" ||
-        parsed.paramName === "email_address" ||
-        parsed.code === "form_identifier_not_found"
+        parsed.paramName === "email_address"
       ) {
         setFieldErrors((current) => ({ ...current, email: parsed.message }));
       } else if (
@@ -184,8 +279,7 @@ export function CustomSignInForm({ redirectTo: checkedRedirect }: { redirectTo?:
       ) {
         setFieldErrors((current) => ({ ...current, password: parsed.message }));
       } else if (parsed.code === "session_exists") {
-        router.push(redirectTo);
-        router.refresh();
+        await continueExistingSession();
         return;
       } else if (parsed.code === "too_many_requests") {
         setStatus({ tone: "warn", message: parsed.message });
@@ -335,12 +429,7 @@ async function handleNewPassword() {
     });
 
     if (result.status === "complete" && result.createdSessionId) {
-      await setActive({
-        session: result.createdSessionId,
-      });
-
-      router.push(redirectTo);
-      router.refresh();
+      await finishSignIn(result.createdSessionId);
     } else {
       setStatus({
         tone: "warn",
@@ -385,9 +474,7 @@ async function handleDeviceCode() {
     });
 
     if (result.status === "complete" && result.createdSessionId) {
-      await setActive({ session: result.createdSessionId });
-      router.push(redirectTo);
-      router.refresh();
+      await finishSignIn(result.createdSessionId);
       return;
     }
 
@@ -399,8 +486,7 @@ async function handleDeviceCode() {
     const parsed = parseClerkError(error);
 
     if (parsed.code === "session_exists") {
-      router.push(redirectTo);
-      router.refresh();
+      await continueExistingSession();
       return;
     }
 
@@ -444,10 +530,14 @@ async function handleResendDeviceCode() {
 
     try {
       setIsSubmitting(true);
+      // Sign-in intent (the callback's default anyway). Both URLs point at the callback: it,
+      // not Clerk, decides where to go, and it never turns an unknown Google account into a
+      // sign-up (Clerk's handleRedirectCallback would: `transferable` defaults to true).
+      rememberOAuthIntent({ purpose: "sign-in", returnPath: redirectTo });
       await signIn.authenticateWithRedirect({
         strategy: "oauth_google",
         redirectUrl: withBase("/sso-callback"),
-        redirectUrlComplete: withBase(redirectTo),
+        redirectUrlComplete: withBase("/sso-callback"),
       });
     } catch (error) {
       const parsed = parseClerkError(error);

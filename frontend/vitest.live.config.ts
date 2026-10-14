@@ -10,7 +10,10 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   resolve: {
     alias: [
-      { find: "@clerk/nextjs", replacement: here("./tests/mocks/clerk.tsx") },
+      // Exact matches (as in vitest.config.ts) so "@clerk/nextjs/legacy" and "/server" resolve too.
+      { find: /^@clerk\/nextjs\/legacy$/, replacement: here("./tests/mocks/clerkLegacy.tsx") },
+      { find: /^@clerk\/nextjs\/server$/, replacement: here("./tests/mocks/clerkServer.ts") },
+      { find: /^@clerk\/nextjs$/, replacement: here("./tests/mocks/clerk.tsx") },
       { find: "next/navigation", replacement: here("./tests/mocks/navigation.tsx") },
       { find: /^@\//, replacement: here("./src/") },
     ],
