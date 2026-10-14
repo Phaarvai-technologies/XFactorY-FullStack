@@ -68,10 +68,11 @@ async def test_admin_actions_notify_the_manufacturer(client, no_clerk):  # noqa:
     n = (await client.post("/manufacturer/notifications/read", headers=mh, json={})).json()
     assert n["unread"] == 0 and all(i["read"] for i in n["items"])
 
-    # Reviewed: the correction box goes away, the history stays
+    # Reviewed: the correction box goes away, the history stays, plus an "approved" message
     await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"review_status": "REVIEWED"})
     n = (await client.get("/manufacturer/notifications", headers=mh)).json()
-    assert n["correction"] is None and len(n["items"]) == 3
+    assert n["correction"] is None and len(n["items"]) == 4
+    assert n["items"][0]["title"] == "Your company details were approved"
 
     # Signed out -> 401
     assert (await client.get("/manufacturer/notifications", headers={"Authorization": ""})).status_code == 401

@@ -44,6 +44,10 @@ REQUIRED = [
     ("admin_accounts", "must_change_password", "013_admin_management.sql"),
     ("notifications", "popup_shown_at", "015_manufacturer_notifications.sql"),
     ("admin_internal_notes", "shared_with_manufacturer", "015_manufacturer_notifications.sql"),
+    ("users", "registration_completed_at", "014_user_registration.sql"),
+    ("registration_flows", None, "014_user_registration.sql"),
+    ("users", "terms_accepted_at", "016_terms_acceptance.sql"),
+    ("registration_settings", None, "018_registration_compat.sql"),
 ]
 
 

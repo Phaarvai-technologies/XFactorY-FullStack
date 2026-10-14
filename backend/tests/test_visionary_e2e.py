@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 
-from test_e2e_local import DB, PNG, client  # noqa: F401  (shared fixture)
+from test_e2e_local import DB, PNG, approve_company, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not DB, reason="E2E_DATABASE_URL not set")
 
@@ -27,8 +27,8 @@ PROFILE = {
     "location": {"address": "7 SIDCO Estate", "city": "Chennai", "state": "Tamil Nadu", "country": "India",
                  "zip": "600032", "pin": None, "sez": "Not in SEZ", "serviceableAreas": []},
     "certifications": [{"name": "ISO 9001", "body": "BSI", "fileName": "", "status": "Pending"}],
-    "infra": {"electricity": "", "water": "", "storage": "", "packaging": "", "waste": "", "qa": ""},
-    "faqs": [],
+    "infra": {"electricity": "400 kVA", "water": "", "storage": "", "packaging": "", "waste": "", "qa": ""},
+    "faqs": [{"q": "MOQ?", "a": "500 cups"}],
 }
 MACHINE = {"industry": "Packaging", "subcategory": "Paper cups", "type": "Injection Moulding", "capacity": "5000",
            "age": "3", "condition": "Good", "technical": "Engel 220T", "images": [], "rawMatStatus": "",
@@ -48,8 +48,9 @@ def auth(client, sub):
     return {"Authorization": f"Bearer {client.token_for(sub)}"}
 
 
-async def make_manufacturer(client, publish=True):
-    """The fixture's own user becomes a manufacturer with a published machine."""
+async def make_manufacturer(client, publish=True, approve=True):
+    """The fixture's own user becomes a manufacturer with a published machine: details approved
+    by an admin and the profile 100% complete (both are needed to be visible to Visionaries)."""
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
     assert (await client.put("/manufacturer/profile", json=PROFILE)).status_code == 200
     if publish:
@@ -60,6 +61,9 @@ async def make_manufacturer(client, publish=True):
     org = (await client.sql("""SELECT o.id FROM organizations o JOIN memberships m ON m.organization_id=o.id
                                JOIN users u ON u.id=m.user_id WHERE u.clerk_user_id=:c
                                AND o.organization_type='manufacturer'""", c=client.user))[0][0]
+    if approve:
+        r = await approve_company(client, str(org))
+        assert r.status_code == 200, r.text
     return str(org)
 
 

@@ -68,8 +68,43 @@ async def client(monkeypatch):
                         "iss": os.environ["CLERK_ISSUER"], "azp": "http://localhost:3000"},
                        key, algorithm="RS256")
     transport = httpx.ASGITransport(app=app)
+    # Since migration 014 a Clerk identity must complete X!Y sign-up before any app API works.
+    # These tests are about the app itself, so each Clerk user seen in a request is first
+    # registered through the REAL endpoints (sign-up flow token + /registration/complete).
+    # Opt out per user with `c.unregistered.add(sub)` (registration tests do).
+    registered: set[str] = set()
+    unregistered: set[str] = set()
+
+    async def register(sub: str, method: str = "manual") -> dict:
+        tok = jwt.encode({"sub": sub, "sid": f"sess_{sub}", "iat": int(time.time()),
+                          "exp": int(time.time()) + 600, "iss": os.environ["CLERK_ISSUER"],
+                          "azp": "http://localhost:3000"}, key, algorithm="RS256")
+        async with httpx.AsyncClient(transport=transport, base_url="http://t/api/v1") as inner:
+            flow = await inner.post("/identity/registration/flows", json={"method": method, "returnPath": "/",
+                                                                         "termsAccepted": True,
+                                                                         "termsVersion": "terms-1.2;privacy-1.4"})
+            assert flow.status_code == 201, flow.text
+            done = await inner.post("/identity/registration/complete", json={"flowToken": flow.json()["flowToken"]},
+                                    headers={"Authorization": f"Bearer {tok}"})
+            assert done.status_code == 200, done.text
+        registered.add(sub)
+        return done.json()
+
+    async def auto_register(request):
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer ey") or "/identity/registration" in request.url.path \
+                or "/webhooks/" in request.url.path:
+            return
+        sub = jwt.decode(auth_header[7:], options={"verify_signature": False}).get("sub")
+        if sub and sub not in registered and sub not in unregistered:
+            await register(sub)
+
     async with httpx.AsyncClient(transport=transport, base_url="http://t/api/v1",
-                                 headers={"Authorization": f"Bearer {token}"}) as c:
+                                 headers={"Authorization": f"Bearer {token}"},
+                                 event_hooks={"request": [auto_register]}) as c:
+        c.register = register
+        c.unregistered = unregistered
+        c.registered = registered
         c.uploads = uploads
         c.user = user
         c.make_token = lambda: jwt.encode(
@@ -80,7 +115,33 @@ async def client(monkeypatch):
             {"sub": sub, "iat": int(time.time()), "exp": int(time.time()) + 600,
              "iss": os.environ["CLERK_ISSUER"], "azp": "http://localhost:3000"}, key, algorithm="RS256")
         yield c
+        # Test isolation: tests reuse fixed company names ("Raman Precision") for different
+        # users, which the duplicate-company rule (same name + country) rightly refuses across
+        # tests sharing one database. Archive this test's companies when it ends.
+        subs = list(registered | {user})
+        await _sql(engine, text("""
+            UPDATE organizations SET is_archived = true
+            WHERE id IN (SELECT m.organization_id FROM memberships m JOIN users u ON u.id = m.user_id
+                         WHERE u.clerk_user_id = ANY(:subs))
+        """), {"subs": subs})
+        await _sql(engine, text("""
+            UPDATE manufacturer_submissions SET status = 'rejected', review_feedback = 'test teardown'
+            WHERE status IN ('pending', 'changes_requested') AND submitted_by_user_id IN
+                  (SELECT id FROM users WHERE clerk_user_id = ANY(:subs))
+        """), {"subs": subs})
     await engine.dispose()
+
+
+async def approve_company(client, org_id, decision="REVIEWED", reason=None):
+    """An X!Y admin decides through the real admin endpoint (review-status control)."""
+    admin = f"admin_{uuid.uuid4().hex[:8]}"
+    hdr = {"Authorization": f"Bearer {client.token_for(admin)}"}
+    assert (await client.get("/identity/me", headers=hdr)).status_code == 200
+    await client.sql("""INSERT INTO platform_role_assignments (user_id, platform_role)
+                        SELECT id, 'platform_administrator' FROM users WHERE clerk_user_id=:s""", s=admin)
+    r = await client.patch(f"/admin/manufacturers/{org_id}/admin-fields", headers=hdr,
+                           json={"review_status": decision, "reason": reason})
+    return r
 
 
 async def _sql(engine, q, p):

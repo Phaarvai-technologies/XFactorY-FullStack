@@ -11,14 +11,14 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# A manufacturer is listed for Visionaries once its account details are saved (the same
-# moment the Manufacturer portal made it discoverable), while the organization is active,
-# not archived by an admin, not a TEST record, not rejected in review, and its owner's
-# account is not suspended.
-DISCOVERABLE = """
+from app.core import eligibility
+
+# A manufacturer is listed for Visionaries (search, recommendations, profile page, booking
+# drafts) only when the central eligibility rule allows it (app/core/eligibility.py: admin
+# approval AND a 100% complete profile), while the organization is active, not archived by
+# an admin, not a TEST record, and its owner's account is not suspended.
+DISCOVERABLE = f"""
     FROM organizations o
-    JOIN manufacturer_onboarding mo ON mo.organization_id = o.id
-         AND mo.personal_information_completed AND mo.status <> 'rejected'
     JOIN LATERAL (
         SELECT u.status FROM memberships m JOIN users u ON u.id = m.user_id
         WHERE m.organization_id = o.id AND m.status = 'active'
@@ -29,6 +29,7 @@ DISCOVERABLE = """
     LEFT JOIN files logo ON logo.id = op.logo_file_id
     WHERE o.organization_type = 'manufacturer' AND o.status = 'active'
       AND NOT o.is_archived AND o.record_type <> 'TEST'
+      AND {eligibility.sql_condition("visionary_visible")}
 """
 
 ORG_COLUMNS = """
@@ -236,6 +237,12 @@ class VisionaryRepository:
         return {"machines": [dict(r) for r in machines.mappings()],
                 "certs": [dict(r) for r in certs.mappings()],
                 "availability": [dict(r) for r in availability.mappings()]}
+
+    async def booking_allowed(self, org_id: UUID) -> bool:
+        """Central booking rule (approval + 100% complete profile), checked when a request is sent."""
+        return bool(await self.db.scalar(text(f"""
+            SELECT {eligibility.sql_condition("booking")} FROM organizations o WHERE o.id = :org
+        """), {"org": org_id}))
 
     async def is_member_of(self, user_id: UUID, org_id: UUID) -> bool:
         return bool(await self.db.scalar(text("""

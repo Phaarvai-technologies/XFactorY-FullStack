@@ -20,11 +20,13 @@ class AccountPayload(_Model):
     contact: str = Field(min_length=3, max_length=320)
     dob: date
     companyName: str = Field(min_length=1, max_length=200)
-    selectedCompanyId: UUID | None = None
     companyType: str = Field(min_length=1, max_length=150)
     country: str = Field(min_length=1, max_length=100)
     phone: str = Field(default="", max_length=30)
     capacity: str = Field(default="", max_length=100)
+    # Database id of the company picked from the search list (None = a new company). The
+    # backend checks the record and the user's ownership before writing anything.
+    companyId: UUID | None = None
 
     @field_validator("dob")
     @classmethod

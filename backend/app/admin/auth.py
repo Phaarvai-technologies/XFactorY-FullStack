@@ -15,10 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import accounts
 from app.core.auth import current_actor
-from app.core.clerk import ClerkManagement
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
-from app.identity.repository import upsert_user
+from app.identity.registration import RegistrationRequired, ensure_registered
 
 ADMIN_ROLES = ("platform_administrator", "platform_operator", "support_specialist", "verification_analyst")
 # While an admin still has a temporary password, only these admin endpoints work.
@@ -66,24 +65,21 @@ async def current_admin(
     if accounts.is_admin_session_token(token):
         return await _password_admin(request, token, session, settings)
     actor = await current_actor(request, authorization, settings)
+    # Registration rule (including recognition of accounts from before explicit registration).
+    await ensure_registered(session, settings, actor.clerk_user_id)
     row = (await session.execute(text("""
-        SELECT id, email, first_name, last_name, display_name, status FROM users WHERE clerk_user_id=:c
+        SELECT id, email, first_name, last_name, display_name, status, registration_completed_at
+        FROM users WHERE clerk_user_id=:c
     """), {"c": actor.clerk_user_id})).first()
+    # The X!Y (Clerk) admin sign-in is for registered X!Y accounts only. Nothing is created
+    # here any more: a Clerk identity that never completed sign-up is refused (403
+    # registration_required). Admin email + password accounts are unaffected.
     if row is None:
-        # Signed in but never synchronized (webhook not configured): create the user record.
-        profile = await ClerkManagement(settings).actor_profile(actor)
-        if not profile.get("email"):
-            raise HTTPException(403, "Admin access only")
-        await upsert_user(session, clerk_user_id=actor.clerk_user_id, email=profile["email"],
-                          display_name=f'{profile.get("first_name", "")} {profile.get("last_name", "")}'.strip()
-                          or profile["email"], first_name=profile.get("first_name") or None,
-                          last_name=profile.get("last_name") or None)
-        await session.commit()
-        row = (await session.execute(text("""
-            SELECT id, email, first_name, last_name, display_name, status FROM users WHERE clerk_user_id=:c
-        """), {"c": actor.clerk_user_id})).first()
+        raise RegistrationRequired()
     if row.status != "active":
         raise HTTPException(403, "This account has been suspended.")
+    if row.registration_completed_at is None:
+        raise RegistrationRequired()
     roles = await _active_roles(session, row.id)
     if not roles and str(row.email).lower() in settings.admin_email_list:
         await grant(session, row.id)

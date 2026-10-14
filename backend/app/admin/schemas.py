@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ReviewStatus = Literal["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "NEEDS_CORRECTION", "REVIEWED"]
+ReviewStatus = Literal["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "NEEDS_CORRECTION", "REVIEWED", "REJECTED"]
 RecordType = Literal["REAL", "DEMO", "TEST"]
 EntrySource = Literal["MANUFACTURER", "ADMIN_ASSISTED", "IMPORTED"]
 

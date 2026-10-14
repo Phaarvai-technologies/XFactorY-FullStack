@@ -9,9 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import auth as core_auth
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
-from app.core.welcome import send_welcome_soon
 from app.identity.context import ActorContext
-from app.identity.repository import get_user_by_clerk_id, upsert_user
+from app.identity.registration import ensure_registered
 
 
 def verify_clerk_token(token: str, settings: Settings) -> dict:
@@ -35,11 +34,14 @@ def verify_clerk_token(token: str, settings: Settings) -> dict:
 async def _fetch_clerk_user(clerk_user_id: str, settings: Settings) -> dict:
     if not settings.clerk_secret_key:
         raise HTTPException(409, "User is not synchronized yet; configure the Clerk webhook")
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(
-            f"https://api.clerk.com/v1/users/{clerk_user_id}",
-            headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"https://api.clerk.com/v1/users/{clerk_user_id}",
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
+            )
+    except httpx.HTTPError as exc:  # network trouble: a retry state, not a verdict
+        raise HTTPException(503, "Unable to reach Clerk right now. Please try again.") from exc
     if response.status_code != 200:
         raise HTTPException(502, "Unable to synchronize user from Clerk")
     return response.json()
@@ -57,44 +59,40 @@ def _primary_email(data: dict) -> tuple[str, bool]:
     return item.get("email_address", ""), verification.get("status") == "verified"
 
 
+async def authenticated_claims(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+    settings: Annotated[Settings, Depends(get_settings)] = None,
+) -> dict:
+    """Authentication only: a valid Clerk session token. Says nothing about registration."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing Clerk session token")
+    claims = verify_clerk_token(authorization.removeprefix("Bearer ").strip(), settings)
+    request.state.clerk_user_id = claims["sub"]
+    return claims
+
+
+AuthenticatedClaims = Annotated[dict, Depends(authenticated_claims)]
+
+
 async def get_actor(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
     session: Annotated[AsyncSession, Depends(get_session)] = None,
     settings: Annotated[Settings, Depends(get_settings)] = None,
 ) -> ActorContext:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing Clerk session token")
-    claims = verify_clerk_token(authorization.removeprefix("Bearer ").strip(), settings)
+    """Authenticated AND registered. A valid Clerk session whose user never completed X!Y
+    sign-up gets 403 registration_required; nothing is created or promoted here (reading is
+    never registration). Database errors propagate as server errors, never as "unregistered"."""
+    claims = await authenticated_claims(request, authorization, settings)
     clerk_user_id = claims["sub"]
-    request.state.clerk_user_id = clerk_user_id
-    row = await get_user_by_clerk_id(session, clerk_user_id)
-    if row is None:
-        data = await _fetch_clerk_user(clerk_user_id, settings)
-        email, verified = _primary_email(data)
-        display_name = " ".join(
-            part for part in [data.get("first_name"), data.get("last_name")] if part
-        ) or email
-        user_id = await upsert_user(
-            session,
-            clerk_user_id=clerk_user_id,
-            email=email,
-            display_name=display_name,
-            first_name=data.get("first_name"),
-            last_name=data.get("last_name"),
-            email_verified=verified,
-        )
-        await session.commit()
-        send_welcome_soon(user_id)
-    else:
-        if row["status"] != "active":
-            raise HTTPException(403, "This account has been suspended. Please contact X!Y support.")
-        user_id = row["id"]
-        await session.execute(text("""
-            UPDATE users SET last_seen_at=now()
-            WHERE id=:id AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
-        """), {"id": user_id})
-        await session.commit()
+    row = await ensure_registered(session, settings, clerk_user_id, claims.get("sid"))
+    user_id = row["id"]
+    await session.execute(text("""
+        UPDATE users SET last_seen_at=now()
+        WHERE id=:id AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
+    """), {"id": user_id})
+    await session.commit()
     # Clerk session-token v1 uses `org_id`, v2 uses `o.id`.
     organization_claim = claims.get("o")
     clerk_organization_id = claims.get("org_id")

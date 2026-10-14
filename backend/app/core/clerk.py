@@ -53,15 +53,18 @@ class ClerkManagement:
         if not self.secret:
             raise HTTPException(503, "CLERK_SECRET_KEY is not configured on the backend")
         headers = {"Authorization": f"Bearer {self.secret}"}
-        async with httpx.AsyncClient(base_url="https://api.clerk.com/v1", headers=headers, timeout=15) as client:
-            user_response = await client.get(f"/users/{actor.clerk_user_id}")
-            if user_response.status_code >= 400:
-                raise HTTPException(502, "Unable to read the signed-in user from Clerk")
-            org = {}
-            if actor.clerk_org_id:
-                org_response = await client.get(f"/organizations/{actor.clerk_org_id}")
-                if org_response.status_code < 400:
-                    org = org_response.json()
+        try:
+            async with httpx.AsyncClient(base_url="https://api.clerk.com/v1", headers=headers, timeout=15) as client:
+                user_response = await client.get(f"/users/{actor.clerk_user_id}")
+                if user_response.status_code >= 400:
+                    raise HTTPException(502, "Unable to read the signed-in user from Clerk")
+                org = {}
+                if actor.clerk_org_id:
+                    org_response = await client.get(f"/organizations/{actor.clerk_org_id}")
+                    if org_response.status_code < 400:
+                        org = org_response.json()
+        except httpx.HTTPError as exc:  # network / proxy trouble: a retry state, not a crash
+            raise HTTPException(503, "Unable to reach Clerk right now. Please try again.") from exc
         user = user_response.json()
         emails = user.get("email_addresses", [])
         primary = next(

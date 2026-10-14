@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from test_e2e_local import ACCOUNT, PNG, PNG2, client  # noqa: F401  (shared fixture)
+from test_e2e_local import ACCOUNT, PNG, PNG2, approve_company, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
 
@@ -93,8 +93,18 @@ async def test_profile_update_flow(client):
     assert pd["company"]["vision"] == "Quality first"                                             # untouched
     assert body["state"]["epic2"]["companyDetailsDone"] and body["state"]["epic2"]["locationDone"]
     row = await profile_row(client)
-    assert row.display_name == "Raman Precision Pvt Ltd" and row.city == "Chengalpattu"
+    # The company name requires admin review: staged (shown to the owner), main record unchanged
+    assert row.display_name != "Raman Precision Pvt Ltd" and row.city == "Chengalpattu"
     assert row.country_code == "IN" and not row.no_geo
+    staged = (await client.sql("""SELECT s.payload->>'companyName' FROM manufacturer_submissions s
+                                  JOIN users u ON u.id=s.submitted_by_user_id
+                                  WHERE u.clerk_user_id=:c AND s.status='pending'""", c=client.user))
+    assert [r[0] for r in staged] == ["Raman Precision Pvt Ltd"]  # still one open submission
+    org_id = (await client.sql("""SELECT o.id FROM organizations o JOIN memberships m ON m.organization_id=o.id
+                                  JOIN users u ON u.id=m.user_id WHERE u.clerk_user_id=:c""", c=client.user))[0][0]
+    assert (await approve_company(client, str(org_id))).status_code == 200
+    row = await profile_row(client)
+    assert row.display_name == "Raman Precision Pvt Ltd"  # approved -> merged into the main record
 
     # 5) Page refresh: a new GET returns exactly what the PATCH returned
     refreshed = (await client.get("/manufacturer/bootstrap")).json()

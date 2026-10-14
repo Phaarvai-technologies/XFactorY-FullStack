@@ -1,7 +1,8 @@
 """Welcome email for a newly registered user.
 
-Called right after the user record is created (first API call after sign-up, or the Clerk
-`user.created` webhook - whichever comes first). It runs in the background, so a slow or
+Called when a user completes X!Y registration (POST /identity/registration/complete after
+an explicit Sign-up). A Clerk identity or a webhook-created users row is not a registration,
+so neither triggers it. It runs in the background, so a slow or
 unreachable mail server never delays sign-up, and it is sent at most once per user:
 `users.welcome_email_sent_at` is claimed atomically before sending.
 

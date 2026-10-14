@@ -16,6 +16,7 @@ REVIEW_TO_DB = {
     "SUBMITTED": "submitted",
     "NEEDS_CORRECTION": "changes_requested",
     "REVIEWED": "approved",
+    "REJECTED": "rejected",
 }
 REVIEW_STATUSES = tuple(REVIEW_TO_DB)
 RECORD_TYPES = ("REAL", "DEMO", "TEST")

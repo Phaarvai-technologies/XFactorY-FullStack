@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import manufacturer_approval as approval
 from app.core.auth import Actor
 from app.storage.supabase import DecodedImage, UploadedObject
 
@@ -80,6 +81,44 @@ def parse_pin(pin: Any) -> tuple[float, float] | None:
     except ValueError:
         return None
     return (lat, lng) if -90 <= lat <= 90 and -180 <= lng <= 180 else None
+
+
+def normalize_company_name(value: Any) -> str:
+    """Comparison form of a company name: trimmed, inner whitespace collapsed, case-folded.
+    Used for search and duplicate checks only; the stored name is never rewritten."""
+    # lower() (not casefold) so Python and PostgreSQL lower() agree.
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def _like_escape(value: str) -> str:
+    """User text inside LIKE: % and _ are literal characters, not wildcards."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# Every manufacturer organization is a selectable COMPANY for onboarding lookup - seeded /
+# imported rows included, however they were loaded (entry_source may be the column default
+# 'MANUFACTURER') - except an organization the app created for a user (created_by_user_id
+# set) that is not an approved company yet: the empty per-user placeholder, or one whose
+# details are still awaiting admin approval. Visionary visibility is a different rule
+# (app/core/eligibility.py).
+LISTED_COMPANY_SQL = """
+    o.organization_type = 'manufacturer'
+    AND o.status IN ('active', 'claim_pending')
+    AND NOT o.is_archived
+    AND o.record_type <> 'TEST'
+    AND NOT (o.created_by_user_id IS NOT NULL
+             AND o.entry_source = 'MANUFACTURER'
+             AND NOT EXISTS (SELECT 1 FROM manufacturer_onboarding mo
+                             WHERE mo.organization_id = o.id
+                               AND (mo.status = 'approved'
+                                    -- accounts from before admin approval existed
+                                    OR (mo.personal_information_completed
+                                        AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
+                                                        WHERE s.organization_id = o.id)))))
+"""
+
+# Who may update an organization through the onboarding form: its active owner / admin.
+OWNER_ROLES_SQL = "('owner', 'admin')"
 
 
 def profile_flags(data: dict) -> dict[str, bool]:
@@ -174,8 +213,12 @@ class ManufacturerRepository:
         if actor.clerk_org_id:
             sql = base + " AND o.clerk_organization_id=:org"
         else:
+            # The company whose details form was submitted wins over an empty placeholder
+            # (matters when the user saved details to a company they own but did not create).
             sql = base + """ AND o.organization_type='manufacturer' AND o.status<>'closed'
-                ORDER BY (o.created_by_user_id=u.id) DESC, m.created_at LIMIT 1"""
+                ORDER BY EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id=o.id
+                                 AND mo.personal_information_completed) DESC,
+                         (o.created_by_user_id=u.id) DESC, m.created_at LIMIT 1"""
         row = (await self.db.execute(text(sql), {"user": actor.clerk_user_id, "org": actor.clerk_org_id})).first()
         if not row:
             raise LookupError("Clerk user/organization is not synchronized yet")
@@ -204,6 +247,9 @@ class ManufacturerRepository:
             raise LookupError("Manufacturer not found")
         return dict(row._mapping)
 
+    async def user_id_for(self, clerk_user_id: str) -> UUID | None:
+        return await self.db.scalar(text("SELECT id FROM users WHERE clerk_user_id=:c"), {"c": clerk_user_id})
+
     async def touch_last_seen(self, clerk_user_id: str) -> None:
         """Last activity for the admin Users / Support pages (at most every 5 minutes)."""
         await self.db.execute(text("""
@@ -230,18 +276,21 @@ class ManufacturerRepository:
         # One onboarding save at a time per user (double submit -> no duplicate rows).
         await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
                               {"k": f"xy-account:{ctx['user_id']}"})
+        workspace = ctx["organization_id"]
+        target = await self._account_target(ctx, data)
         contact = data["contact"].strip()
         email = contact if "@" in contact else None
         contact_phone = data.get("phone") or (None if email else contact)
         country = await self._country_code(data["country"])
         first, last = data["firstName"].strip(), data["lastName"].strip()
+        # Personal details belong to the user and are saved directly (not company data).
         names_changed = (await self.db.execute(text("""
             UPDATE users SET first_name=:first, last_name=:last, display_name=:display, updated_at=now()
             WHERE id=:user_id AND (first_name IS DISTINCT FROM CAST(:first AS text)
                                    OR last_name IS DISTINCT FROM CAST(:last AS text))
             RETURNING id
         """), {**ctx, "first": first, "last": last, "display": f"{first} {last}"})).first() is not None
-        # users.email stays the Clerk sign-in email; the form's email is the contact email below.
+        # users.email stays the Clerk sign-in email; the form's email is the company contact email.
         await self.db.execute(text("""
             UPDATE users SET date_of_birth=CAST(:dob AS date), phone=COALESCE(CAST(:phone AS text),phone),
               updated_at=now()
@@ -249,90 +298,207 @@ class ManufacturerRepository:
               AND (date_of_birth IS DISTINCT FROM CAST(:dob AS date)
                    OR (CAST(:phone AS text) IS NOT NULL AND phone IS DISTINCT FROM CAST(:phone AS text)))
         """), {**ctx, "dob": date.fromisoformat(str(data["dob"])), "phone": contact_phone})
-        await self.db.execute(text("""
-            UPDATE organizations SET display_name=:name,legal_name=COALESCE(legal_name,:name),
-              updated_at=now(),version=version+1
-            WHERE id=:organization_id AND display_name IS DISTINCT FROM CAST(:name AS text)
-        """), {**ctx, "name": data["companyName"]})
-        await self.db.execute(text("""
-            INSERT INTO organization_profiles
-              (organization_id,contact_email,contact_phone,country_code,country_name,company_category,
-               stated_production_capacity,production_capacity_label)
-            VALUES (:organization_id,:email,:phone,:country,:country_name,:category,:capacity,:capacity_label)
-            ON CONFLICT (organization_id) DO UPDATE SET contact_email=EXCLUDED.contact_email,
-              contact_phone=EXCLUDED.contact_phone,country_code=EXCLUDED.country_code,
-              country_name=EXCLUDED.country_name,company_category=EXCLUDED.company_category,
-              stated_production_capacity=EXCLUDED.stated_production_capacity,
-              production_capacity_label=EXCLUDED.production_capacity_label,updated_at=now()
-        """), {**ctx, "email": email, "phone": contact_phone, "country": country,
-                "country_name": data["country"], "category": data["companyType"],
-                "capacity": capacity_number(data.get("capacity")), "capacity_label": data.get("capacity") or None})
+        # Company details go to staging until an admin approves them (app/manufacturer_approval.py).
+        payload = {
+            "companyName": (target["name"] if target["selected"] else data["companyName"].strip()),
+            "companyType": data["companyType"], "country": data["country"], "countryCode": country,
+            "capacity": data.get("capacity") or "", "capacityNumber": capacity_number(data.get("capacity")),
+            "contactEmail": email, "contactPhone": contact_phone,
+        }
+        await approval.stage(self.db, user_id=ctx["user_id"], workspace_id=workspace,
+                             target_id=target["organization_id"],
+                             selected_id=target["organization_id"] if target["selected"] else None,
+                             kind=target["kind"], payload=payload)
         await self.db.execute(text("""
             INSERT INTO marketplace_role_selections(user_id,role_selected)
             SELECT :user_id,'manufacturer' WHERE NOT EXISTS (
               SELECT 1 FROM marketplace_role_selections
               WHERE user_id=:user_id AND role_selected='manufacturer' AND status='active')
         """), ctx)
+        # The workspace (the user's own organization) is where they keep building the profile
+        # while the review runs. A new company is now awaiting approval ('submitted');
+        # completing the profile never changes this status.
         await self.db.execute(text("""
             INSERT INTO manufacturer_onboarding
-              (organization_id,current_step,personal_information_completed,completion_percentage,status)
-            VALUES (:organization_id,'company_information',true,15,'in_progress')
+              (organization_id,current_step,personal_information_completed,completion_percentage,status,submitted_at)
+            VALUES (:organization_id,'company_information',true,15,
+                    CASE WHEN :new THEN 'submitted' ELSE 'in_progress' END, CASE WHEN :new THEN now() END)
             ON CONFLICT (organization_id) DO UPDATE SET personal_information_completed=true,
               completion_percentage=GREATEST(manufacturer_onboarding.completion_percentage,15),
-              status=CASE WHEN manufacturer_onboarding.status='draft' THEN 'in_progress'
+              status=CASE WHEN manufacturer_onboarding.status='approved' THEN 'approved'
+                          WHEN :new THEN 'submitted'
+                          WHEN manufacturer_onboarding.status='draft' THEN 'in_progress'
                           ELSE manufacturer_onboarding.status END,
+              submitted_at=CASE WHEN :new AND manufacturer_onboarding.status<>'approved' THEN now()
+                                ELSE manufacturer_onboarding.submitted_at END,
               version=manufacturer_onboarding.version+1
-        """), ctx)
+        """), {**ctx, "organization_id": workspace, "new": target["kind"] == "new_company"})
         await self.db.commit()
         return {"names_changed": names_changed}
 
-        # ------------------------------------------------------------------ company search
-    async def search_companies(self, query: str, limit: int = 10) -> list[dict]:
-        """Search existing manufacturer organizations by company name."""
+    async def _account_target(self, ctx: dict, data: dict) -> dict:
+        """Which organization the Manufacturer details form may write to, checked BEFORE any
+        write (inside the caller's transaction, row locked):
 
-        query = query.strip()
+        * a selected company (companyId): must exist and be listed, the submitted name must be
+          that record's name, and the user must already be its active owner / admin (the
+          existing authorization). Selecting never grants ownership and an unowned or
+          someone else's company is never modified;
+        * no selection: a NEW company on the user's own organization, refused when a listed
+          company with the same name already exists in the same country (similar names in
+          different locations stay separate; records are never merged by name).
+        """
+        company_id = data.get("companyId")
+        if company_id:
+            # Lock the company row first; ownership is read AFTER the lock is granted (a new
+            # statement sees a claim committed meanwhile - in one statement it would not).
+            locked = (await self.db.execute(text(f"""
+                SELECT o.id, o.display_name FROM organizations o
+                WHERE o.id = CAST(:company_id AS uuid) AND {LISTED_COMPANY_SQL}
+                FOR UPDATE OF o
+            """), {"company_id": str(company_id)})).first()
+            row = None if locked is None else (await self.db.execute(text(f"""
+                SELECT CAST(:id AS uuid) AS id, CAST(:name AS text) AS display_name,
+                       EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=CAST(:id AS uuid)
+                               AND m.user_id=:user_id AND m.status='active'
+                               AND m.membership_role IN {OWNER_ROLES_SQL}) AS mine,
+                       EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=CAST(:id AS uuid)
+                               AND m.status='active' AND m.membership_role IN {OWNER_ROLES_SQL}) AS claimed
+            """), {"id": locked.id, "name": locked.display_name, "user_id": ctx["user_id"]})).first()
+            if row is None:
+                raise LookupError("The selected company was not found. Please search again.")
+            if normalize_company_name(row.display_name) != normalize_company_name(data["companyName"]):
+                raise ValueError("The company name does not match the selected company. Select it again from the list.")
+            if row.mine or row.id == ctx["organization_id"]:
+                approved = await approval.approval_status(self.db, row.id) == "approved"
+                kind = "update" if approved else ("new_company" if row.id == ctx["organization_id"] else "update")
+                return {"organization_id": row.id, "selected": True, "kind": kind, "name": row.display_name}
+            if row.claimed:
+                raise PermissionError("This company is already registered on X!Y and is managed by its owner. "
+                                      "Ask the owner to add you, or contact X!Y support.")
+            # Unclaimed (seeded / imported, no owner): the user may submit a claim; it takes effect
+            # only when an admin approves it. One claim at a time per company (row locked above).
+            other_claim = await self.db.scalar(text("""
+                SELECT 1 FROM manufacturer_submissions WHERE target_organization_id = :t AND kind = 'claim'
+                  AND status IN ('pending', 'changes_requested') AND submitted_by_user_id <> :u LIMIT 1
+            """), {"t": row.id, "u": ctx["user_id"]})
+            if other_claim:
+                raise LookupError("Another request to manage this company is already awaiting X!Y review.")
+            return {"organization_id": row.id, "selected": True, "kind": "claim", "name": row.display_name}
 
+        name = normalize_company_name(data["companyName"])
+        country = str(data.get("country") or "").strip().lower()
+        # Serialize creations of the same name + country (two users at the same moment).
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                              {"k": f"xy-company:{name}|{country}"})
+        clash = await self.db.scalar(text(f"""
+            SELECT o.id FROM organizations o
+            LEFT JOIN organization_profiles op ON op.organization_id = o.id
+            LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
+            WHERE {LISTED_COMPANY_SQL} AND o.id <> :organization_id
+              AND lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) = :name
+              AND lower(btrim(COALESCE(op.country_name, f.country_name, ''))) = :country
+            LIMIT 1
+        """), {"organization_id": ctx["organization_id"], "name": name, "country": country})
+        if clash is None:
+            # Another user's company with this name + country may still be awaiting approval.
+            clash = await self.db.scalar(text("""
+                SELECT 1 FROM manufacturer_submissions s
+                WHERE s.status IN ('pending', 'changes_requested') AND s.kind = 'new_company'
+                  AND s.submitted_by_user_id <> :user_id
+                  AND lower(regexp_replace(btrim(s.payload->>'companyName'), '\\s+', ' ', 'g')) = :name
+                  AND lower(btrim(COALESCE(s.payload->>'country', ''))) = :country
+                LIMIT 1
+            """), {"user_id": ctx["user_id"], "name": name, "country": country})
+        if clash is not None:
+            raise LookupError("A company with this name is already registered in this country. "
+                              "Select it from the list, or check the name and country.")
+        approved = await approval.approval_status(self.db, ctx["organization_id"]) == "approved"
+        return {"organization_id": ctx["organization_id"], "selected": False,
+                "kind": "update" if approved else "new_company", "name": None}
+
+    # ------------------------------------------------------------------ company search
+    async def search_companies(self, query: str, user_id: UUID | None = None, limit: int = 10) -> list[dict]:
+        """Listed manufacturer companies matching `query` (trimmed, case-insensitive), read live
+        from the database. Exact name first, then names starting with the text, then names with
+        a word starting with it, then other partial matches. Location is returned so companies
+        with similar names can be told apart; no contact details are exposed."""
+        query = re.sub(r"\s+", " ", query or "").strip()
         if len(query) < 2:
             return []
+        q = query.lower()
+        rows = await self.db.execute(text(f"""
+            WITH matches AS (
+              SELECT o.id, o.display_name, lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) AS norm,
+                     op.country_name AS profile_country, op.company_category,
+                     f.city, f.state_province, f.country_name AS facility_country,
+                     EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=o.id AND m.status='active'
+                             AND m.membership_role IN {OWNER_ROLES_SQL}) AS claimed,
+                     EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=o.id AND m.status='active'
+                             AND m.user_id = :user_id AND m.membership_role IN {OWNER_ROLES_SQL}) AS mine
+              FROM organizations o
+              LEFT JOIN organization_profiles op ON op.organization_id = o.id
+              LEFT JOIN LATERAL (
+                SELECT city, state_province, country_name FROM facilities
+                WHERE organization_id = o.id AND is_headquarters AND status <> 'suspended' LIMIT 1) f ON true
+              WHERE {LISTED_COMPANY_SQL}
+                AND (lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) LIKE :contains ESCAPE '\\'
+                     OR lower(regexp_replace(btrim(COALESCE(o.legal_name, '')), '\\s+', ' ', 'g'))
+                        LIKE :contains ESCAPE '\\')
+            )
+            SELECT *, CASE WHEN norm = :q THEN 0
+                           WHEN norm LIKE :prefix ESCAPE '\\' THEN 1
+                           WHEN norm LIKE :word ESCAPE '\\' THEN 2
+                           ELSE 3 END AS rank
+            FROM matches
+            ORDER BY rank, norm, display_name, id
+            LIMIT :limit
+        """), {"q": q, "contains": f"%{_like_escape(q)}%", "prefix": f"{_like_escape(q)}%",
+                "word": f"% {_like_escape(q)}%", "user_id": user_id, "limit": max(1, min(limit, 10))})
+        return [{
+            "id": str(r.id),
+            "companyName": r.display_name,
+            "country": r.profile_country or r.facility_country,
+            "city": r.city,
+            "state": r.state_province,
+            "companyType": r.company_category,
+            "claimed": bool(r.claimed),
+            "ownedByYou": bool(r.mine),
+        } for r in rows]
 
-        rows = await self.db.execute(
-            text("""
-                SELECT
-                    o.id,
-                    o.display_name AS company_name,
-                    op.country_name AS country,
-                    op.company_category AS company_type
-                FROM organizations o
-                LEFT JOIN organization_profiles op
-                    ON op.organization_id = o.id
-                WHERE o.organization_type = 'manufacturer'
-                  AND o.status = 'active'
-                  AND o.display_name ILIKE :query
-                ORDER BY
-                    CASE
-                        WHEN LOWER(o.display_name) = LOWER(:exact)
-                        THEN 0
-                        ELSE 1
-                    END,
-                    o.display_name
-                LIMIT :limit
-            """),
-            {
-                "query": f"%{query}%",
-                "exact": query,
-                "limit": max(1, min(limit, 10)),
-            },
-        )
-
-        return [
-            {
-                "id": str(row.id),
-                "companyName": row.company_name,
-                "country": row.country,
-                "companyType": row.company_type,
-            }
-            for row in rows
-        ]
+    async def company_details(self, company_id: str, user_id: UUID) -> dict:
+        """Saved details of exactly this company record, for prefilling the details form.
+        Contact details are returned only to the company's own owner / admin."""
+        r = (await self.db.execute(text(f"""
+            SELECT o.id, o.display_name, op.company_category, op.country_name, op.production_capacity_label,
+                   op.contact_phone, f.city, f.state_province, f.country_name AS facility_country,
+                   EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=o.id AND m.status='active'
+                           AND m.membership_role IN {OWNER_ROLES_SQL}) AS claimed,
+                   EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=o.id AND m.status='active'
+                           AND m.user_id=:user_id AND m.membership_role IN {OWNER_ROLES_SQL}) AS mine
+            FROM organizations o
+            LEFT JOIN organization_profiles op ON op.organization_id = o.id
+            LEFT JOIN LATERAL (
+              SELECT city, state_province, country_name FROM facilities
+              WHERE organization_id = o.id AND is_headquarters AND status <> 'suspended' LIMIT 1) f ON true
+            WHERE o.id = CAST(:id AS uuid) AND {LISTED_COMPANY_SQL}
+        """), {"id": company_id, "user_id": user_id})).first()
+        if r is None:
+            raise LookupError("Company not found")
+        access = "owner" if r.mine else ("claimed" if r.claimed else "unclaimed")
+        return {
+            "id": str(r.id),
+            "companyName": r.display_name,
+            "companyType": r.company_category or "",
+            "country": r.country_name or r.facility_country or "",
+            "city": r.city or "",
+            "state": r.state_province or "",
+            "capacity": r.production_capacity_label or "",
+            "phone": (r.contact_phone or "") if r.mine else "",
+            "access": access,
+            # owner: may update; unclaimed: may complete missing details (saved values are kept)
+            "canUpdate": bool(r.mine) or not r.claimed,
+        }
 
     async def fill_missing_names(self, ctx: dict, first: str | None, last: str | None) -> None:
         """Copy the name from Clerk into the user record when the record has none
@@ -401,7 +567,12 @@ class ManufacturerRepository:
         # (the company keeps its name); description mirrors "about".
         org_sets, org_params = [], {}
         if str(company.get("name") or "").strip():
-            org_sets.append("display_name=:name"); org_params["name"] = company["name"].strip()
+            # The company name requires admin review: staged, not written (older accounts that
+            # never submitted keep the previous direct behaviour).
+            if not await approval.stage_name_change(self.db, user_id=ctx["user_id"],
+                                                    workspace_id=ctx["organization_id"],
+                                                    name=company["name"].strip()):
+                org_sets.append("display_name=:name"); org_params["name"] = company["name"].strip()
         if "about" in company:
             org_sets.append("description=:about"); org_params["about"] = company["about"] or None
         if org_sets:
@@ -500,13 +671,19 @@ class ManufacturerRepository:
               certification_completed=EXCLUDED.certification_completed,
               infrastructure_completed=EXCLUDED.infrastructure_completed,
               faq_completed=EXCLUDED.faq_completed,completion_percentage=EXCLUDED.completion_percentage,
+              -- Profile completion never changes the approval status. Only accounts from before
+              -- admin approval existed (no submission) keep "complete = submitted for review".
               status=CASE
                 WHEN :complete AND manufacturer_onboarding.status IN ('draft','in_progress','changes_requested')
+                     AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
+                                     WHERE s.organization_id = manufacturer_onboarding.organization_id)
                   THEN 'submitted'
                 WHEN manufacturer_onboarding.status='draft' THEN 'in_progress'
                 ELSE manufacturer_onboarding.status END,
               submitted_at=CASE
                 WHEN :complete AND manufacturer_onboarding.status IN ('draft','in_progress','changes_requested')
+                     AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
+                                     WHERE s.organization_id = manufacturer_onboarding.organization_id)
                   THEN now() ELSE manufacturer_onboarding.submitted_at END,
               version=manufacturer_onboarding.version+1
         """), {**ctx, **flags, "step": next_step, "pct": pct, "complete": complete})
@@ -897,6 +1074,14 @@ class ManufacturerRepository:
                    logo.object_key logo_object_key,cover.object_key cover_object_key,
                    mo.personal_information_completed,mo.company_information_completed,mo.location_completed,
                    mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage,
+                   mo.status approval_status,
+                   (SELECT ov.completeness FROM admin_manufacturer_overview ov
+                     WHERE ov.organization_id=o.id) AS completeness,
+                   (SELECT row_to_json(x) FROM (
+                      SELECT s.id,s.kind,s.status,s.payload,s.review_feedback,s.updated_at,s.reviewed_at,
+                             s.selected_company_id
+                      FROM manufacturer_submissions s WHERE s.submitted_by_user_id=CAST(:user_id AS uuid)
+                      ORDER BY s.updated_at DESC, s.created_at DESC LIMIT 1) x) AS latest_submission,
                    (SELECT COALESCE(json_agg(x ORDER BY x.created_at, x.id), '[]'::json) FROM (
                       SELECT ct.name,COALESCE(oc.issuer,ct.issuer) body,oc.status,oc.document_file_name,
                              oc.created_at,oc.id

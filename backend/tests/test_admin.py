@@ -82,7 +82,8 @@ async def test_manufacturer_list_detail_edit_history(client, no_clerk):
                              params={"q": tag, "completeness": "incomplete", "record_type": ["REAL"]})).json()
     assert body["total"] == 1
     row = body["rows"][0]
-    assert row["companyName"] == f"Chnnai Tools {tag}" and row["reviewStatus"] == "IN_PROGRESS"
+    # approval is requested as soon as the basic company details are submitted
+    assert row["companyName"] == f"Chnnai Tools {tag}" and row["reviewStatus"] == "SUBMITTED"
     assert row["completeness"] < 100 and "At least one certification" in row["missingFields"]
     assert row["recordType"] == "REAL" and row["entrySource"] == "MANUFACTURER"
     assert (await client.get("/admin/manufacturers", headers=admin,
@@ -140,7 +141,9 @@ async def test_review_flow_notes_assignment(client, no_clerk):
 
     # queue shows the incomplete manufacturer; assign to me; note
     q = (await client.get("/admin/review-queue", headers=admin, params={"q": tag})).json()["rows"]
-    assert len(q) == 1 and q[0]["stoppedAt"] == "Company details" and q[0]["lastCompletedSection"] == "Company info"
+    # the submitted company details are staged until approval, so the main record still lacks
+    # the contact / category / country items of "Personal info"
+    assert len(q) == 1 and q[0]["stoppedAt"] == "Personal info" and q[0]["reviewStatus"] == "SUBMITTED"
     await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"assigned_admin_id": admin_id})
     mine = (await client.get("/admin/review-queue", headers=admin, params={"q": tag, "assigned": "me"})).json()["rows"]
     assert len(mine) == 1 and mine[0]["assignedAdminName"]
@@ -157,16 +160,24 @@ async def test_review_flow_notes_assignment(client, no_clerk):
     assert d["manufacturer"]["reviewStatus"] == "NEEDS_CORRECTION"
     assert d["notes"][0]["note"].startswith("Correction requested")
 
-    # manufacturer completes everything -> SUBMITTED automatically
+    # completing the profile never resubmits or approves anything
     await client.patch("/manufacturer/profile", headers=mh, json={
         "company": {"about": "Parts"}, "location": {"address": "Plot 1", "city": "Pune", "country": "India"},
         "certifications": [{"name": "ISO 9001", "body": "BSI", "fileName": "", "status": "Pending"}],
         "infra": {"water": "Borewell"}, "faqs": [{"q": "MOQ?", "a": "100"}]})
     d = (await client.get(f"/admin/manufacturers/{org}", headers=admin)).json()
-    assert d["manufacturer"]["reviewStatus"] == "SUBMITTED" and d["manufacturer"]["completeness"] == 100
+    assert d["manufacturer"]["reviewStatus"] == "NEEDS_CORRECTION"
+    # the manufacturer resubmits the corrected details -> SUBMITTED again, same submission
+    r = await client.post("/manufacturer/account", headers=mh, json={**ACCOUNT, "companyName": f"Review Co {tag}"})
+    assert r.status_code == 201, r.text
+    d = (await client.get(f"/admin/manufacturers/{org}", headers=admin)).json()
+    assert d["manufacturer"]["reviewStatus"] == "SUBMITTED" and d["pendingSubmission"]["status"] == "pending"
+    assert (await client.sql("SELECT count(*) FROM manufacturer_submissions WHERE target_organization_id=CAST(:o AS uuid)",
+                             o=org))[0][0] == 1
 
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"review_status": "REVIEWED"})
     assert r.json()["manufacturer"]["reviewStatus"] == "REVIEWED"
+    assert r.json()["manufacturer"]["completeness"] == 100  # approved details are now in the main record
     fields = [h["field_changed"] for h in r.json()["history"]]
     assert fields.count("Review status") == 2 and "Assigned admin" in fields
 
@@ -229,7 +240,7 @@ async def test_users_suspend_and_troubleshooting(client, no_clerk):
     detail = (await client.get(f"/admin/users/{uid}", headers=admin)).json()
     t = detail["troubleshooting"]
     assert t["accountStatus"] == "active" and t["lastLogin"]["available"]
-    assert t["onboarding"]["stoppedAt"] == "Company details"
+    assert t["onboarding"]["stoppedAt"] == "Personal info"  # company details staged until approval
     err = t["events"][0]
     assert err["status_code"] == 422 and err["path"].endswith("/manufacturer/profile") and err["request_id"]
     text = str(detail).lower()

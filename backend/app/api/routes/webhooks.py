@@ -6,7 +6,6 @@ from svix.webhooks import Webhook, WebhookVerificationError
 
 from app.core.config import get_settings
 from app.core.database import SessionFactory
-from app.core.welcome import send_welcome_soon
 from app.identity.repository import deactivate_user, upsert_user
 
 
@@ -124,7 +123,6 @@ async def clerk_webhook(request: Request):
             detail="Clerk webhook data is invalid",
         )
 
-    new_user_id = None
     # SessionFactory.begin() commits on success and rolls back on failure.
     async with SessionFactory.begin() as session:
         if event_type in {"user.created", "user.updated"}:
@@ -152,7 +150,10 @@ async def clerk_webhook(request: Request):
                 if part
             ) or email
 
-            new_user_id = await upsert_user(
+            # Keeps the users row in step with Clerk. This is NOT registration: the row stays
+            # unregistered (registration_completed_at untouched) until the person completes
+            # X!Y sign-up, so no welcome email is sent from here either.
+            await upsert_user(
                 session,
                 clerk_user_id=clerk_user_id,
                 email=email,
@@ -335,9 +336,6 @@ async def clerk_webhook(request: Request):
                         "organization_id": clerk_organization_id,
                     },
                 )
-
-    if event_type == "user.created" and new_user_id:
-        send_welcome_soon(new_user_id)
 
     return {
         "received": True,

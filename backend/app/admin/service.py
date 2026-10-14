@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import manufacturer_approval as approval
 from app import notifications
 from app.admin import accounts
 from app.admin.auth import AdminContext
@@ -30,7 +31,7 @@ log = logging.getLogger("xy.admin")
 
 DB_TO_REVIEW = {"draft": "NOT_STARTED", "in_progress": "IN_PROGRESS", "submitted": "SUBMITTED",
                 "under_review": "SUBMITTED", "changes_requested": "NEEDS_CORRECTION",
-                "rejected": "NEEDS_CORRECTION", "approved": "REVIEWED"}
+                "rejected": "REJECTED", "approved": "REVIEWED"}
 
 # XY-ADMIN-06: every field an admin may edit, with its label. Validation reuses
 # the onboarding form's own rules (ProfilePatchPayload / MachineryPatch).
@@ -62,7 +63,7 @@ REQUIRED_KEYS = {"company.name", "company.about", "location.address", "location.
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^[0-9+\-\s()]{7,15}$")
 REVIEW_LABELS = {"NOT_STARTED": "Not started", "IN_PROGRESS": "In progress", "SUBMITTED": "Submitted",
-                 "NEEDS_CORRECTION": "Needs correction", "REVIEWED": "Reviewed"}
+                 "NEEDS_CORRECTION": "Needs correction", "REVIEWED": "Reviewed", "REJECTED": "Rejected"}
 
 
 def list_row(r: dict) -> dict:
@@ -177,9 +178,40 @@ class AdminService:
             timeline.append({"at": row["submitted_at"], "event": "Profile completed and submitted for review"})
         if row.get("reviewed_at"):
             decision = {"approved": "Reviewed by X!Y", "changes_requested": "Corrections requested by X!Y",
-                        "rejected": "Corrections requested by X!Y"}.get(row.get("onboarding_raw_status") or "")
+                        "rejected": "Rejected by X!Y"}.get(row.get("onboarding_raw_status") or "")
             if decision:
                 timeline.append({"at": row["reviewed_at"], "event": decision})
+        submissions = await approval.submissions_for_target(self.db, org_id)
+        kind_label = {"new_company": "Company details", "claim": "Request to manage this company",
+                      "update": "Change to company details"}
+        for sub in submissions:
+            timeline.append({"at": sub["created_at"], "event": f'{kind_label[sub["kind"]]} submitted for approval'})
+            if sub["reviewed_at"]:
+                verb = {"approved": "approved", "rejected": "rejected",
+                        "changes_requested": "returned for corrections"}.get(sub["status"])
+                if verb:
+                    timeline.append({"at": sub["reviewed_at"], "event": f'{kind_label[sub["kind"]]} {verb} by X!Y'})
+        open_sub = next((x for x in reversed(submissions) if x["status"] in approval.OPEN), None)
+        pending = None
+        if open_sub:
+            submitter = next((u for u in await self.repo.linked_users(str(open_sub["organization_id"]))
+                              if str(u["id"]) == str(open_sub["submitted_by_user_id"])), None)
+            # main record values (the list shows a pending new company under its submitted name)
+            current = {"companyName": p.get("display_name") or "", "companyType": p.get("company_category") or "",
+                       "country": p.get("account_country") or "", "capacity": p.get("production_capacity_label") or "",
+                       "contactEmail": p.get("contact_email") or "", "contactPhone": p.get("contact_phone") or ""}
+            pending = {
+                "id": str(open_sub["id"]), "kind": open_sub["kind"], "kindLabel": kind_label[open_sub["kind"]],
+                "status": open_sub["status"], "submittedAt": open_sub["updated_at"],
+                "submittedBy": ({"name": f'{submitter.get("first_name") or ""} {submitter.get("last_name") or ""}'.strip(),
+                                 "email": submitter.get("email") or ""} if submitter else None),
+                "feedback": open_sub["review_feedback"],
+                "fields": [{"key": k, "label": label, "submitted": open_sub["payload"].get(k) or "",
+                            "current": current.get(k) or ""}
+                           for k, label in (("companyName", "Company name"), ("companyType", "Category"),
+                                            ("country", "Country"), ("capacity", "Production capacity"),
+                                            ("contactEmail", "Contact email"), ("contactPhone", "Contact phone"))],
+            }
         if row.get("last_updated"):
             timeline.append({"at": row["last_updated"], "event": "Last profile update"})
         return {
@@ -191,6 +223,7 @@ class AdminService:
             "notes": [{**n, "id": str(n["id"])} for n in await self.repo.notes(org_id)],
             "history": [{**h, "id": str(h["id"])} for h in await self.repo.history(org_id)],
             "timeline": sorted(timeline, key=lambda t: t["at"], reverse=True),
+            "pendingSubmission": pending,
             "admins": await self.admins(),
             "requiredFields": [{"key": c, "label": label, "section": sec, "done": bool(row.get(c))}
                                for c, label, sec in REQUIRED_FIELDS],
@@ -356,28 +389,54 @@ class AdminService:
                 changed = True
         review_email = None
         if body.get("review_status"):
-            old = DB_TO_REVIEW.get(meta["onboarding_raw_status"] or "draft", "NOT_STARTED")
+            current_row = await self.repo.overview_row(org_id)
+            old = (current_row or {}).get("review_status") or DB_TO_REVIEW.get(
+                meta["onboarding_raw_status"] or "draft", "NOT_STARTED")
             new = body["review_status"]
             if new != old:
-                if new == "NEEDS_CORRECTION" and not (reason or "").strip():
-                    raise HTTPException(422, "Add a short note explaining what needs correcting.")
-                await self.repo.set_review_status(org_id, new, admin.user_id, reason)
+                if new in ("NEEDS_CORRECTION", "REJECTED") and not (reason or "").strip():
+                    raise HTTPException(422, "Add a short note explaining what needs correcting."
+                                        if new == "NEEDS_CORRECTION" else "Add a short note explaining the rejection.")
+                # A submission awaiting review: the decision applies to it (approval merges it
+                # into the main record). Otherwise the company's own status changes as before.
+                decision = {"REVIEWED": "approved", "NEEDS_CORRECTION": "changes_requested",
+                            "REJECTED": "rejected"}.get(new)
+                sub = None
+                if decision:
+                    try:
+                        sub = await approval.decide(self.db, org_id, decision, admin.user_id, reason)
+                    except approval.DecisionError as exc:
+                        await self.db.rollback()
+                        raise HTTPException(409, str(exc)) from exc
+                if sub is None:
+                    await self.repo.set_review_status(org_id, new, admin.user_id, reason)
+                # Messages go to the submitter's own organization (for a claim that is not this company).
+                notify_org = str(sub["organization_id"]) if sub else org_id
                 await self.repo.add_history(org_id, "Review status", REVIEW_LABELS[old], REVIEW_LABELS[new],
                                             admin.user_id, reason)
                 if new == "NEEDS_CORRECTION" and (reason or "").strip():
                     # The correction note is always shown to the manufacturer.
-                    await self.repo.add_note(org_id, admin.user_id, f"Correction requested: {reason.strip()}",
+                    await self.repo.add_note(notify_org, admin.user_id, f"Correction requested: {reason.strip()}",
                                              shared=True)
                     await notifications.notify_company(
-                        self.db, org_id, "needs_correction", "Your profile needs a few corrections",
+                        self.db, notify_org, "needs_correction", "Your profile needs a few corrections",
                         reason.strip(), admin.user_id)
+                if new == "REJECTED":
+                    await notifications.notify_company(
+                        self.db, notify_org, "admin_note", "Your company details were not approved",
+                        reason.strip(), admin.user_id)
+                if new == "REVIEWED" and sub:
+                    await notifications.notify_company(
+                        self.db, org_id, "admin_note", "Your company details were approved",
+                        (reason or "").strip() or "You can now complete your profile to become visible to Visionaries.",
+                        admin.user_id)
                 if new in ("NEEDS_CORRECTION", "REVIEWED"):
-                    review_email = (new, (reason or "").strip())
+                    review_email = (new, (reason or "").strip(), org_id if new == "REVIEWED" else notify_org)
                 changed = True
         if not changed:
             raise HTTPException(422, "Nothing to change.")
         await self._run(self._commit())
-        email = await self._review_email(org_id, *review_email) if review_email else None
+        email = await self._review_email(review_email[2], *review_email[:2]) if review_email else None
         detail = await self.detail(org_id)
         if email:
             detail["email"] = email

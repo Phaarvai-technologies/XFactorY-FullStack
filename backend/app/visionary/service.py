@@ -344,6 +344,9 @@ class VisionaryService:
             org, machines, _, _ = await self._manufacturer(data["manufacturer_id"])
             if await self.repo.is_member_of(actor.user_id, org["id"]):
                 raise PermissionError("You cannot send a manufacturing request to your own company.")
+            if not await self.repo.booking_allowed(org["id"]):
+                # Central rule (app/core/eligibility.py); separate from visibility so it can differ later.
+                raise LookupError("Manufacturer not found")
             project = await self.repo.project(actor.user_id)
             if not project or not project["project_name"]:
                 raise LookupError("Add your project details before sending a request.")

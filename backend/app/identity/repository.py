@@ -89,7 +89,8 @@ async def get_user_by_clerk_id(session: AsyncSession, clerk_user_id: str):
     result = await session.execute(
         text("""
             SELECT id, clerk_user_id, email, display_name, first_name, last_name,
-                   phone, status, created_at, updated_at
+                   phone, status, created_at, updated_at,
+                   registration_completed_at, registration_method
             FROM users
             WHERE clerk_user_id = :clerk_user_id
         """),

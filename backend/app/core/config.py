@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_webhook_signing_secret: str = ""
     clerk_authorized_parties: list[str] = ["http://localhost:3000"]
+    # Terms and Conditions + Privacy Policy version shown on the Sign-up page
+    # ("Terms v1.2 · Privacy Policy v1.4"). Registration is refused unless the user accepted
+    # exactly this version; change it together with frontend TERMS_VERSION.
+    terms_version: str = "terms-1.2;privacy-1.4"
 
     @property
     def clerk_issuers(self) -> list[str]:

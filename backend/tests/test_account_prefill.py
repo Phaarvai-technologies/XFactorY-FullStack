@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from test_e2e_local import ACCOUNT, client  # noqa: F401  (shared fixture)
+from test_e2e_local import ACCOUNT, approve_company, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
 
@@ -58,7 +58,10 @@ async def test_onboarding_prefill_and_updates(client, clerk_updates):
     assert r.status_code == 201, r.text
     row = await user_row(client)
     assert (row.first_name, row.last_name, row.email) == ("Jordan", "Lee", f"{client.user}@example.com")
-    assert row.contact_email == f"{client.user}@example.com"
+    assert row.contact_email is None  # company contact is staged until an admin approves it
+    staged = (await client.sql("""SELECT s.payload->>'contactEmail' FROM manufacturer_submissions s
+                                  JOIN users u ON u.id=s.submitted_by_user_id WHERE u.clerk_user_id=:c""", c=client.user))
+    assert [r[0] for r in staged] == [f"{client.user}@example.com"]
     assert clerk_updates == []
 
     # Edited last name -> user record updated and pushed to Clerk
@@ -71,6 +74,12 @@ async def test_onboarding_prefill_and_updates(client, clerk_updates):
 
     # Edited email -> manufacturer contact email; the Clerk sign-in email stays
     await client.post("/manufacturer/account", json=form(client, lastName="Lee-Smith", contact="sales@raman.in"))
+    staged = (await client.sql("""SELECT s.payload->>'contactEmail' FROM manufacturer_submissions s
+                                  JOIN users u ON u.id=s.submitted_by_user_id WHERE u.clerk_user_id=:c""", c=client.user))
+    assert [r[0] for r in staged] == ["sales@raman.in"]  # the same open submission, updated
+    org_id = (await client.sql("""SELECT o.id FROM organizations o JOIN memberships m ON m.organization_id=o.id
+                                  JOIN users u ON u.id=m.user_id WHERE u.clerk_user_id=:c""", c=client.user))[0][0]
+    assert (await approve_company(client, str(org_id))).status_code == 200
     row = await user_row(client)
     assert row.contact_email == "sales@raman.in" and row.email == f"{client.user}@example.com"
 

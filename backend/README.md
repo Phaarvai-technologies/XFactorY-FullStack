@@ -25,7 +25,10 @@ Either run the SQL files in the Supabase SQL editor, in order:
 9. `database/migrations/012_visionary_portal.sql` (Visionaries portal: profile, project,
    manufacturing requests and request drafts; see `../VISIONARIES_PORTAL.md`)
 10. `database/migrations/013_admin_management.sql` (Admins tab: temporary passwords, who added an admin)
-11. `database/migrations/015_manufacturer_notifications.sql` (notifications to manufacturers, shared admin notes)
+11. `database/migrations/014_user_registration.sql` (explicit registration: `users.registration_*`,
+    `registration_flows`). Existing accounts: review and run `database/backfills/014_registration_backfill.sql`
+    once (not run by `app.migrate`).
+12. `database/migrations/015_manufacturer_notifications.sql` (notifications to manufacturers, shared admin notes)
 
 or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
 schema only if the database is empty, then runs all migrations (they are idempotent).
@@ -47,9 +50,11 @@ macOS/Linux: same, with `source .venv/bin/activate` and `PYTHONPATH=. uvicorn ap
 Check `http://localhost:8000/health/live` and `http://localhost:8000/docs`.
 
 `CORS_ORIGINS` and `CLERK_AUTHORIZED_PARTIES` must contain the frontend
-origin (`http://localhost:3000`). `CLERK_SECRET_KEY` is required: on a user's
-first request the backend reads their email/name from Clerk and creates the
-`users` / `organizations` / `memberships` rows (the Clerk webhook is optional).
+origin (`http://localhost:3000`). `CLERK_SECRET_KEY` is required: it signs the sign-up
+flow tokens, and when a user completes Sign-up (`POST /api/v1/identity/registration/complete`)
+the backend reads their verified email/name from Clerk and creates the `users` row, so the
+Clerk webhook stays optional. A Clerk session alone is not an X!Y user: every app API answers
+`403 {"code": "registration_required"}` until Sign-up was completed, and reads never create users.
 
 ## 3. Frontend
 

@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.gateway_guard import GatewayGuard
 from app.core.schema_check import MIGRATION_HINT, log_schema_status, missing_schema
+from app.identity.registration import SIGN_UP_REQUIRED_MESSAGE, RegistrationRequired
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
 settings = get_settings()
@@ -45,6 +46,12 @@ app.add_middleware(
 if settings.gateway_shared_secret:
     # Outermost layer: requests that did not come through the API gateway stop here.
     app.add_middleware(GatewayGuard, secret=settings.gateway_shared_secret)
+
+@app.exception_handler(RegistrationRequired)
+async def registration_required(_request, _exc):
+    # Authenticated with Clerk, but X!Y sign-up was never completed. The frontend keys on `code`.
+    return JSONResponse({"detail": SIGN_UP_REQUIRED_MESSAGE, "code": "registration_required"}, status_code=403)
+
 
 app.include_router(manufacturer_router, prefix="/api/v1")
 app.include_router(identity_router, prefix="/api/v1")

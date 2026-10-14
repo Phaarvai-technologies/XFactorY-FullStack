@@ -6,14 +6,15 @@ from fastapi import HTTPException
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import manufacturer_approval as approval
 from app import notifications
+from app.core import eligibility
 from app.core.auth import Actor
 from app.core.clerk import ClerkManagement
 from app.core.config import Settings
 from app.core.schema_check import MIGRATION_HINT
 from app.repositories.manufacturer import ManufacturerRepository, profile_flags
 from app.storage.supabase import SupabaseStorage, decode_data_url
-from app.core.welcome import send_welcome_soon
 
 
 _TOUCH_EVERY_SECONDS = 300
@@ -54,6 +55,12 @@ def _cert_status(value: str) -> str:
     return "Pending"
 
 
+def _json_or_none(value):
+    if value is None:
+        return None
+    return json.loads(value) if isinstance(value, (str, bytes)) else dict(value)
+
+
 def _first_incomplete(completed: list[int], total: int) -> int | None:
     return next((n for n in range(1, total + 1) if n not in completed), None)
 
@@ -86,6 +93,17 @@ class ManufacturerService:
         self.settings = settings
         self.storage = SupabaseStorage(settings)
         self.clerk = ClerkManagement(settings)
+    async def search_companies(self, actor: Actor, query: str) -> list[dict]:
+        """Search listed manufacturer companies (live database, ranked)."""
+        if len(query.strip()) < 2:
+            return []
+        user_id = await self._run(self.repo.user_id_for(actor.clerk_user_id))
+        return await self._run(self.repo.search_companies(query, user_id))
+
+    async def company_details(self, actor: Actor, company_id: str) -> dict:
+        """Saved details of the selected company record (form prefill; read-only)."""
+        user_id = await self._run(self.repo.user_id_for(actor.clerk_user_id))
+        return await self._run(self.repo.company_details(company_id, user_id))
 
     # ---------------------------------------------------------------- helpers
     async def _run(self, coro):
@@ -125,7 +143,10 @@ class ManufacturerService:
                                 else "Something went wrong on our side. Please try again.") from exc
 
     async def ensure_actor(self, actor: Actor) -> dict:
-        """Returns the DB context; creates the rows on first use (webhook may be late)."""
+        """Returns the DB context; creates the Manufacturer organization / membership on first
+        use. Only reached for REGISTERED users: every manufacturer route depends on
+        `registered_actor`, which refuses Clerk identities that never completed sign-up, so the
+        users row always exists here and is never created from a read."""
         try:
             ctx = await self._run(self.repo.context(actor))
         except HTTPException as exc:
@@ -134,7 +155,6 @@ class ManufacturerService:
             profile = await self.clerk.actor_profile(actor)
             await self._run(self.repo.sync_actor(actor, profile))
             ctx = await self._run(self.repo.context(actor))
-            send_welcome_soon(ctx["user_id"])  # new user: welcome email (once, in the background)
         # "Last seen" changes at most every 5 minutes; skip the database write in between
         # (it costs two round trips on every request otherwise).
         now = time.monotonic()
@@ -170,7 +190,39 @@ class ManufacturerService:
                 log.info("Could not read the name from Clerk: %s", exc)
         # Reuse the context just read (one database trip less), unless the names were just filled in.
         raw = await self._run(self.repo.snapshot(actor, ctx=None if names_filled else ctx))
-        return self.view(raw)
+        return self._with_approval(raw["profile"], self.view(raw))
+
+    @staticmethod
+    def _with_approval(p: dict, snapshot: dict) -> dict:
+        """Owner's own view: details awaiting review are shown as entered (the main record is
+        unchanged until approval), plus approval status and eligibility, tracked separately.
+        Everything comes from the one snapshot query (no extra database round trips)."""
+        latest = _json_or_none(p.get("latest_submission"))
+        if latest and latest["status"] in approval.OPEN:
+            staged = latest.get("payload") or {}
+            account = snapshot["state"]["account"]
+            account.update(companyName=staged.get("companyName") or account["companyName"],
+                           companyType=staged.get("companyType") or account["companyType"],
+                           country=staged.get("country") or account["country"],
+                           capacity=staged.get("capacity") or account["capacity"])
+            snapshot["profileData"]["company"]["name"] = account["companyName"]
+            if staged.get("contactEmail") or staged.get("contactPhone"):
+                email = staged.get("contactEmail") or ""
+                snapshot["state"]["contact"] = {"email": email, "phone": "" if email else (staged.get("contactPhone") or "")}
+        org_status = p.get("approval_status")
+        status = latest["status"] if latest else ("approved" if org_status == "approved" else "not_submitted")
+        if latest and latest["status"] in ("rejected", "approved") and org_status == "approved":
+            status = "approved"  # e.g. a rejected change to an approved company: company stays approved
+        snapshot["approval"] = {
+            "status": status,
+            "kind": latest["kind"] if latest else None,
+            "selectedCompanyId": latest.get("selected_company_id") if latest else None,
+            "feedback": latest.get("review_feedback") if latest else None,
+            "submittedAt": latest.get("updated_at") if latest else None,
+            "reviewedAt": latest.get("reviewed_at") if latest else None,
+            "eligibility": eligibility.evaluate(org_status, p.get("completeness")),
+        }
+        return snapshot
 
     def view(self, raw: dict) -> dict:
         """Frontend snapshot from repository data (also used read-only by the admin)."""
@@ -297,10 +349,7 @@ class ManufacturerService:
 
     # ---------------------------------------------------------------- mutations
     async def create_account(self, actor: Actor, data: dict) -> dict:
-        ctx = await self.ensure_actor(actor)
-        selected = data.get("selectedCompanyId")
-        if selected and str(ctx["organization_id"]) != str(selected):
-            raise HTTPException(409, "Company selection does not grant ownership. Complete the existing company claim and verification process before saving this account.")
+        await self.ensure_actor(actor)
         result = await self._run(self.repo.create_account(actor, data))
         if result["names_changed"]:
             try:
