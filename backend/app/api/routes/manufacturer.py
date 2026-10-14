@@ -3,6 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.claims.schemas import ClaimCreate
+from app.claims.service import ClaimService
 from app.core.auth import Actor, current_actor
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
@@ -39,16 +41,6 @@ async def create_account(body: AccountPayload, actor: Actor = Depends(current_ac
                          svc: ManufacturerService = Depends(service)):
     """AccountScreen submit."""
     return await svc.create_account(actor, body.model_dump(mode="json"))
-
-@router.get("/companies/search")
-async def search_companies(
-    q: str = Query(min_length=2, max_length=100),
-    actor: Actor = Depends(current_actor),
-    svc: ManufacturerService = Depends(service),
-):
-    """Search existing manufacturer companies by name."""
-    companies = await svc.search_companies(q)
-    return {"items": companies}
 
 
 @router.patch("/profile")
@@ -140,3 +132,41 @@ async def notifications_popup_seen(actor: Actor = Depends(current_actor),
                                    svc: ManufacturerService = Depends(service)):
     """The new-messages popup was shown and closed with "Later"."""
     return await svc.notifications_popup_seen(actor)
+
+
+# ---------------------------------------------------------------- company claims
+def claims(session: AsyncSession = Depends(get_session), settings: Settings = Depends(get_settings)):
+    return ClaimService(session, settings)
+
+
+@router.get("/claims/search")
+async def search_companies(q: str = Query(..., min_length=1, max_length=200),
+                           limit: int = Query(20, ge=1, le=50), actor: Actor = Depends(current_actor),
+                           svc: ClaimService = Depends(claims)):
+    """Imported, unclaimed companies whose name matches (from the first letter; names starting
+    with the text first). Public details only (no contacts)."""
+    return await svc.search(actor, q, limit)
+
+
+@router.get("/claims/companies/{org_id}")
+async def claimable_company(org_id: UUID, actor: Actor = Depends(current_actor), svc: ClaimService = Depends(claims)):
+    """Public details of one claimable company, read fresh by id after the user selects it.
+    Selecting does not claim, link or change the company."""
+    return await svc.company(actor, str(org_id))
+
+
+@router.get("/claims")
+async def my_claims(actor: Actor = Depends(current_actor), svc: ClaimService = Depends(claims)):
+    return await svc.my_claims(actor)
+
+
+@router.post("/claims", status_code=201)
+async def create_claim(body: ClaimCreate, actor: Actor = Depends(current_actor), svc: ClaimService = Depends(claims)):
+    """"Claim this company". Approved at once when a Clerk-verified email of the user proves it
+    (published contact email or the company's own domain); otherwise pending for admin review."""
+    return await svc.create(actor, str(body.organizationId), (body.note or "").strip() or None)
+
+
+@router.post("/claims/{claim_id}/cancel")
+async def cancel_claim(claim_id: UUID, actor: Actor = Depends(current_actor), svc: ClaimService = Depends(claims)):
+    return await svc.cancel(actor, str(claim_id))

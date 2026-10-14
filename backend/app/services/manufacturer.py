@@ -86,16 +86,6 @@ class ManufacturerService:
         self.settings = settings
         self.storage = SupabaseStorage(settings)
         self.clerk = ClerkManagement(settings)
-    async def search_companies(self, query: str) -> list[dict]:
-        """Search existing manufacturer companies."""
-        query = query.strip()
-
-        if len(query) < 2:
-            return []
-
-        return await self._run(
-            self.repo.search_companies(query)
-        )    
 
     # ---------------------------------------------------------------- helpers
     async def _run(self, coro):
@@ -307,7 +297,10 @@ class ManufacturerService:
 
     # ---------------------------------------------------------------- mutations
     async def create_account(self, actor: Actor, data: dict) -> dict:
-        await self.ensure_actor(actor)
+        ctx = await self.ensure_actor(actor)
+        selected = data.get("selectedCompanyId")
+        if selected and str(ctx["organization_id"]) != str(selected):
+            raise HTTPException(409, "Company selection does not grant ownership. Complete the existing company claim and verification process before saving this account.")
         result = await self._run(self.repo.create_account(actor, data))
         if result["names_changed"]:
             try:

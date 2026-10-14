@@ -2,10 +2,6 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { usePathname, useRouter } from "next/navigation";
-import type {
-  CompanySearchResponse,
-  CompanySearchResult,
-} from "@/lib/api";
 import {
   useCallback,
   useEffect,
@@ -215,17 +211,6 @@ export function ManufacturerApp() {
     },
     [getToken],
   );
-
-  const handleSearchCompanies = useCallback(
-  async (query: string): Promise<CompanySearchResult[]> => {
-    const response = await request<CompanySearchResponse>(
-      `/manufacturer/companies/search?q=${encodeURIComponent(query)}`,
-    );
-
-    return response.items;
-  },
-  [request],
-);
 
   const localId = useCallback((serverId: string): number => {
     const map = ids.current;
@@ -737,15 +722,15 @@ export function ManufacturerApp() {
       ) : null}
 
       {screen === "account" ? (
-  <AccountScreen
-    onBack={() => {
-      router.push(MANUFACTURER_OVERVIEW_PATH);
-      window.scrollTo(0, 0);
-    }}
-    onAccountCreated={handleAccountCreated}
-    onSearchCompanies={handleSearchCompanies}
-  />
-) : null}
+        <AccountScreen
+          request={request}
+          onBack={() => {
+            router.push(MANUFACTURER_OVERVIEW_PATH);
+            window.scrollTo(0, 0);
+          }}
+          onAccountCreated={handleAccountCreated}
+        />
+      ) : null}
 
       {screen === "dashboard" ? (
         <>

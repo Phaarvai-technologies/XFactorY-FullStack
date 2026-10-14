@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-
-import type { CompanySearchResult } from "@/lib/api";
 import { FactoryMark } from "@/components/layout/Logo";
+import {
+  CompanyClaimPanel,
+  type ClaimRequest,
+  type CompanyDetails,
+} from "@/components/manufacturer/CompanyClaimPanel";
 import {
   BackIcon,
   BuildingIcon,
@@ -24,6 +27,7 @@ export type AccountSubmission = {
   contact: string;
   dob: string;
   companyName: string;
+  selectedCompanyId?: string;
   companyType: string;
   country: string;
   phone: string;
@@ -34,7 +38,8 @@ type AccountScreenProps = {
   onBack: () => void;
   /** May return a promise; if it rejects, the form is re-enabled so the user can retry. */
   onAccountCreated: (submission: AccountSubmission) => void | Promise<void>;
-  onSearchCompanies: (query: string) => Promise<CompanySearchResult[]>;
+  /** Signed-in API calls; enables finding and claiming an already listed company. */
+  request?: ClaimRequest;
 };
 
 type FieldErrors = Partial<
@@ -76,17 +81,12 @@ const COUNTRIES = [
   "Other",
 ];
 
-export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, }: AccountScreenProps) {
+export function AccountScreen({ onBack, onAccountCreated, request }: AccountScreenProps) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [contact, setContact] = useState("");
   const [dob, setDob] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [companySuggestions, setCompanySuggestions] = useState<CompanySearchResult[]>([]);
-  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
-  const [companySearchLoading, setCompanySearchLoading] = useState(false);
-  
-  const companySearchRef = useRef<HTMLDivElement>(null);
   const [companyType, setCompanyType] = useState("");
   const [country, setCountry] = useState("");
   const [phone, setPhone] = useState("");
@@ -95,45 +95,45 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, }: 
   const [errors, setErrors] = useState<FieldErrors>({});
   const [showFormError, setShowFormError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [companySearchError, setCompanySearchError] = useState("");
 
+  // Company picked from the listed-company dropdown: its database id and what it filled in.
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
+  const current = useRef({ country, companyType, capacity });
   useEffect(() => {
-  const query = companyName.trim();
+    current.current = { country, companyType, capacity };
+  }, [country, companyType, capacity]);
+  const prefill = useRef<{
+    before: { country: string; companyType: string; capacity: string };
+    filled: { country: string; companyType: string; capacity: string };
+  } | null>(null);
 
-  if (query.length < 2 || !companyDropdownOpen) {
-    return;
-  }
-
-  let cancelled = false;
-
-  const timer = window.setTimeout(async () => {
-    setCompanySearchLoading(true);
-    setCompanySearchError("");
-
-    try {
-      const companies = await onSearchCompanies(query);
-
-      if (!cancelled) {
-        setCompanySuggestions(companies);
-      }
-    } catch {
-      if (!cancelled) {
-        setCompanySuggestions([]);
-        setCompanySearchError("Unable to search companies.");
-      }
-    } finally {
-      if (!cancelled) {
-        setCompanySearchLoading(false);
-      }
+  /** Fills the form from the selected company (only fields it has, from that exact record);
+   *  with null, removes what a previous selection filled in and restores the user's values. */
+  function applyCompany(details: CompanyDetails | null) {
+    let next = { ...current.current };
+    const previous = prefill.current;
+    if (previous) {
+      (["country", "companyType", "capacity"] as const).forEach((key) => {
+        if (next[key] === previous.filled[key]) next[key] = previous.before[key];
+      });
+      prefill.current = null;
     }
-  }, 300);
-
-  return () => {
-    cancelled = true;
-    window.clearTimeout(timer);
-  };
-}, [companyName, companyDropdownOpen, onSearchCompanies]);
-
+    setSelectedCompanyId(details?.id ?? null);
+    if (details) {
+      const before = { ...next };
+      next = {
+        country: details.country && COUNTRIES.includes(details.country) ? details.country : next.country,
+        companyType:
+          details.category && COMPANY_TYPES.includes(details.category) ? details.category : next.companyType,
+        capacity: details.capacity ?? next.capacity,
+      };
+      prefill.current = { before, filled: next };
+    }
+    current.current = next;
+    setCountry(next.country);
+    setCompanyType(next.companyType);
+    setCapacity(next.capacity);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,6 +170,7 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, }: 
         contact: contact.trim(),
         dob,
         companyName: companyName.trim(),
+        ...(selectedCompanyId ? { selectedCompanyId } : {}),
         companyType,
         country,
         phone: phone.trim(),
@@ -345,122 +346,37 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, }: 
                 <h2>Company info</h2>
               </div>
               <div className="form-grid">
-                <div className="col-span-2">
-  <label htmlFor="acc-company">Company name</label>
-
-  <div
-    className="company-search-container"
-    ref={companySearchRef}
-    style={{ position: "relative" }}
-  >
-    <div className="account-input-wrap">
-      <span className="input-icon">
-        <BuildingIcon size={16} />
-      </span>
-
-      <input
-        type="text"
-        id="acc-company"
-        placeholder="Acme Manufacturing Co."
-        className={errors.companyName ? "error" : ""}
-        value={companyName}
-        autoComplete="off"
-        onFocus={() => setCompanyDropdownOpen(true)}
-        onChange={(e) => {
-          setCompanyName(e.target.value);
-          setCompanyDropdownOpen(true);
-        }}
-      />
-    </div>
-
-    {companyDropdownOpen && companyName.trim().length >= 2 && (
-      <div
-        className="company-suggestions"
-        style={{
-          position: "absolute",
-          top: "100%",
-          left: 0,
-          right: 0,
-          zIndex: 50,
-          background: "#fff",
-          border: "1px solid #dbe3ef",
-          borderRadius: 8,
-          marginTop: 4,
-          boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
-          maxHeight: 220,
-          overflowY: "auto",
-        }}
-      >
-        {companySearchLoading && (
-          <div style={{ padding: 12, color: "#64748b" }}>
-            Searching companies...
-          </div>
-        )}
-
-        {!companySearchLoading &&
-          companySuggestions.map((company) => (
-            <button
-              key={company.id}
-              type="button"
-              onClick={() => {
-                setCompanyName(company.companyName);
-                setCompanyDropdownOpen(false);
-              }}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: "12px",
-                textAlign: "left",
-                background: "#fff",
-                border: 0,
-                cursor: "pointer",
-              }}
-            >
-              {company.companyName}
-            </button>
-          ))}
-
-        {!companySearchLoading &&
-          !companySearchError &&
-          !companySuggestions.some(
-            (company) =>
-              company.companyName.toLowerCase() ===
-              companyName.trim().toLowerCase()
-          ) && (
-            <button
-              type="button"
-              onClick={() => {
-                setCompanyName(companyName.trim());
-                setCompanyDropdownOpen(false);
-              }}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: "12px",
-                textAlign: "left",
-                background: "#fff",
-                border: 0,
-                borderTop: "1px solid #e2e8f0",
-                cursor: "pointer",
-              }}
-            >
-              {companyName.trim()}
-            </button>
-          )}
-
-        {companySearchError && (
-          <div style={{ padding: 12, color: "#b91c1c" }}>
-            {companySearchError}
-          </div>
-        )}
-      </div>
-    )}
-  </div>
-
-  {errors.companyName ? (
-    <p className="field-error">{errors.companyName}</p>
-  ) : null}
-</div>
+                <div className="col-span-2" data-selected-company-id={selectedCompanyId ?? undefined}>
+                  <label htmlFor="acc-company">Company name</label>
+                  {request ? (
+                    <CompanyClaimPanel
+                      value={companyName}
+                      onChange={setCompanyName}
+                      hasError={!!errors.companyName}
+                      request={request}
+                      onSelect={applyCompany}
+                      onSelectionChange={setSelectedCompanyId}
+                      onClaimed={setCompanyName}
+                    />
+                  ) : (
+                    <div className="account-input-wrap">
+                      <span className="input-icon">
+                        <BuildingIcon size={16} />
+                      </span>
+                      <input
+                        type="text"
+                        id="acc-company"
+                        placeholder="Acme Manufacturing Co."
+                        className={errors.companyName ? "error" : ""}
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  {errors.companyName ? (
+                    <p className="field-error">{errors.companyName}</p>
+                  ) : null}
+                </div>
                 <div>
                   <label htmlFor="acc-company-type">Company type / category</label>
                   <div className="account-input-wrap">
@@ -564,8 +480,8 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, }: 
                     onChange={(e) => setAgree(e.target.checked)}
                   />
                   <label htmlFor="acc-agree">
-                    I agree to the <a href="/terms">Terms &amp; Conditions</a> and{" "}
-                    <a href="/privacy-policy">Privacy Policy</a>.
+                    I agree to the <a href="#">Terms &amp; Conditions</a> and{" "}
+                    <a href="#">Privacy Policy</a>.
                   </label>
                 </div>
               </div>
