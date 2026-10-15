@@ -158,8 +158,9 @@ class AdminManager:
         if user is None:
             first, _, last = name.strip().partition(" ")
             user_id = await self.db.scalar(text("""
-                INSERT INTO users (clerk_user_id, email, display_name, first_name, last_name, status)
-                VALUES (:c, :e, :d, NULLIF(:f, ''), NULLIF(:l, ''), 'active') RETURNING id
+                INSERT INTO users (clerk_user_id, email, display_name, first_name, last_name, status,
+                                   registration_channel)
+                VALUES (:c, :e, :d, NULLIF(:f, ''), NULLIF(:l, ''), 'active', 'admin_portal') RETURNING id
             """), {"c": f"{LOCAL_CLERK_PREFIX}{uuid.uuid4()}", "e": email, "d": name.strip() or email,
                    "f": first, "l": last.strip()})
         else:

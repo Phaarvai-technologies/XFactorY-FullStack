@@ -33,8 +33,15 @@ CREATE TABLE IF NOT EXISTS manufacturer_submissions (
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- One open submission per user: a retry or a correction updates it instead of adding rows.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_manufacturer_submissions_open
-  ON manufacturer_submissions (submitted_by_user_id) WHERE status IN ('pending', 'changes_requested');
+-- (019 replaces this index so update requests are counted separately; migrations are re-run in
+-- order, so the original is only created on a database that does not have 019's yet.)
+DO $$
+BEGIN
+  IF to_regclass('uq_manufacturer_submissions_open_v2') IS NULL THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_manufacturer_submissions_open
+      ON manufacturer_submissions (submitted_by_user_id) WHERE status IN ('pending', 'changes_requested');
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS ix_manufacturer_submissions_target
   ON manufacturer_submissions (target_organization_id, status);
 CREATE INDEX IF NOT EXISTS ix_manufacturer_submissions_org

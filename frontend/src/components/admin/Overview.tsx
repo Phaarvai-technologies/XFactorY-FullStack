@@ -111,7 +111,7 @@ function MiniList({
                     {mode === "attention"
                       ? r.attentionReason
                       : mode === "registered"
-                        ? `${r.contactName || r.contactEmail || "—"} · ${fmtDate(r.registeredAt)}`
+                        ? `${r.primaryUser?.name || r.primaryUser?.email || r.contactEmail || "—"} · ${fmtDate(r.registeredAt)}`
                         : `Updated ${fmtAgo(r.lastUpdated)}`}
                   </span>
                 </div>

@@ -61,6 +61,13 @@ def _json_or_none(value):
     return json.loads(value) if isinstance(value, (str, bytes)) else dict(value)
 
 
+def _json_list(value) -> list:
+    """A json array column: already decoded by the driver, or JSON text."""
+    if value is None:
+        return []
+    return list(json.loads(value) if isinstance(value, (str, bytes)) else value)
+
+
 def _first_incomplete(completed: list[int], total: int) -> int | None:
     return next((n for n in range(1, total + 1) if n not in completed), None)
 
@@ -221,6 +228,14 @@ class ManufacturerService:
             "submittedAt": latest.get("updated_at") if latest else None,
             "reviewedAt": latest.get("reviewed_at") if latest else None,
             "eligibility": eligibility.evaluate(org_status, p.get("completeness")),
+            # The user's own update requests for companies managed by someone else: their own
+            # proposed values, status and the admin's feedback only (no data of that company).
+            "updateRequests": [{
+                "id": str(r["id"]), "status": r["status"], "companyId": str(r["company_id"]),
+                "companyName": r["company_name"], "proposed": r.get("proposed") or {},
+                "feedback": r.get("review_feedback"), "submittedAt": r.get("created_at"),
+                "updatedAt": r.get("updated_at"), "reviewedAt": r.get("reviewed_at"),
+            } for r in _json_list(p.get("update_requests"))],
         }
         return snapshot
 
@@ -357,7 +372,11 @@ class ManufacturerService:
                                                   data["lastName"].strip())
             except Exception as exc:  # noqa: BLE001 - the database already has the new name
                 log.warning("Saved the new name, but could not update it in Clerk: %s", exc)
-        return await self.bootstrap(actor)
+        snapshot = await self.bootstrap(actor)
+        # What this submission became (new company / claim / update / update request for admin
+        # review), so the form can show the matching confirmation.
+        snapshot["submitted"] = result.get("submitted")
+        return snapshot
 
     async def update_profile(self, actor: Actor, changes: dict, progress: dict | None = None) -> dict:
         """PATCH /manufacturer/profile: apply only the changed fields, then return

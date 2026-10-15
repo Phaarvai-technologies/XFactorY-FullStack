@@ -1,10 +1,13 @@
 "use client";
 
-import { CheckCircle2, ExternalLink, MessageSquarePlus } from "lucide-react";
-import { useCallback, useState } from "react";
+import { CheckCircle2, ExternalLink, MessageSquarePlus, RotateCcw, UserCheck, UserMinus, XCircle } from "lucide-react";
+import { Fragment, useCallback, useState } from "react";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import {
+  ActionsMenu,
   Completeness,
+  DetailsRow,
+  DetailsToggle,
   ErrorBox,
   Loading,
   Modal,
@@ -13,9 +16,10 @@ import {
   RecordBadge,
   ReviewBadge,
   SearchInput,
+  Truncate,
 } from "@/components/admin/ui";
 import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
-import { REVIEW_LABELS, REVIEW_ORDER, fmtAgo } from "@/lib/admin/format";
+import { REVIEW_LABELS, REVIEW_ORDER, fmtAgo, fmtDate } from "@/lib/admin/format";
 import type { ManufacturerRow, ReviewQueue as Queue, ReviewStatus } from "@/lib/admin/types";
 
 type Pending =
@@ -42,6 +46,7 @@ export function ReviewQueue() {
   const [share, setShare] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
 
   async function patch(row: ManufacturerRow, body: Record<string, unknown>, done: string) {
     setBusy(row.id);
@@ -75,6 +80,7 @@ export function ReviewQueue() {
       return;
     }
     if (pending.status === "NEEDS_CORRECTION" && text.trim().length < 3) return setErr("Explain what needs correcting.");
+    if (pending.status === "REJECTED" && text.trim().length < 3) return setErr("Explain why it is rejected.");
     const ok = await patch(
       pending.row,
       { review_status: pending.status, reason: text.trim() || null },
@@ -96,7 +102,7 @@ export function ReviewQueue() {
     <>
       <PageHeader
         title="Onboarding & review"
-        subtitle="Profiles waiting for review come first, then those needing corrections and those still in progress. Reviewed profiles are hidden unless you filter for them."
+        subtitle="All requests in one place: new company accounts, claims, changes to company details and onboarding still in progress. Requests waiting for a decision come first; approved companies are hidden unless you filter for them."
       />
       <div className="card adm-toolbar">
         <div className="adm-toolbar-row">
@@ -138,129 +144,171 @@ export function ReviewQueue() {
       ) : (
         <div className={`card adm-table-card${loading ? " adm-stale" : ""}`}>
           <div className="adm-table-wrap">
-            <table className="adm-table">
+            <table className="adm-table adm-table-fixed">
+              <colgroup>
+                <col className="adm-w-expand" />
+                <col className="adm-w-main" />
+                <col className="adm-w-request" />
+                <col className="adm-w-date" />
+                <col className="adm-w-status" />
+                <col className="adm-w-actions" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Company</th>
-                  <th>Completion</th>
-                  <th>Last completed section</th>
-                  <th>Missing required fields</th>
-                  <th>Last activity</th>
-                  <th>Assigned admin</th>
-                  <th>Review status</th>
-                  <th aria-label="Actions" />
+                  <th aria-label="Details" />
+                  <th>Company / requester</th>
+                  <th>Request</th>
+                  <th>Submitted</th>
+                  <th>Status</th>
+                  <th className="adm-th-actions">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="adm-empty-cell">
+                    <td colSpan={6} className="adm-empty-cell">
                       The queue is empty for these filters.
                     </td>
                   </tr>
                 )}
-                {rows.map((r) => (
-                  <tr key={r.id} className={busy === r.id ? "adm-stale" : undefined}>
-                    <td className="adm-col-company">
-                      <button type="button" className="adm-link" onClick={() => go(`/admin/manufacturers/${r.id}?tab=onboarding`)}>
-                        {r.companyName || "Unnamed company"}
-                      </button>
-                      <RecordBadge type={r.recordType} hideReal />
-                      <div className="adm-cell-sub">{r.contactName || r.contactEmail || ""}</div>
-                    </td>
-                    <td>
-                      <Completeness value={r.completeness} done={r.requiredDone} total={r.requiredTotal} />
-                    </td>
-                    <td>{r.lastCompletedSection ?? <span className="adm-muted">None yet</span>}</td>
-                    <td className="adm-missing-cell">
-                      {r.missingFields.length === 0 ? (
-                        <span className="adm-ok-text">None</span>
-                      ) : (
-                        <span title={r.missingFields.join(", ")}>
-                          <b>{r.missingFields.length}</b> · {r.missingFields.slice(0, 2).join(", ")}
-                          {r.missingFields.length > 2 ? "…" : ""}
-                        </span>
+                {rows.map((r) => {
+                  const name = r.companyName || "Unnamed company";
+                  const detailsId = `rq-${r.id}`;
+                  const isOpen = open === r.id;
+                  const openRequest = () => go(`/admin/manufacturers/${r.id}?tab=onboarding`);
+                  // Update requests from other users are decided in their own section of the request page;
+                  // the company-level status control does not approve them.
+                  const separateDecision = r.request?.kind === "update_request";
+                  const ask = (status: ReviewStatus) => {
+                    setErr("");
+                    setText("");
+                    setPending({ kind: "status", row: r, status });
+                  };
+                  return (
+                    <Fragment key={r.id}>
+                      <tr className={busy === r.id ? "adm-stale" : undefined}>
+                        <td>
+                          <DetailsToggle open={isOpen} onToggle={() => setOpen(isOpen ? null : r.id)} controls={detailsId} label={name} />
+                        </td>
+                        <td>
+                          <div className="adm-name-line">
+                            <button type="button" className="adm-link adm-truncate" title={name} onClick={openRequest}>
+                              {name}
+                            </button>
+                            <RecordBadge type={r.recordType} hideReal />
+                          </div>
+                          <div className="adm-cell-sub">
+                            <Truncate text={r.request?.requestedBy || r.primaryUser?.name || r.primaryUser?.email || null} />
+                          </div>
+                        </td>
+                        <td>
+                          <Truncate text={r.request?.label ?? (r.reviewStatus === "NOT_STARTED" ? "Onboarding not started" : "Onboarding")} />
+                          {r.request && r.request.openCount > 1 && (
+                            <div className="adm-cell-sub">+{r.request.openCount - 1} more open</div>
+                          )}
+                        </td>
+                        <td className="adm-nowrap">{r.request?.submittedAt ? fmtDate(r.request.submittedAt) : <span className="adm-muted">—</span>}</td>
+                        <td>
+                          <ReviewBadge status={r.reviewStatus} />
+                        </td>
+                        <td className="adm-td-actions">
+                          <ActionsMenu
+                            context={name}
+                            items={[
+                              { label: separateDecision ? "Open request to decide" : "Open request", icon: <ExternalLink size={15} />, onSelect: openRequest },
+                              {
+                                label: "Approve",
+                                icon: <CheckCircle2 size={15} />,
+                                hidden: r.reviewStatus === "REVIEWED" || separateDecision,
+                                disabled: busy !== null,
+                                group: true,
+                                onSelect: () => void patch(r, { review_status: "REVIEWED" }, `${name} approved`),
+                              },
+                              {
+                                label: "Request corrections…",
+                                icon: <RotateCcw size={15} />,
+                                hidden: r.reviewStatus === "NEEDS_CORRECTION" || separateDecision,
+                                onSelect: () => ask("NEEDS_CORRECTION"),
+                              },
+                              {
+                                label: "Reject…",
+                                icon: <XCircle size={15} />,
+                                danger: true,
+                                hidden: r.reviewStatus === "REJECTED" || separateDecision,
+                                onSelect: () => ask("REJECTED"),
+                              },
+                              ...(["SUBMITTED", "IN_PROGRESS", "NOT_STARTED"] as ReviewStatus[])
+                                .filter((st) => st !== r.reviewStatus && !separateDecision)
+                                .map((st, i) => ({ label: `Set to ${REVIEW_LABELS[st]}…`, onSelect: () => ask(st), group: i === 0 })),
+                              {
+                                label: "Add internal note",
+                                icon: <MessageSquarePlus size={15} />,
+                                group: true,
+                                onSelect: () => {
+                                  setErr("");
+                                  setText("");
+                                  setPending({ kind: "note", row: r });
+                                },
+                              },
+                              {
+                                label: "Assign to me",
+                                icon: <UserCheck size={15} />,
+                                hidden: !me || r.assignedAdminId === me.id,
+                                disabled: busy !== null,
+                                onSelect: () => void patch(r, { assigned_admin_id: me?.id }, "Assigned to you"),
+                              },
+                              {
+                                label: "Unassign",
+                                icon: <UserMinus size={15} />,
+                                hidden: !r.assignedAdminId,
+                                disabled: busy !== null,
+                                onSelect: () => void patch(r, { unassign: true }, "Unassigned"),
+                              },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <DetailsRow
+                          id={detailsId}
+                          colSpan={6}
+                          items={[
+                            ["Profile completion", <Completeness key="c" value={r.completeness} done={r.requiredDone} total={r.requiredTotal} />],
+                            ["Last completed section", r.lastCompletedSection ?? "None yet"],
+                            ["Missing required fields", r.missingFields.length ? r.missingFields.join(", ") : "None"],
+                            ["Last activity", fmtAgo(r.lastUpdated)],
+                            ["Company contact", [r.contactEmail, r.contactPhone].filter(Boolean).join(" · ") || null],
+                            ["Primary user", r.primaryUser ? [r.primaryUser.name, r.primaryUser.email].filter(Boolean).join(" · ") : null],
+                            [
+                              "Assigned admin",
+                              <select
+                                key="assign"
+                                className="adm-inline-select"
+                                value={r.assignedAdminId ?? ""}
+                                disabled={busy !== null}
+                                aria-label={`Assign ${name}`}
+                                onChange={(e) =>
+                                  void patch(
+                                    r,
+                                    e.target.value ? { assigned_admin_id: e.target.value } : { unassign: true },
+                                    e.target.value ? "Admin assigned" : "Unassigned",
+                                  )
+                                }
+                              >
+                                <option value="">Unassigned</option>
+                                {data.admins.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.id === me?.id ? "Me" : a.name || a.email}
+                                  </option>
+                                ))}
+                              </select>,
+                            ],
+                          ]}
+                        />
                       )}
-                    </td>
-                    <td className="adm-nowrap">{fmtAgo(r.lastUpdated)}</td>
-                    <td>
-                      <select
-                        className="adm-inline-select"
-                        value={r.assignedAdminId ?? ""}
-                        disabled={busy !== null}
-                        aria-label={`Assign ${r.companyName ?? "manufacturer"}`}
-                        onChange={(e) =>
-                          void patch(
-                            r,
-                            e.target.value ? { assigned_admin_id: e.target.value } : { unassign: true },
-                            e.target.value ? "Admin assigned" : "Unassigned",
-                          )
-                        }
-                      >
-                        <option value="">Unassigned</option>
-                        {data.admins.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.id === me?.id ? "Me" : a.name || a.email}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        className={`adm-inline-select adm-status-select s-${r.reviewStatus}`}
-                        value={r.reviewStatus}
-                        disabled={busy !== null}
-                        aria-label={`Review status for ${r.companyName ?? "manufacturer"}`}
-                        onChange={(e) => {
-                          setErr("");
-                          setText("");
-                          setPending({ kind: "status", row: r, status: e.target.value as ReviewStatus });
-                        }}
-                      >
-                        {REVIEW_ORDER.map((s) => (
-                          <option key={s} value={s}>
-                            {REVIEW_LABELS[s]}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <div className="adm-row-actions">
-                        {r.reviewStatus !== "REVIEWED" && (
-                          <button
-                            type="button"
-                            className="adm-icon-action ok"
-                            title="Mark reviewed"
-                            disabled={busy !== null}
-                            onClick={() => void patch(r, { review_status: "REVIEWED" }, `${r.companyName || "Manufacturer"} marked reviewed`)}
-                          >
-                            <CheckCircle2 size={16} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="adm-icon-action"
-                          title="Add internal note"
-                          onClick={() => {
-                            setErr("");
-                            setText("");
-                            setPending({ kind: "note", row: r });
-                          }}
-                        >
-                          <MessageSquarePlus size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="adm-icon-action"
-                          title="Open"
-                          onClick={() => go(`/admin/manufacturers/${r.id}?tab=onboarding`)}
-                        >
-                          <ExternalLink size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -282,6 +330,10 @@ export function ReviewQueue() {
             ) : pending.status === "NEEDS_CORRECTION" ? (
               <>
                 What needs correcting? <span className="adm-req">*</span>
+              </>
+            ) : pending.status === "REJECTED" ? (
+              <>
+                Reason for rejection <span className="adm-req">*</span>
               </>
             ) : (
               <>

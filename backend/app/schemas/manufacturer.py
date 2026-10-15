@@ -4,7 +4,9 @@ from datetime import date
 from uuid import UUID
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.core.onboarding_source import reject_client_source
 
 
 class _Model(BaseModel):
@@ -27,6 +29,13 @@ class AccountPayload(_Model):
     # Database id of the company picked from the search list (None = a new company). The
     # backend checks the record and the user's ownership before writing anything.
     companyId: UUID | None = None
+
+    # The onboarding / submission source is assigned by the backend (web_dashboard for this
+    # endpoint); a body that tries to set it is rejected rather than silently ignored.
+    @model_validator(mode="before")
+    @classmethod
+    def no_client_source(cls, data):
+        return reject_client_source(data)
 
     @field_validator("dob")
     @classmethod

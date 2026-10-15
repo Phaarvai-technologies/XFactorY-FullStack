@@ -29,12 +29,17 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import onboarding_source
+
 OPEN = ("pending", "changes_requested")
+# Update requests from users who do not manage the company are reviewed on their own
+# (app/company_update_requests.py); the functions below concern the company's own submissions.
+OWN_KINDS_SQL = "s.kind <> 'update_request'"
 OWNER_ROLES = "('owner', 'admin')"
 SUBMISSION_COLUMNS = """
     s.id, s.organization_id, s.target_organization_id, s.selected_company_id, s.submitted_by_user_id,
     s.kind, s.payload, s.status, s.reviewed_by_user_id, s.reviewed_at, s.review_feedback, s.applied_at,
-    s.created_at, s.updated_at
+    s.created_at, s.updated_at, s.source, s.submitted_at
 """
 
 
@@ -47,7 +52,7 @@ def _payload(row) -> dict:
 async def open_submission_for_user(db: AsyncSession, user_id: UUID) -> dict | None:
     row = (await db.execute(text(f"""
         SELECT {SUBMISSION_COLUMNS} FROM manufacturer_submissions s
-        WHERE s.submitted_by_user_id = :u AND s.status IN ('pending', 'changes_requested')
+        WHERE s.submitted_by_user_id = :u AND s.status IN ('pending', 'changes_requested') AND {OWN_KINDS_SQL}
     """), {"u": user_id})).mappings().first()
     return {**row, "payload": _payload(row)} if row else None
 
@@ -55,7 +60,8 @@ async def open_submission_for_user(db: AsyncSession, user_id: UUID) -> dict | No
 async def latest_submission_for_user(db: AsyncSession, user_id: UUID) -> dict | None:
     row = (await db.execute(text(f"""
         SELECT {SUBMISSION_COLUMNS} FROM manufacturer_submissions s
-        WHERE s.submitted_by_user_id = :u ORDER BY s.updated_at DESC, s.created_at DESC LIMIT 1
+        WHERE s.submitted_by_user_id = :u AND {OWN_KINDS_SQL}
+        ORDER BY s.updated_at DESC, s.created_at DESC LIMIT 1
     """), {"u": user_id})).mappings().first()
     return {**row, "payload": _payload(row)} if row else None
 
@@ -64,6 +70,7 @@ async def open_submission_for_target(db: AsyncSession, org_id: str | UUID, lock:
     row = (await db.execute(text(f"""
         SELECT {SUBMISSION_COLUMNS} FROM manufacturer_submissions s
         WHERE s.target_organization_id = CAST(:o AS uuid) AND s.status IN ('pending', 'changes_requested')
+          AND {OWN_KINDS_SQL}
         ORDER BY (s.status = 'pending') DESC, s.updated_at DESC LIMIT 1
         {"FOR UPDATE" if lock else ""}
     """), {"o": str(org_id)})).mappings().first()
@@ -88,22 +95,65 @@ async def completeness(db: AsyncSession, org_id: UUID) -> int:
         "SELECT completeness FROM admin_manufacturer_overview WHERE organization_id = :o"), {"o": org_id}) or 0)
 
 
+# ------------------------------------------------------------------ history
+async def record_event(db: AsyncSession, *, event: str, role: str, source: str | None,
+                       organization_id: UUID | str | None, submission_id: UUID | None = None,
+                       actor: UUID | None = None, details: dict | None = None,
+                       import_batch_id: UUID | None = None, key: str | None = None) -> bool:
+    """One onboarding history row (company / submission, action, channel, actor, time).
+    With `key`, a retry of the same action adds nothing. Returns True when a row was added."""
+    row = (await db.execute(text("""
+        INSERT INTO manufacturer_submission_events
+          (submission_id, organization_id, event, actor_user_id, actor_role, source, details,
+           import_batch_id, idempotency_key)
+        VALUES (:s, CAST(:o AS uuid), :e, :a, :r, :src, CAST(:d AS jsonb), :b, :k)
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+        RETURNING id
+    """), {"s": submission_id, "o": str(organization_id) if organization_id else None, "e": event, "a": actor,
+           "r": role, "src": source, "d": json.dumps(details or {}, default=str), "b": import_batch_id,
+           "k": key})).first()
+    return row is not None
+
+
 # ------------------------------------------------------------------ submit
 async def stage(db: AsyncSession, *, user_id: UUID, workspace_id: UUID, target_id: UUID,
-                selected_id: UUID | None, kind: str, payload: dict) -> UUID:
-    """Create or refresh the user's open submission (status back to 'pending')."""
-    return await db.scalar(text("""
+                selected_id: UUID | None, kind: str, payload: dict,
+                source: str = "web_dashboard") -> UUID:
+    """Create or refresh the user's open submission (status back to 'pending').
+
+    `source` is the channel that handled the request, decided by the calling handler (never by
+    the client); only implemented channels are accepted. A retry with the same details while
+    the submission is still pending changes nothing and records no new history event."""
+    onboarding_source.require(source)
+    previous = (await db.execute(text("""
+        SELECT id, payload, status, target_organization_id, kind FROM manufacturer_submissions
+        WHERE submitted_by_user_id = :u AND status IN ('pending', 'changes_requested')
+          AND kind <> 'update_request'
+        FOR UPDATE
+    """), {"u": user_id})).mappings().first()
+    if previous and previous["status"] == "pending" and _payload(previous) == payload \
+            and previous["target_organization_id"] == target_id and previous["kind"] == kind:
+        return previous["id"]  # idempotent retry
+    sub_id = await db.scalar(text("""
         INSERT INTO manufacturer_submissions
-          (organization_id, target_organization_id, selected_company_id, submitted_by_user_id, kind, payload)
-        VALUES (:w, :t, :sel, :u, :k, CAST(:p AS jsonb))
+          (organization_id, target_organization_id, selected_company_id, submitted_by_user_id, kind, payload,
+           source, submitted_at)
+        VALUES (:w, :t, :sel, :u, :k, CAST(:p AS jsonb), :src, now())
         ON CONFLICT (submitted_by_user_id) WHERE status IN ('pending', 'changes_requested')
+                                               AND kind <> 'update_request'
         DO UPDATE SET organization_id = EXCLUDED.organization_id,
                       target_organization_id = EXCLUDED.target_organization_id,
                       selected_company_id = EXCLUDED.selected_company_id, kind = EXCLUDED.kind,
-                      payload = EXCLUDED.payload, status = 'pending', updated_at = now()
+                      payload = EXCLUDED.payload, status = 'pending', submitted_at = now(), updated_at = now()
         RETURNING id
     """), {"w": workspace_id, "t": target_id, "sel": selected_id, "u": user_id, "k": kind,
-           "p": json.dumps(payload)})
+           "p": json.dumps(payload), "src": source})
+    # The source stays on the submission (staging). For a new company it is copied to the company
+    # record when the admin approves the creation (decide), in the same transaction.
+    await record_event(db, event="resubmitted" if previous else "submitted", role="requester", source=source,
+                       organization_id=target_id, submission_id=sub_id, actor=user_id,
+                       details={"kind": kind, "proposed": payload})
+    return sub_id
 
 
 async def stage_name_change(db: AsyncSession, *, user_id: UUID, workspace_id: UUID, name: str) -> bool:
@@ -112,10 +162,16 @@ async def stage_name_change(db: AsyncSession, *, user_id: UUID, workspace_id: UU
     open_sub = await open_submission_for_user(db, user_id)
     if open_sub:
         payload = {**open_sub["payload"], "companyName": name}
+        if payload == open_sub["payload"] and open_sub["status"] == "pending":
+            return True  # unchanged: nothing to record
         await db.execute(text("""
-            UPDATE manufacturer_submissions SET payload = CAST(:p AS jsonb), status = 'pending', updated_at = now()
+            UPDATE manufacturer_submissions SET payload = CAST(:p AS jsonb), status = 'pending',
+              submitted_at = now(), updated_at = now()
             WHERE id = :id
         """), {"id": open_sub["id"], "p": json.dumps(payload)})
+        await record_event(db, event="resubmitted", role="requester", source=open_sub["source"],
+                           organization_id=open_sub["target_organization_id"], submission_id=open_sub["id"],
+                           actor=user_id, details={"kind": open_sub["kind"], "proposed": payload})
         return True
     if await approval_status(db, workspace_id) != "approved":
         return False  # never submitted (older accounts): unchanged behaviour
@@ -164,6 +220,23 @@ async def decide(db: AsyncSession, org_id: str, decision: str, admin_id: UUID, f
     """), {"s": new_status, "a": admin_id, "f": feedback, "id": sub["id"]})).first()
     if updated is None:  # processed concurrently
         raise DecisionError("This submission was already processed.")
+    # Review actions are history of their own ('admin_review'); the company's onboarding source
+    # and the submission's channel are left exactly as they are.
+    await record_event(db, event="decision", role="admin", source=onboarding_source.ADMIN_REVIEW,
+                       organization_id=sub["target_organization_id"], submission_id=sub["id"], actor=admin_id,
+                       details={"decision": new_status, "feedback": feedback, "kind": sub["kind"]})
+    if new_status == "approved" and sub["kind"] == "new_company":
+        # Approved creation: the company's original source is the staged submission's channel.
+        # Only the user's own organization (created for them by the app) and only once.
+        await db.execute(text("""
+            UPDATE organizations SET onboarding_source = :src
+            WHERE id = :t AND onboarding_source IS NULL AND created_by_user_id = :u
+        """), {"t": sub["target_organization_id"], "u": sub["submitted_by_user_id"],
+               "src": onboarding_source.require(sub["source"])})
+    if new_status == "approved":
+        await record_event(db, event="merged", role="admin", source=onboarding_source.ADMIN_REVIEW,
+                           organization_id=sub["target_organization_id"], submission_id=sub["id"],
+                           actor=admin_id, details={"kind": sub["kind"]}, key=f"merged:{sub['id']}")
     # The company's own approval status follows the decision for a NEW company. A claim or an
     # update concerns an existing company: rejecting / correcting it leaves that company as is.
     if sub["kind"] == "new_company" or new_status == "approved":

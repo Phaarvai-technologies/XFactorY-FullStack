@@ -6,16 +6,18 @@ import {
   ArchiveRestore,
   CheckCircle2,
   Circle,
+  ClipboardCheck,
+  Cog,
   FileText,
   ImageIcon,
   Pencil,
-  UserRound,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import { EditFieldModal, type EditTarget } from "@/components/admin/EditFieldModal";
+import { RegisteredUsers } from "@/components/admin/RegisteredUsers";
 import {
-  AccountBadge,
+  ActionsMenu,
   Completeness,
   EntryBadge,
   ErrorBox,
@@ -26,6 +28,7 @@ import {
   ReviewBadge,
 } from "@/components/admin/ui";
 import { jsonBody, useAdminApi, useAdminHost, useResource } from "@/lib/admin/api";
+import { ApiError } from "@/lib/api";
 import { displayValue } from "@/lib/admin/fields";
 import {
   ENTRY_LABELS,
@@ -37,8 +40,10 @@ import {
   fmtAgo,
   fmtDate,
   fmtDateTime,
+  sourceText,
 } from "@/lib/admin/format";
 import type {
+  CompanyUpdateRequest,
   EntrySource,
   Machine,
   ManufacturerDetail as Detail,
@@ -180,17 +185,16 @@ export function ManufacturerDetail({ id }: { id: string }) {
           </>
         }
         actions={
-          <button type="button" className="btn-ghost" onClick={() => setArchiveOpen(true)}>
-            {m.isArchived ? (
-              <>
-                <ArchiveRestore size={15} /> Restore
-              </>
-            ) : (
-              <>
-                <Archive size={15} /> Archive
-              </>
-            )}
-          </button>
+          <ActionsMenu
+            context={m.companyName || "this company"}
+            items={[
+              { label: "Onboarding & review", icon: <ClipboardCheck size={15} />, onSelect: () => setTab("onboarding") },
+              { label: "View machinery", icon: <Cog size={15} />, onSelect: () => go(`/admin/machinery?org=${id}`) },
+              m.isArchived
+                ? { label: "Restore", icon: <ArchiveRestore size={15} />, group: true, onSelect: () => setArchiveOpen(true) }
+                : { label: "Archive", icon: <Archive size={15} />, group: true, danger: true, onSelect: () => setArchiveOpen(true) },
+            ]}
+          />
         }
       />
 
@@ -210,14 +214,37 @@ export function ManufacturerDetail({ id }: { id: string }) {
             </small>
           </div>
           <div>
-            <span>Contact</span>
-            <b>{m.contactName || "—"}</b>
-            <small>{m.contactEmail || m.contactPhone || "No contact details"}</small>
+            <span>Company contact</span>
+            <b className="adm-truncate" title={m.contactEmail ?? ""}>{m.contactEmail || "—"}</b>
+            <small>{m.contactPhone || (m.contactEmail ? "No contact phone" : "No company contact details")}</small>
           </div>
           <div>
             <span>Location</span>
             <b>{m.location || "—"}</b>
             <small>{m.industry || "Industry not set"}</small>
+          </div>
+          <div>
+            <span>Linked users</span>
+            <b>{m.linkedUsers ?? new Set((d.members ?? []).filter((u) => u.membershipStatus === "active").map((u) => u.id)).size}</b>
+            <small>
+              {/* based on memberships only (the entry / onboarding source says nothing about linked users) */}
+              Accounts linked by membership
+            </small>
+          </div>
+          <div>
+            <span>Onboarding source</span>
+            <b>{sourceText(d.onboarding?.source ?? m.onboardingSource, d.onboarding?.staged ?? m.stagedSource)}</b>
+            <small>
+              {d.onboarding?.importBatch
+                ? `Batch ${d.onboarding.importBatch.reference} · ${fmtDate(d.onboarding.importBatch.importedAt)}`
+                : (d.onboarding?.source ?? m.onboardingSource)
+                  ? d.onboarding?.backfill?.outcome === "applied"
+                    ? `Set from evidence on ${fmtDate(d.onboarding.backfill.at)} (rule ${d.onboarding.backfill.rule})`
+                    : "Original source (never changes)"
+                  : (d.onboarding?.staged ?? m.stagedSource)
+                    ? "Recorded on the submission; copied to the company when approved"
+                    : (d.onboarding?.note ?? m.onboardingSourceNote ?? "Not examined yet — run the source backfill")}
+            </small>
           </div>
           <div>
             <span>Major process</span>
@@ -347,13 +374,14 @@ function ArchiveModal({
 /* ---------------------------------------------------------------- tab 1 */
 function CompanyTab({ ctx }: { ctx: Ctx }) {
   const { d } = ctx;
-  const { go } = useAdminHost();
   const a = d.profile.state.account;
   const c = d.profile.profileData.company;
   const l = d.profile.profileData.location;
   const done = (s: string) => d.manufacturer.sections.find((x) => x.name === s)?.complete ?? false;
   return (
     <div className="adm-tab-body">
+      <RegisteredUsers orgId={d.manufacturer.id} refreshKey={d} />
+
       <Section title="Personal info" note={<SectionState done={done("Personal info")} />}>
         <div className="details-grid">
           <Resp ctx={ctx} label="First name" value={a.firstName} requiredKey="r_first_name" readOnly="Comes from the user's sign-up." />
@@ -396,45 +424,6 @@ function CompanyTab({ ctx }: { ctx: Ctx }) {
         </div>
       </Section>
 
-      <Section title="Linked users">
-        {d.linkedUsers.length === 0 ? (
-          <p className="adm-muted">No user is linked to this manufacturer.</p>
-        ) : (
-          <div className="adm-table-wrap">
-            <table className="adm-table adm-table-compact">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Relationship</th>
-                  <th>Account</th>
-                  <th>Last activity</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {d.linkedUsers.map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="adm-cell-main">{[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}</div>
-                      <div className="adm-cell-sub">{u.email}</div>
-                    </td>
-                    <td className="adm-capitalize">{u.membership_role}</td>
-                    <td>
-                      <AccountBadge status={u.status} />
-                    </td>
-                    <td>{fmtAgo(u.last_seen_at)}</td>
-                    <td>
-                      <button type="button" className="btn-text" onClick={() => go(`/admin/users/${u.id}`)}>
-                        <UserRound size={14} /> Open user
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
     </div>
   );
 }
@@ -756,9 +745,56 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             ))}
           </ul>
         </Section>
+
+        {d.onboarding && (
+          <Section
+            title="Onboarding source & history"
+            note={<span className="badge badge-neutral">Source: {sourceText(d.onboarding.source, d.onboarding.staged)}</span>}
+          >
+            {!d.onboarding.source && d.onboarding.note && (
+              <p className="adm-section-hint">
+                <b>Why unknown:</b> {d.onboarding.note}
+              </p>
+            )}
+            {d.onboarding.backfill?.outcome === "applied" && (
+              <p className="adm-section-hint">
+                Assigned on {fmtDateTime(d.onboarding.backfill.at)} from evidence (rule {d.onboarding.backfill.rule}):{" "}
+                {d.onboarding.backfill.evidence.join("; ")}.
+              </p>
+            )}
+            {d.onboarding.importBatch && (
+              <p className="adm-section-hint">
+                Imported from <b>{d.onboarding.importBatch.reference}</b> by {d.onboarding.importBatch.importedBy} on{" "}
+                {fmtDateTime(d.onboarding.importBatch.importedAt)}.
+              </p>
+            )}
+            {d.onboarding.history.length === 0 ? (
+              <p className="adm-muted">No onboarding events recorded for this company.</p>
+            ) : (
+              <ul className="adm-timeline">
+                {d.onboarding.history.map((e) => (
+                  <li key={e.id}>
+                    <b>
+                      {e.label}
+                      {e.decision ? ` — ${e.decision.replace(/_/g, " ")}` : ""}
+                    </b>
+                    <span>
+                      {fmtDateTime(e.at)} · {e.sourceLabel}
+                      {e.actor ? ` · ${e.actor}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        )}
       </div>
 
       <div className="adm-col">
+        {(d.updateRequests ?? []).map((r) => (
+          <UpdateRequestReview key={`${r.id}:${r.fingerprint ?? r.status}`} orgId={m.id} req={r} onChange={onChange} />
+        ))}
+
         {d.pendingSubmission ? (
           <Section
             title="Submitted for approval"
@@ -796,7 +832,7 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
               </table>
             </div>
             <p className="field-hint">
-              Use the review status below: Reviewed approves and applies these details to the record; Needs correction
+              Use the review status below: Approved applies these details to the record; Needs correction
               or Rejected leave the record unchanged.
             </p>
           </Section>
@@ -827,6 +863,12 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             )}
           </label>
           <textarea id="rv-reason" rows={2} value={statusReason} onChange={(e) => setStatusReason(e.target.value)} />
+          {!d.pendingSubmission && (d.updateRequests ?? []).some((r) => r.status === "pending") && (
+            <p className="field-hint">
+              Update requests from other users are decided in their own section above. This status is the company&apos;s
+              own and does not approve or decline them.
+            </p>
+          )}
           {status === "NEEDS_CORRECTION" && status !== m.reviewStatus && (
             <p className="field-hint">The manufacturer gets this note as a notification and a popup on their dashboard.</p>
           )}
@@ -850,10 +892,10 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
                 disabled={busy !== null}
                 onClick={async () => {
                   setStatus("REVIEWED");
-                  await patch("status", { review_status: "REVIEWED", reason: statusReason || null }, "Marked as reviewed");
+                  await patch("status", { review_status: "REVIEWED", reason: statusReason || null }, "Approved");
                 }}
               >
-                <CheckCircle2 size={15} /> Mark reviewed
+                <CheckCircle2 size={15} /> Approve
               </button>
             )}
           </div>
@@ -974,6 +1016,206 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
 }
 
 /* ---------------------------------------------------------------- tab 5 */
+const UPDATE_REQUEST_STATUS: Record<CompanyUpdateRequest["status"], [string, string]> = {
+  pending: ["badge-info", "Awaiting review"],
+  changes_requested: ["badge-pending", "Corrections requested"],
+  approved: ["badge-verified", "Approved"],
+  rejected: ["badge-rejected", "Declined"],
+};
+const EVENT_LABELS: Record<string, string> = {
+  submitted: "Submitted",
+  resubmitted: "Resubmitted",
+  edited: "Proposed values edited",
+  note: "Verification notes updated",
+  decision: "Decision",
+};
+
+/**
+ * One update request from a user who does not manage this company: the record's current
+ * values beside the proposed ones. The admin may edit proposed values, keep internal
+ * verification / contact notes, choose which changes to apply, and decide. Nothing changes on
+ * the company until an approval, and approval never grants the requester access.
+ */
+function UpdateRequestReview({ orgId, req, onChange }: { orgId: string; req: CompanyUpdateRequest; onChange: (d: Detail) => void }) {
+  const call = useAdminApi();
+  const toast = useToast();
+  const open = req.status === "pending" || req.status === "changes_requested";
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(req.fields.map((f) => [f.key, f.proposed])));
+  const [apply, setApply] = useState<Set<string>>(() => new Set(req.fields.filter((f) => f.differs).map((f) => f.key)));
+  const [notes, setNotes] = useState(req.adminNotes);
+  const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [badge, label] = UPDATE_REQUEST_STATUS[req.status];
+  const base = `/manufacturers/${orgId}/update-requests/${req.id}`;
+  const edits = Object.fromEntries(req.fields.filter((f) => (values[f.key] ?? "") !== f.proposed).map((f) => [f.key, values[f.key] ?? ""]));
+  const dirty = Object.keys(edits).length > 0 || notes !== req.adminNotes;
+  const companyChanged = req.fields.some((f) => f.companyChanged);
+
+  async function run(action: () => Promise<Detail>, done: string) {
+    setBusy(true);
+    setErr(null);
+    try {
+      onChange(await action());
+      toast(done);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save");
+      // The request or the company changed meanwhile: show the latest values to review again.
+      if (e instanceof ApiError && e.status === 409) onChange(await call<Detail>(`/manufacturers/${orgId}`));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdits(): Promise<Detail> {
+    return call<Detail>(base, jsonBody("PATCH", {
+      ...(Object.keys(edits).length ? { values: edits } : {}),
+      ...(notes !== req.adminNotes ? { notes } : {}),
+    }));
+  }
+
+  async function decide(decision: "approve" | "request_changes" | "decline") {
+    await run(async () => {
+      let fingerprint = req.fingerprint;
+      if (dirty) {
+        // Unsaved edits / notes are saved first, then the decision is made on that version.
+        const saved = await saveEdits();
+        fingerprint = saved.updateRequests.find((r) => r.id === req.id)?.fingerprint ?? null;
+      }
+      return call<Detail>(`${base}/decision`, jsonBody("POST", {
+        decision,
+        fingerprint,
+        feedback: feedback.trim() || null,
+        ...(decision === "approve" ? { fields: [...apply] } : {}),
+      }));
+    }, decision === "approve" ? "Approved changes applied to the company" : decision === "decline" ? "Request declined" : "Corrections requested");
+  }
+
+  return (
+    <Section title="Update request" note={<span className={`badge ${badge}`}>{label}</span>}>
+      <p className="field-hint">
+        Existing company update · from {req.requester.name} ({req.requester.email}) · {fmtDateTime(req.submittedAt)} ·
+        source: {req.source}
+        {req.reviewedAt ? ` · decided ${fmtDateTime(req.reviewedAt)}${req.reviewedBy ? ` by ${req.reviewedBy}` : ""}` : ""}
+      </p>
+      <p className="field-hint">
+        This user does not manage the company. Approving updates only the chosen fields; it does not give them access
+        to the company.
+      </p>
+      {open && companyChanged && (
+        <div className="adm-missing-banner" role="note">
+          <AlertTriangle size={18} />
+          <div>
+            <b>The company record changed after this request was submitted.</b> Compare the current values (marked) before
+            deciding.
+          </div>
+        </div>
+      )}
+      <div className="adm-table-wrap">
+        <table className="adm-table adm-table-compact">
+          <thead>
+            <tr>
+              {open && <th className="adm-check-col">Apply</th>}
+              <th>Field</th>
+              <th>Current record</th>
+              <th>Proposed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {req.fields.map((f) => (
+              <tr key={f.key}>
+                {open && (
+                  <td className="adm-check-col">
+                    <input
+                      type="checkbox"
+                      aria-label={`Apply ${f.label}`}
+                      checked={apply.has(f.key)}
+                      disabled={busy || !f.differs}
+                      onChange={(e) => setApply((cur) => {
+                        const next = new Set(cur);
+                        if (e.target.checked) next.add(f.key); else next.delete(f.key);
+                        return next;
+                      })}
+                    />
+                  </td>
+                )}
+                <td>{f.label}</td>
+                <td>
+                  {f.current || "—"}
+                  {f.companyChanged && <span className="badge badge-pending adm-inline-badge">changed since request (was {f.atSubmission || "—"})</span>}
+                </td>
+                <td>
+                  {open ? (
+                    <input
+                      aria-label={`Proposed ${f.label}`}
+                      value={values[f.key] ?? ""}
+                      disabled={busy}
+                      onChange={(e) => setValues((cur) => ({ ...cur, [f.key]: e.target.value }))}
+                    />
+                  ) : (
+                    f.proposed || "—"
+                  )}
+                  {f.edited && <span className="adm-muted"> (requester: {f.submitted || "—"})</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {req.appliedChanges && (
+        <p className="field-hint">
+          Applied: {Object.entries(req.appliedChanges).map(([k, c]) => `${req.fields.find((f) => f.key === k)?.label ?? k}: ${c.from || "—"} → ${c.to}`).join("; ")}
+        </p>
+      )}
+      {req.feedback && <p className="field-hint">Feedback to requester: {req.feedback}</p>}
+      {open ? (
+        <>
+          <label htmlFor={`ur-notes-${req.id}`} style={{ marginTop: 12 }}>
+            Verification / contact notes <span className="optional">(internal)</span>
+          </label>
+          <textarea id={`ur-notes-${req.id}`} rows={2} value={notes} disabled={busy} onChange={(e) => setNotes(e.target.value)} />
+          <label htmlFor={`ur-feedback-${req.id}`} style={{ marginTop: 12 }}>
+            Feedback to the requester <span className="optional">(required to request corrections or decline)</span>
+          </label>
+          <textarea id={`ur-feedback-${req.id}`} rows={2} value={feedback} disabled={busy} onChange={(e) => setFeedback(e.target.value)} />
+          {err && <p className="field-error">{err}</p>}
+          <div className="adm-btn-row">
+            <button type="button" className="btn-primary adm-btn-sm" disabled={busy || apply.size === 0} onClick={() => void decide("approve")}>
+              Approve selected changes
+            </button>
+            <button type="button" className="btn-ghost" disabled={busy || !feedback.trim()} onClick={() => void decide("request_changes")}>
+              Request corrections
+            </button>
+            <button type="button" className="btn-danger-ghost" disabled={busy || !feedback.trim()} onClick={() => void decide("decline")}>
+              Decline
+            </button>
+            <button type="button" className="btn-ghost" disabled={busy || !dirty} onClick={() => void run(saveEdits, "Review saved")}>
+              Save edits &amp; notes
+            </button>
+          </div>
+        </>
+      ) : null}
+      <details style={{ marginTop: 12 }}>
+        <summary>Audit history ({req.events.length})</summary>
+        <ul className="adm-timeline">
+          {req.events.map((e, i) => (
+            <li key={i}>
+              <b>
+                {EVENT_LABELS[e.event] ?? e.event}
+                {e.event === "decision" ? `: ${String(e.details.decision ?? "")}` : ""}
+              </b>
+              <span>
+                {fmtDateTime(e.at)} · {e.by ?? (e.role === "admin" ? "X!Y admin" : "Requester")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </Section>
+  );
+}
+
 function HistoryTab({ d }: { d: Detail }) {
   if (d.history.length === 0)
     return (

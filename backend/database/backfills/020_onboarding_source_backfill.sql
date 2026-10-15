@@ -1,0 +1,11 @@
+-- SUPERSEDED. Use the reviewable, audited command instead (migration 021 must be applied first):
+--
+--   PYTHONPATH=. python -m app.backfill_onboarding_source --report source_report.csv   # dry run
+--   PYTHONPATH=. python -m app.backfill_onboarding_source --apply                       # write
+--
+-- It covers more evidence than the earlier version of this file (legacy dashboard accounts, rows
+-- loaded directly into the database, import logs / ids), reports conflicts and unresolved records
+-- with the reason, and records every assigned value in onboarding_source_backfill_log.
+-- If the earlier version of this file was already run, its results stay valid: the command only
+-- examines records whose source is still missing.
+SELECT 'Use: python -m app.backfill_onboarding_source (see backend/ONBOARDING_SOURCES.md)' AS notice;

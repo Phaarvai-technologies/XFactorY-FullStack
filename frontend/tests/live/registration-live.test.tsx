@@ -16,7 +16,7 @@ const T: Record<string, { sub: string; token: string }> = file ? JSON.parse(read
 const API = "http://localhost:8000/api/v1";
 
 const h = vi.hoisted(() => ({
-  pushed: [] as string[], replaced: [] as string[], setActive: vi.fn(), signOut: vi.fn(),
+  pushed: [] as string[], replaced: [] as string[], setActive: vi.fn(), signOut: vi.fn(), removed: [] as string[],
   session: { id: "", token: "" }, signIn: {} as Record<string, unknown>,
 }));
 vi.mock("@clerk/nextjs/legacy", () => ({
@@ -25,7 +25,9 @@ vi.mock("@clerk/nextjs/legacy", () => ({
 }));
 vi.mock("@clerk/nextjs", () => ({
   useClerk: () => ({
-    client: { sessions: [{ id: h.session.id, getToken: async () => h.session.token }] },
+    client: { sessions: [{ id: h.session.id, getToken: async () => h.session.token,
+                          lastActiveToken: { getRawString: () => h.session.token },
+                          remove: async () => { h.removed.push(h.session.id); } }] },
     session: null,
     signOut: (...a: unknown[]) => h.signOut(...a),
   }),
@@ -60,7 +62,7 @@ const api = (path: string, token: string) => fetch(API + path, { headers: { Auth
 
 describe.skipIf(!file)("registration regression (live backend + database)", () => {
   beforeEach(() => {
-    h.pushed = []; h.replaced = []; h.setActive = vi.fn(async () => undefined); h.signOut = vi.fn(async () => undefined);
+    h.pushed = []; h.replaced = []; h.setActive = vi.fn(async () => undefined); h.signOut = vi.fn(async () => undefined); h.removed = [];
   });
 
   it("an existing registered account (from before explicit registration) signs in and reaches the dashboard", async () => {

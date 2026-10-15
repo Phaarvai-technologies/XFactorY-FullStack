@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import company_update_requests as update_requests
 from app import manufacturer_approval as approval
 from app.core.auth import Actor
 from app.storage.supabase import DecodedImage, UploadedObject
@@ -114,7 +115,8 @@ LISTED_COMPANY_SQL = """
                                     -- accounts from before admin approval existed
                                     OR (mo.personal_information_completed
                                         AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
-                                                        WHERE s.organization_id = o.id)))))
+                                                        WHERE s.organization_id = o.id
+                                                          AND s.kind <> 'update_request')))))
 """
 
 # Who may update an organization through the onboarding form: its active owner / admin.
@@ -305,10 +307,19 @@ class ManufacturerRepository:
             "capacity": data.get("capacity") or "", "capacityNumber": capacity_number(data.get("capacity")),
             "contactEmail": email, "contactPhone": contact_phone,
         }
-        await approval.stage(self.db, user_id=ctx["user_id"], workspace_id=workspace,
-                             target_id=target["organization_id"],
-                             selected_id=target["organization_id"] if target["selected"] else None,
-                             kind=target["kind"], payload=payload)
+        if target["kind"] == "update_request":
+            try:
+                request = await update_requests.submit(
+                    self.db, user_id=ctx["user_id"], workspace_id=workspace,
+                    company_id=target["organization_id"], payload=payload)
+            except update_requests.RequestError as exc:
+                raise ValueError(str(exc)) from exc
+        else:
+            request = None
+            await approval.stage(self.db, user_id=ctx["user_id"], workspace_id=workspace,
+                                 target_id=target["organization_id"],
+                                 selected_id=target["organization_id"] if target["selected"] else None,
+                                 kind=target["kind"], payload=payload)
         await self.db.execute(text("""
             INSERT INTO marketplace_role_selections(user_id,role_selected)
             SELECT :user_id,'manufacturer' WHERE NOT EXISTS (
@@ -334,16 +345,20 @@ class ManufacturerRepository:
               version=manufacturer_onboarding.version+1
         """), {**ctx, "organization_id": workspace, "new": target["kind"] == "new_company"})
         await self.db.commit()
-        return {"names_changed": names_changed}
+        submitted = {"kind": target["kind"], "companyId": str(target["organization_id"]),
+                     "companyName": target["name"] or payload["companyName"],
+                     "requestId": str(request["id"]) if request else None}
+        return {"names_changed": names_changed, "submitted": submitted}
 
     async def _account_target(self, ctx: dict, data: dict) -> dict:
         """Which organization the Manufacturer details form may write to, checked BEFORE any
         write (inside the caller's transaction, row locked):
 
         * a selected company (companyId): must exist and be listed, the submitted name must be
-          that record's name, and the user must already be its active owner / admin (the
-          existing authorization). Selecting never grants ownership and an unowned or
-          someone else's company is never modified;
+          that record's name. Its active owner / admin updates it (staged for approval); an
+          unowned company may be claimed; a company managed by someone else gets an update
+          request for admin review. Selecting never grants ownership, and nothing on an unowned
+          or someone else's company changes before an admin approves;
         * no selection: a NEW company on the user's own organization, refused when a listed
           company with the same name already exists in the same country (similar names in
           different locations stay separate; records are never merged by name).
@@ -374,8 +389,11 @@ class ManufacturerRepository:
                 kind = "update" if approved else ("new_company" if row.id == ctx["organization_id"] else "update")
                 return {"organization_id": row.id, "selected": True, "kind": kind, "name": row.display_name}
             if row.claimed:
-                raise PermissionError("This company is already registered on X!Y and is managed by its owner. "
-                                      "Ask the owner to add you, or contact X!Y support.")
+                # Managed by someone else: the details become an update request for X!Y admin
+                # review (app/company_update_requests.py). Nothing on the company changes now,
+                # and the request never grants ownership or membership.
+                return {"organization_id": row.id, "selected": True, "kind": "update_request",
+                        "name": row.display_name}
             # Unclaimed (seeded / imported, no owner): the user may submit a claim; it takes effect
             # only when an admin approves it. One claim at a time per company (row locked above).
             other_claim = await self.db.scalar(text("""
@@ -1081,7 +1099,17 @@ class ManufacturerRepository:
                       SELECT s.id,s.kind,s.status,s.payload,s.review_feedback,s.updated_at,s.reviewed_at,
                              s.selected_company_id
                       FROM manufacturer_submissions s WHERE s.submitted_by_user_id=CAST(:user_id AS uuid)
+                        AND s.kind <> 'update_request'
                       ORDER BY s.updated_at DESC, s.created_at DESC LIMIT 1) x) AS latest_submission,
+                   (SELECT COALESCE(json_agg(x ORDER BY x.updated_at DESC), '[]'::json) FROM (
+                      -- the user's own update requests for companies they do not manage: only
+                      -- their own submitted values, status and feedback (no company data)
+                      SELECT s.id, s.status, s.target_organization_id AS company_id,
+                             t.display_name AS company_name, COALESCE(s.original_payload, s.payload) AS proposed,
+                             s.review_feedback, s.created_at, s.updated_at, s.reviewed_at
+                      FROM manufacturer_submissions s JOIN organizations t ON t.id = s.target_organization_id
+                      WHERE s.submitted_by_user_id=CAST(:user_id AS uuid) AND s.kind = 'update_request'
+                      ORDER BY s.updated_at DESC LIMIT 10) x) AS update_requests,
                    (SELECT COALESCE(json_agg(x ORDER BY x.created_at, x.id), '[]'::json) FROM (
                       SELECT ct.name,COALESCE(oc.issuer,ct.issuer) body,oc.status,oc.document_file_name,
                              oc.created_at,oc.id

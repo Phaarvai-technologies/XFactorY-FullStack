@@ -29,6 +29,13 @@ Either run the SQL files in the Supabase SQL editor, in order:
     `registration_flows`). Existing accounts: review and run `database/backfills/014_registration_backfill.sql`
     once (not run by `app.migrate`).
 12. `database/migrations/015_manufacturer_notifications.sql` (notifications to manufacturers, shared admin notes)
+13. `database/migrations/016_*.sql` – `019_*.sql` (terms acceptance, admin approval staging, update requests)
+14. `database/migrations/020_onboarding_source.sql` (company onboarding source, import batches,
+    onboarding history; see `ONBOARDING_SOURCES.md`).
+15. `database/migrations/021_source_backfill_and_registration_channel.sql` (backfill audit log, user
+    registration channel). Then fill existing records from evidence: dry run
+    `PYTHONPATH=. python -m app.backfill_onboarding_source --report source_report.csv`, review, then `--apply`.
+16. `database/migrations/022_admin_entry.sql` (Admin Entry: admins add companies in the dashboard).
 
 or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
 schema only if the database is empty, then runs all migrations (they are idempotent).

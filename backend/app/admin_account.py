@@ -72,8 +72,9 @@ async def create(email: str, name: str | None, from_stdin: bool, role: str = "pl
         else:
             first, _, last = (name or "").strip().partition(" ")
             user_id = await db.scalar(text("""
-                INSERT INTO users (clerk_user_id, email, display_name, first_name, last_name, status)
-                VALUES (:c, :e, :d, NULLIF(:f, ''), NULLIF(:l, ''), 'active') RETURNING id
+                INSERT INTO users (clerk_user_id, email, display_name, first_name, last_name, status,
+                                   registration_channel)
+                VALUES (:c, :e, :d, NULLIF(:f, ''), NULLIF(:l, ''), 'active', 'admin_portal') RETURNING id
             """), {"c": f"{LOCAL_CLERK_PREFIX}{uuid.uuid4()}", "e": email, "d": (name or email).strip(),
                    "f": first, "l": last.strip()})
             linked = False

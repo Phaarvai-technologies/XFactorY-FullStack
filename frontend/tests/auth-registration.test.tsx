@@ -3,7 +3,7 @@
  * X!Y backend replaced by stand-ins. Every "backend" answer goes through a fetch stub, so the
  * tests also check which requests are (and are not) made.
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
@@ -12,7 +12,9 @@ const h = vi.hoisted(() => {
     signUp: {} as Record<string, unknown>,
     setActive: undefined as unknown as ReturnType<typeof vi.fn>,
     signOut: undefined as unknown as ReturnType<typeof vi.fn>,
-    sessions: [] as { id: string; getToken: () => Promise<string | null> }[],
+    sessions: [] as { id: string; getToken: () => Promise<string | null>; remove: () => Promise<void> }[],
+    /** Sessions ended through Clerk's session.remove() (no navigation, unlike signOut()). */
+    removed: [] as string[],
     search: new URLSearchParams(),
     pushed: [] as string[],
     replaced: [] as string[],
@@ -47,7 +49,7 @@ vi.mock("next/link", () => ({
 }));
 
 import { CustomSignInForm } from "@/components/auth/CustomSignInForm";
-import { CustomSignUpForm } from "@/components/auth/CustomSignUpForm";
+import { CustomSignUpForm, EMAIL_EXISTS } from "@/components/auth/CustomSignUpForm";
 import SsoCallbackPage from "@/app/sso-callback/page";
 import { SIGN_UP_FIRST_MESSAGE, TERMS_VERSION } from "@/lib/auth/registration";
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   h.setActive = vi.fn(async () => undefined);
   h.signOut = vi.fn(async () => undefined);
   h.sessions = [];
+  h.removed = [];
   h.search = new URLSearchParams();
   h.pushed = [];
   h.replaced = [];
@@ -86,7 +89,7 @@ beforeEach(() => {
 
 /** A session Clerk created; its token names it, so tests can see whose token was sent. */
 function createdSession(id: string) {
-  h.sessions.push({ id, getToken: async () => `token-for-${id}` });
+  h.sessions.push({ id, getToken: async () => `token-for-${id}`, remove: async () => { h.removed.push(id); } });
 }
 
 function registration(answer: "registered" | "unregistered" | "down" | "500") {
@@ -124,7 +127,8 @@ describe("Sign-in", () => {
     await fillSignIn();
     expect(h.requests[0].auth).toBe("Bearer token-for-sess_1");
     expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_1" });
+    expect(h.removed).toEqual(["sess_1"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
     expect(h.replaced).toEqual(["/sign-up?notice=signup_required"]);
     expect(h.pushed).toEqual([]);
   });
@@ -161,7 +165,8 @@ describe("Sign-in", () => {
     expect(screen.queryByText(SIGN_UP_FIRST_MESSAGE)).not.toBeInTheDocument();
     expect(h.replaced).toEqual([]);
     expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_3" });
+    expect(h.removed).toEqual(["sess_3"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
   });
 
   it("new-device / MFA code step still works and is followed by the registration check", async () => {
@@ -250,24 +255,26 @@ describe("Sign-up", () => {
     expect(screen.getByText(SIGN_UP_FIRST_MESSAGE)).toBeInTheDocument();
   });
 
-  it("manual sign-up → registration finalized once with the new session's token → Sign-in", async () => {
+  it("manual sign-up → registration finalized once with the new session's token → signed in, dashboard", async () => {
     createdSession("sess_new");
     h.signUp.create = vi.fn(async () => ({}));
     h.signUp.prepareEmailAddressVerification = vi.fn(async () => ({}));
     h.signUp.attemptEmailAddressVerification = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_new" }));
     const completes: unknown[] = [];
     h.backend["POST /identity/registration/complete"] = (body, auth) => {
-      completes.push({ body, auth });
+      completes.push({ body, auth, activeYet: h.setActive.mock.calls.length > 0 });
       return { status: 200, json: { registered: true, alreadyRegistered: false } };
     };
     render(<CustomSignUpForm redirectTo="/manufacturer/account" />);
     await fillSignUp();
     expect(h.requests[0].url).toBe(`${API}/identity/registration/flows`); // before Clerk creates anything
     await enterCode();
-    expect(completes).toEqual([{ body: { flowToken: "flow-manual" }, auth: "Bearer token-for-sess_new" }]);
-    expect(h.setActive).not.toHaveBeenCalled(); // never an active app session
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_new" });
-    expect(h.replaced).toEqual(["/sign-in?notice=registered&redirect_url=%2Fmanufacturer%2Faccount"]);
+    // Finalized by the backend while the session was still inactive, THEN activated.
+    expect(completes).toEqual([{ body: { flowToken: "flow-manual" }, auth: "Bearer token-for-sess_new", activeYet: false }]);
+    expect(h.setActive).toHaveBeenCalledTimes(1);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_new" });
+    expect(h.signOut).not.toHaveBeenCalled(); // no post-sign-up sign-out
+    expect(h.replaced).toEqual(["/manufacturer/account"]); // no forced Sign-in
   });
 
   it("server unreachable before sign-up → no Clerk account is created", async () => {
@@ -292,10 +299,14 @@ describe("Sign-up", () => {
     await enterCode();
     expect(screen.getByText("We couldn't finish creating your account. Please try again.")).toBeInTheDocument();
     expect(h.signOut).not.toHaveBeenCalled();
+    expect(h.setActive).not.toHaveBeenCalled(); // failed finalization: no access
+    expect(h.replaced).toEqual([]);
     up = true;
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Verify email" })));
     expect(h.signUp.attemptEmailAddressVerification).toHaveBeenCalledTimes(1);
-    expect(h.replaced).toEqual(["/sign-in?notice=registered"]);
+    expect(h.setActive).toHaveBeenCalledTimes(1);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_r" });
+    expect(h.replaced).toEqual(["/"]);
   });
 
   it("email already in Clerk but never registered: the entered password proves it, then registers", async () => {
@@ -308,10 +319,11 @@ describe("Sign-up", () => {
     render(<CustomSignUpForm />);
     await fillSignUp("old@example.com");
     expect(h.signIn.create).toHaveBeenCalledWith({ identifier: "old@example.com", password: "long-password-1" });
-    expect(h.replaced).toEqual(["/sign-in?notice=registered"]);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_old" });
+    expect(h.replaced).toEqual(["/"]);
   });
 
-  it("email taken by a registered account (or wrong password) → Clerk's original message", async () => {
+  it("email taken by a registered account (or wrong password) → stays on Sign-up: 'already exists'", async () => {
     h.signUp.create = vi.fn(async () => {
       throw clerkError("form_identifier_exists", "That email address is taken. Please try another.", "email_address");
     });
@@ -320,7 +332,7 @@ describe("Sign-up", () => {
     });
     render(<CustomSignUpForm />);
     await fillSignUp("taken@example.com");
-    expect(screen.getByText("That email address is taken. Please try another.")).toBeInTheDocument();
+    expect(screen.getByText(EMAIL_EXISTS)).toBeInTheDocument();
     expect(h.replaced).toEqual([]);
 
     // Correct password, already registered: same message, session ended.
@@ -328,8 +340,10 @@ describe("Sign-up", () => {
     h.signIn.create = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_reg" }));
     h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: true } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create account" })));
-    expect(screen.getByText("That email address is taken. Please try another.")).toBeInTheDocument();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_reg" });
+    expect(screen.getByText(EMAIL_EXISTS)).toBeInTheDocument();
+    expect(h.removed).toEqual(["sess_reg"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
+    expect(h.setActive).not.toHaveBeenCalled();
     expect(h.replaced).toEqual([]);
   });
 
@@ -391,7 +405,8 @@ describe("Google callback", () => {
     registration("unregistered");
     await runCallback();
     expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_u" });
+    expect(h.removed).toEqual(["sess_u"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
     expect(h.replaced).toEqual(["/sign-up?notice=signup_required"]);
   });
 
@@ -404,20 +419,21 @@ describe("Google callback", () => {
     expect(h.replaced).toEqual(["/sign-in?notice=unavailable"]);
   });
 
-  it("Google sign-up of a new account → registered with the token → Sign-in", async () => {
+  it("Google sign-up of a new account → registered with the token → signed in, dashboard", async () => {
     intent({ purpose: "sign-up", returnPath: "/onboarding/roles", flowToken: "flow-google" });
     createdSession("sess_s");
     h.signUp = { status: "complete", createdSessionId: "sess_s", verifications: { externalAccount: { status: "verified" } } };
     const completes: unknown[] = [];
     h.backend["POST /identity/registration/complete"] = (body, auth) => {
-      completes.push({ body, auth });
+      completes.push({ body, auth, activeYet: h.setActive.mock.calls.length > 0 });
       return { status: 200, json: { registered: true, alreadyRegistered: false } };
     };
     await runCallback();
-    expect(completes).toEqual([{ body: { flowToken: "flow-google" }, auth: "Bearer token-for-sess_s" }]);
-    expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_s" });
-    expect(h.replaced).toEqual(["/sign-in?notice=registered&redirect_url=%2Fonboarding%2Froles"]);
+    expect(completes).toEqual([{ body: { flowToken: "flow-google" }, auth: "Bearer token-for-sess_s", activeYet: false }]);
+    expect(h.setActive).toHaveBeenCalledTimes(1);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_s" });
+    expect(h.signOut).not.toHaveBeenCalled();
+    expect(h.replaced).toEqual(["/onboarding/roles"]);
   });
 
   it("Google sign-up with an account Clerk already has → transferred to sign-in, then completed", async () => {
@@ -428,7 +444,8 @@ describe("Google callback", () => {
     h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: false } });
     await runCallback();
     expect(h.signIn.create).toHaveBeenCalledWith({ transfer: true });
-    expect(h.replaced).toEqual(["/sign-in?notice=registered"]);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_t" });
+    expect(h.replaced).toEqual(["/"]);
   });
 
   it("registration completion refused → session ended, back to Sign-up with an error", async () => {
@@ -437,7 +454,9 @@ describe("Google callback", () => {
     h.signUp = { status: "complete", createdSessionId: "sess_f", verifications: {} };
     h.backend["POST /identity/registration/complete"] = () => ({ status: 503, json: { detail: "down" } });
     await runCallback();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_f" });
+    expect(h.removed).toEqual(["sess_f"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
+    expect(h.setActive).not.toHaveBeenCalled(); // no app access
     expect(h.replaced).toEqual(["/sign-up?notice=signup_failed"]);
   });
 });
@@ -510,7 +529,7 @@ describe("Terms and Conditions", () => {
     expect(flowBodies).toEqual([{ method: "manual", returnPath: "/", termsAccepted: true, termsVersion: TERMS_VERSION }]);
     expect(h.signUp.create).toHaveBeenCalledWith(expect.objectContaining({ legalAccepted: true }));
     await enterCode();
-    expect(h.replaced).toEqual(["/sign-in?notice=registered"]);
+    expect(h.replaced).toEqual(["/"]);
   });
 
   it("Google sign-up sends the explicit acceptance with the flow request", async () => {
@@ -570,9 +589,9 @@ describe("Google sign-up that needs more details", () => {
     expect(flowBodies).toEqual([{ method: "google", returnPath: "/", termsAccepted: true, termsVersion: TERMS_VERSION }]);
     expect(h.signUp.update).toHaveBeenCalledWith({ legalAccepted: true, firstName: "Gee", lastName: "Oogle" });
     expect(completes).toEqual([{ body: { flowToken: "flow-gd" }, auth: "Bearer token-for-sess_gd" }]);
-    expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.signOut).toHaveBeenCalledWith({ sessionId: "sess_gd" });
-    expect(h.replaced).toEqual(["/sign-in?notice=registered"]);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_gd" });
+    expect(h.signOut).not.toHaveBeenCalled();
+    expect(h.replaced).toEqual(["/"]);
   });
 });
 
@@ -608,5 +627,188 @@ describe("Regression: registered users are not sent to Sign-up", () => {
     await fillSignIn();
     expect(screen.getByText("We couldn't confirm your account right now. Please try again.")).toBeInTheDocument();
     expect(h.replaced).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------------------- Auto sign-in after Sign-up
+describe("Sign-up signs the user in only after the backend finalizes registration", () => {
+  beforeEach(() => {
+    h.backend["POST /identity/registration/flows"] = () => ({ status: 201, json: { flowToken: "flow-manual" } });
+  });
+
+  function codeStepSignUp(sessionId: string) {
+    createdSession(sessionId);
+    h.signUp.create = vi.fn(async () => ({}));
+    h.signUp.prepareEmailAddressVerification = vi.fn(async () => ({}));
+    h.signUp.attemptEmailAddressVerification = vi.fn(async () => ({ status: "complete", createdSessionId: sessionId }));
+  }
+
+  it("refused by the backend (not retryable) → error shown, session ended, no access", async () => {
+    codeStepSignUp("sess_no");
+    h.backend["POST /identity/registration/complete"] = () => ({ status: 400, json: { detail: "Verify your email first." } });
+    render(<CustomSignUpForm redirectTo="/manufacturer/dashboard" />);
+    await fillSignUp();
+    await enterCode();
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.removed).toEqual(["sess_no"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
+    expect(h.replaced).toEqual([]);
+    expect(h.pushed).toEqual([]);
+  });
+
+  it("email code not verified by Clerk → registration is never attempted", async () => {
+    createdSession("sess_unv");
+    h.signUp.create = vi.fn(async () => ({}));
+    h.signUp.prepareEmailAddressVerification = vi.fn(async () => ({}));
+    h.signUp.attemptEmailAddressVerification = vi.fn(async () => {
+      throw clerkError("form_code_incorrect", "Incorrect code", "code");
+    });
+    let completed = 0;
+    h.backend["POST /identity/registration/complete"] = () => { completed += 1; return { status: 200, json: { registered: true } }; };
+    render(<CustomSignUpForm />);
+    await fillSignUp();
+    await enterCode();
+    expect(completed).toBe(0);
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.replaced).toEqual([]);
+  });
+
+  it("retries after failures activate exactly once; the backend sees one flow token per attempt", async () => {
+    codeStepSignUp("sess_rr");
+    const bodies: unknown[] = [];
+    let n = 0;
+    h.backend["POST /identity/registration/complete"] = (body) => {
+      bodies.push(body);
+      n += 1;
+      return n < 3 ? { status: 503, json: { detail: "x" } } : { status: 200, json: { registered: true, alreadyRegistered: false } };
+    };
+    render(<CustomSignUpForm />);
+    await fillSignUp();
+    await enterCode();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Verify email" })));
+    expect(h.setActive).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Verify email" })));
+    expect(bodies).toEqual([{ flowToken: "flow-manual" }, { flowToken: "flow-manual" }, { flowToken: "flow-manual" }]);
+    expect(h.signUp.create).toHaveBeenCalledTimes(1); // one Clerk account
+    expect(h.setActive).toHaveBeenCalledTimes(1);
+    expect(h.replaced).toEqual(["/"]);
+  });
+
+  it("registration done but Clerk cannot activate the session → Sign-in with 'account is ready', no half session", async () => {
+    codeStepSignUp("sess_act");
+    h.setActive = vi.fn(async () => { throw new Error("clerk"); });
+    h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: false } });
+    render(<CustomSignUpForm redirectTo="/manufacturer/dashboard" />);
+    await fillSignUp();
+    await enterCode();
+    expect(h.removed).toEqual(["sess_act"]);
+    expect(h.signOut).not.toHaveBeenCalled(); // no sign-out navigation (would leave the page)
+    expect(h.replaced).toEqual(["/sign-in?notice=registered&redirect_url=%2Fmanufacturer%2Fdashboard"]);
+  });
+
+  it("an unsafe redirect_url is never followed after sign-up", async () => {
+    codeStepSignUp("sess_safe");
+    h.search = new URLSearchParams("redirect_url=https%3A%2F%2Fevil.example%2Fx");
+    h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: false } });
+    render(<CustomSignUpForm />);
+    await fillSignUp();
+    await enterCode();
+    expect(h.replaced).toEqual(["/"]);
+  });
+
+  it("Google callback: a repeated callback (intent already used) does not register or activate again", async () => {
+    intent({ purpose: "sign-up", returnPath: "/manufacturer/dashboard", flowToken: "flow-google" });
+    createdSession("sess_once");
+    h.signUp = { status: "complete", createdSessionId: "sess_once", verifications: {} };
+    let completes = 0;
+    h.backend["POST /identity/registration/complete"] = () => { completes += 1; return { status: 200, json: { registered: true, alreadyRegistered: false } }; };
+    await runCallback();
+    expect(h.replaced).toEqual(["/manufacturer/dashboard"]);
+    cleanup();
+    h.replaced = [];
+    h.signIn = { firstFactorVerification: { status: "verified" }, status: "needs_identifier" };
+    await runCallback(); // e.g. Back button to /sso-callback: no stored intent any more
+    expect(completes).toBe(1);
+    expect(h.setActive).toHaveBeenCalledTimes(1);
+    expect(h.replaced).toEqual(["/sign-in?notice=oauth_failed"]);
+  });
+
+  it("Google sign-up already registered (existing X!Y user) → signed in, as before", async () => {
+    intent({ purpose: "sign-up", returnPath: "/visionaries/flow", flowToken: "flow-google" });
+    createdSession("sess_ex");
+    h.signUp = { status: "complete", createdSessionId: "sess_ex", verifications: {} };
+    h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: true } });
+    await runCallback();
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_ex" });
+    expect(h.replaced).toEqual(["/visionaries/flow"]);
+  });
+});
+
+// ------------------------------------------------------------------------------- Existing email on Sign-up
+describe("Sign-up with an email that already has an account", () => {
+  beforeEach(() => {
+    h.backend["POST /identity/registration/flows"] = () => ({ status: 201, json: { flowToken: "flow-manual" } });
+  });
+
+  it("registered account + its password: stays on Sign-up, field says it already exists, never leaves the page", async () => {
+    createdSession("sess_exists");
+    h.signUp.create = vi.fn(async () => {
+      throw clerkError("form_identifier_exists", "That email address is taken. Please try another.", "email_address");
+    });
+    h.signIn.create = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_exists" }));
+    h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: true } });
+    render(<CustomSignUpForm redirectTo="/manufacturer/dashboard" />);
+    await fillSignUp("exists@example.com");
+    expect(screen.getByText(EMAIL_EXISTS)).toBeInTheDocument();
+    expect(h.removed).toEqual(["sess_exists"]);       // the temporary session is ended...
+    expect(h.signOut).not.toHaveBeenCalled();          // ...without Clerk's sign-out redirect to the home page
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.replaced).toEqual([]);
+    expect(h.pushed).toEqual([]);
+    // the form is still there and can be used again
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("exists@example.com");
+    expect((screen.getByRole("button", { name: "Create account" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Continue with Google for an email that already exists: message on the form, no redirect", async () => {
+    h.signUp.authenticateWithRedirect = vi.fn(async () => {
+      throw clerkError("form_identifier_exists", "That email address is taken. Please try another.", "email_address");
+    });
+    render(<CustomSignUpForm />);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "exists@example.com" } });
+    fireEvent.click(screen.getByLabelText("I agree to the Terms of Service and Privacy Policy."));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue with Google" })));
+    expect(screen.getByText(EMAIL_EXISTS)).toBeInTheDocument();
+    expect(h.replaced).toEqual([]);
+    expect(h.signOut).not.toHaveBeenCalled();
+  });
+});
+
+describe("existing email on Sign-up leaves no Clerk session cookie behind", () => {
+  it("the temporary session's issued token is used (no getToken → Clerk writes no cookie), then the session is removed", async () => {
+    h.backend["POST /identity/registration/flows"] = () => ({ status: 201, json: { flowToken: "flow-manual" } });
+    const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, "");
+    const issued = `${b64({ alg: "RS256" })}.${b64({ sid: "sess_ex2", exp: Math.floor(Date.now() / 1000) + 55 })}.sig`;
+    const getToken = vi.fn(async () => "fetched-token");
+    h.sessions.push({ id: "sess_ex2", getToken, remove: async () => { h.removed.push("sess_ex2"); },
+                      lastActiveToken: { getRawString: () => issued } } as never);
+    h.signUp.create = vi.fn(async () => {
+      throw clerkError("form_identifier_exists", "That email address is taken. Please try another.", "email_address");
+    });
+    h.signIn.create = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_ex2" }));
+    const auths: (string | null)[] = [];
+    h.backend["POST /identity/registration/complete"] = (_b, auth) => {
+      auths.push(auth);
+      return { status: 200, json: { registered: true, alreadyRegistered: true } };
+    };
+    render(<CustomSignUpForm />);
+    await fillSignUp("exists2@example.com");
+    expect(screen.getByText(EMAIL_EXISTS)).toBeInTheDocument();
+    expect(auths).toEqual([`Bearer ${issued}`]);
+    expect(getToken).not.toHaveBeenCalled();
+    expect(h.removed).toEqual(["sess_ex2"]);
+    expect(h.signOut).not.toHaveBeenCalled();
+    expect(h.replaced).toEqual([]);
+    expect(h.pushed).toEqual([]);
   });
 });
