@@ -7,9 +7,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
-import { endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
+import { activateRegisteredSession, endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
 import {
-  authPageHref,
   completeRegistration,
   noticeFor,
   rememberOAuthIntent,
@@ -134,6 +133,8 @@ function splitName(fullName: string) {
 
 const START_FAILED = "We couldn't start creating your account right now. Please try again.";
 const TERMS_ERROR = "Please accept the Terms of Service and Privacy Policy to continue.";
+/** Sign-up with an email that already has an account: stay on Sign-up and say so. */
+export const EMAIL_EXISTS = "An account with this email already exists. Please sign in instead, or use a different email.";
 const flowErrorText = (error: unknown) => (error instanceof SignUpFlowError ? error.message : START_FAILED);
 
 export function CustomSignUpForm({
@@ -252,11 +253,12 @@ export function CustomSignUpForm({
   /**
    * Clerk created (or, for an existing identity, signed in) the account and its session.
    * Registration is finalized by the backend with that session's token BEFORE the session is
-   * ever active; then the session is ended and the user is sent to Sign-in.
+   * ever active; only after the backend confirms it is the session activated and the user
+   * sent to the dashboard they came for (safe redirect). Failure: no active session.
    */
   async function finishRegistration(sessionId: string) {
     if (!setActive) return;
-    const { token } = await tokenForCreatedSession(clerk, setActive, sessionId);
+    const { token, activated } = await tokenForCreatedSession(clerk, setActive, sessionId);
     let result = await completeRegistration(token, await ensureFlowToken());
     if (!result.ok && (result.code === "flow_expired" || result.code === "invalid_flow" || result.code === "flow_used")) {
       flowToken.current = null; // long pause on the code step, or a second attempt: fresh token once
@@ -265,9 +267,9 @@ export function CustomSignUpForm({
     if (result.ok) {
       flowToken.current = null; // single use: a later attempt on this page gets its own
       setPendingSession(null);
-      await endSession(clerk, sessionId);
       if (result.alreadyRegistered && existingAccountError.current) {
         // Existing, already-registered account on the Sign-up page: unchanged behaviour.
+        await endSession(clerk, sessionId);
         const message = existingAccountError.current;
         existingAccountError.current = null;
         setNeedsVerification(false);
@@ -275,7 +277,7 @@ export function CustomSignUpForm({
         setFieldErrors((current) => ({ ...current, email: message }));
         return;
       }
-      router.replace(authPageHref("/sign-in", redirectTo, "registered"));
+      router.replace(await activateRegisteredSession(clerk, setActive, sessionId, activated, redirectTo));
       return;
     }
     if (result.retryable) {
@@ -409,7 +411,7 @@ export function CustomSignUpForm({
       if (parsed.paramName === "first_name" || parsed.paramName === "last_name") {
         setFieldErrors((current) => ({ ...current, name: parsed.message }));
       } else if (parsed.code === "form_identifier_exists") {
-        await registerExistingIdentity(parsed.message);
+        await registerExistingIdentity(EMAIL_EXISTS);
       } else if (parsed.paramName === "email_address") {
         setFieldErrors((current) => ({ ...current, email: parsed.message }));
       } else if (parsed.paramName === "password") {
@@ -546,7 +548,11 @@ export function CustomSignUpForm({
       });
     } catch (error) {
       const parsed = parseClerkError(error);
-      setStatus({ tone: "error", message: parsed.message });
+      if (parsed.code === "form_identifier_exists") {
+        setFieldErrors((current) => ({ ...current, email: EMAIL_EXISTS }));
+      } else {
+        setStatus({ tone: "error", message: parsed.message });
+      }
       setIsSubmitting(false);
     }
   }

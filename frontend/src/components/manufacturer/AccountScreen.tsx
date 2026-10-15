@@ -117,6 +117,8 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
   const [selectedCompany, setSelectedCompany] = useState<{ id: string; name: string } | null>(
     initial?.companyId && initial.companyName ? { id: initial.companyId, name: initial.companyName } : null);
   const [companyDetailsStatus, setCompanyDetailsStatus] = useState<"idle" | "loading" | "error">("idle");
+  /** The selected company is managed by another user: the details go to X!Y as an update request. */
+  const [managedElsewhere, setManagedElsewhere] = useState(false);
   /** Values copied from the selected record, so they can be removed again when it changes. */
   const prefilled = useRef<Partial<Record<PrefillKey, string>>>({});
   /** Ignores a details response that arrives after the selection changed. */
@@ -138,6 +140,7 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
     }
     prefilled.current = {};
     setSelectedCompany(null);
+    setManagedElsewhere(false);
     setCompanyDetailsStatus("idle");
   }
 
@@ -159,6 +162,7 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
       if (details.capacity) next.capacity = details.capacity;
       for (const [key, value] of Object.entries(next) as [PrefillKey, string][]) fieldSetters[key](value);
       prefilled.current = next;
+      setManagedElsewhere(details.access === "claimed");
       setCompanyDetailsStatus("idle");
     } catch {
       if (requestId !== detailsRequest.current) return;
@@ -552,6 +556,11 @@ return () => {
     <p className="field-error">Couldn’t load this company’s saved details. Select it again to retry.</p>
   ) : companyDetailsStatus === "loading" ? (
     <p style={{ ...MUTED, padding: "6px 0 0", margin: 0 }}>Loading company details…</p>
+  ) : managedElsewhere && selectedCompany ? (
+    <p style={{ ...MUTED, padding: "6px 0 0", margin: 0 }}>
+      This company is managed by another X!Y user. Your details will be sent to X!Y for review; the company’s
+      saved information stays unchanged unless X!Y approves your changes.
+    </p>
   ) : null}
 </div>
                 <div>

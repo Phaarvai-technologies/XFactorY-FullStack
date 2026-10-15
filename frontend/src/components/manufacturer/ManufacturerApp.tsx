@@ -68,7 +68,23 @@ type ServerSnapshot = {
     kind: "new_company" | "claim" | "update" | null;
     selectedCompanyId?: string | null;
     feedback: string | null;
+    /** The user's own update requests for companies managed by someone else (status + feedback). */
+    updateRequests?: CompanyUpdateRequest[];
   };
+  /** What the account form submission became (set on POST /manufacturer/account). */
+  submitted?: { kind: string; companyId: string; companyName: string; requestId: string | null } | null;
+};
+
+export type CompanyUpdateRequest = {
+  id: string;
+  status: "pending" | "changes_requested" | "approved" | "rejected";
+  companyId: string;
+  companyName: string;
+  proposed: Record<string, string | number | null>;
+  feedback: string | null;
+  submittedAt: string | null;
+  updatedAt: string | null;
+  reviewedAt: string | null;
 };
 
 type ProfileProgress = {
@@ -174,7 +190,9 @@ export function ManufacturerApp() {
   const checked =
     server !== null && server.userId === userId && (!server.failed || server.path === pathname);
   /** The admin asked for corrections to the submitted company details: the form may be reopened. */
-  const canResubmit = server?.approval?.status === "changes_requested";
+  /** X!Y asked for corrections to one of the user's update requests for another company. */
+  const requestToCorrect = server?.approval?.updateRequests?.find((r) => r.status === "changes_requested") ?? null;
+  const canResubmit = server?.approval?.status === "changes_requested" || requestToCorrect !== null;
   /** UI components use numeric ids; the database uses UUIDs. */
   const ids = useRef({ toServer: new Map<number, string>(), toLocal: new Map<string, number>(), next: 1 });
   const profileSaveTimer = useRef<number | null>(null);
@@ -405,7 +423,11 @@ export function ManufacturerApp() {
     if (userId) setServer({ userId, accountExists: true, failed: false, approval: snapshot.approval ?? null });
     markManufacturerProfileComplete();
     router.push(MANUFACTURER_DASHBOARD_PATH);
-    showToast("Details sent to X!Y for approval — you can keep building your profile.");
+    showToast(
+      snapshot.submitted?.kind === "update_request"
+        ? `Your update request for ${snapshot.submitted.companyName} was submitted for admin review.`
+        : "Details sent to X!Y for approval — you can keep building your profile.",
+    );
   }
 
   function handleOpenProfileWizard(jumpToNextIncomplete: boolean) {
@@ -763,10 +785,20 @@ export function ManufacturerApp() {
     onAccountCreated={handleAccountCreated}
     onSearchCompanies={handleSearchCompanies}
     onLoadCompany={handleLoadCompany}
-    initial={canResubmit ? {
+    initial={server?.approval?.status === "changes_requested" ? {
       ...state.account,
       contact: state.contact.email || state.contact.phone || "",
       companyId: server?.approval?.kind === "new_company" ? null : server?.approval?.selectedCompanyId ?? null,
+    } : requestToCorrect ? {
+      // Correcting an update request: the user's own submitted values for that company.
+      ...state.account,
+      contact: String(requestToCorrect.proposed.contactEmail || requestToCorrect.proposed.contactPhone || ""),
+      companyName: requestToCorrect.companyName,
+      companyType: String(requestToCorrect.proposed.companyType ?? ""),
+      country: String(requestToCorrect.proposed.country ?? ""),
+      capacity: String(requestToCorrect.proposed.capacity ?? ""),
+      phone: String(requestToCorrect.proposed.contactPhone ?? ""),
+      companyId: requestToCorrect.companyId,
     } : undefined}
   />
 ) : null}
@@ -779,6 +811,7 @@ export function ManufacturerApp() {
             flags={flags}
             onOpenProfileWizard={handleOpenProfileWizard}
             onFixCompanyDetails={canResubmit ? () => router.push(MANUFACTURER_ACCOUNT_PATH) : undefined}
+            updateRequests={server?.approval?.updateRequests ?? []}
             onOpenMachineryWizard={openMachineryWizard}
             onEditMachinery={handleEditMachinery}
             onSetMachineryStatus={handleSetMachineryStatus}

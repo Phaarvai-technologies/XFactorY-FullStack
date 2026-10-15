@@ -2,7 +2,15 @@ import { stripBase, withBase } from "@/lib/basePath";
 import { authPageHref } from "@/lib/auth/registration";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public code: string | null = null) { super(message); }
+  constructor(
+    public status: number,
+    message: string,
+    public code: string | null = null,
+    /** The full error body (e.g. existingId for a duplicate company). */
+    public data: Record<string, unknown> | null = null,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -16,8 +24,9 @@ function handleRegistrationRequired(): void {
   leavingForSignUp = true;
   const back = stripBase(`${window.location.pathname}${window.location.search}`);
   const target = withBase(authPageHref("/sign-up", back, "signup_required"));
-  const clerk = (window as unknown as { Clerk?: { signOut?: () => Promise<unknown> } }).Clerk;
-  void Promise.resolve(clerk?.signOut?.())
+  const clerk = (window as unknown as { Clerk?: { signOut?: (o?: { redirectUrl?: string }) => Promise<unknown> } }).Clerk;
+  // Clerk navigates after signing out: send it straight to the Sign-up notice (not the home page).
+  void Promise.resolve(clerk?.signOut?.({ redirectUrl: target }))
     .catch(() => undefined)
     .finally(() => window.location.assign(target));
 }
@@ -39,7 +48,8 @@ export async function api<T>(path: string, token: string, options: RequestInit =
   if (!response.ok) {
     const code = typeof payload?.code === "string" ? payload.code : null;
     if (response.status === 403 && code === "registration_required") handleRegistrationRequired();
-    throw new ApiError(response.status, payload?.detail ?? "API request failed", code);
+    throw new ApiError(response.status, payload?.detail ?? "API request failed", code,
+                       payload && typeof payload === "object" ? payload : null);
   }
   return payload as T;
 }

@@ -4,7 +4,7 @@ import { useClerk } from "@clerk/nextjs";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
+import { activateRegisteredSession, endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
 import {
   authPageHref,
   checkRegistration,
@@ -28,8 +28,9 @@ import { safeRedirectPath } from "@/lib/auth/safeRedirect";
  * - Sign-in with an existing account → the backend must confirm X!Y registration before the
  *   session is activated; unregistered → session ended, sent to Sign-up.
  * - Sign-up (new Google account, or an existing one Clerk transfers to sign-in) → X!Y
- *   registration is completed with the server-signed sign-up token, then the session is
- *   ended and the user goes to Sign-in. Already registered → signed in as before.
+ *   registration is completed with the server-signed sign-up token; only once the backend
+ *   confirms it is the session activated and the user sent to the dashboard (safe
+ *   redirect). Not finalized → session ended, Sign-up shows the error; no access.
  * The stored intent only picks which branch to finish; it grants nothing by itself.
  */
 export default function SsoCallbackPage() {
@@ -66,14 +67,14 @@ export default function SsoCallbackPage() {
     async function finishSignUp(sessionId: string, flowToken: string) {
       const { token, activated } = await tokenForCreatedSession(clerk, setActive!, sessionId);
       const result = await completeRegistration(token, flowToken);
-      if (result.ok && result.alreadyRegistered) {
-        // Existing X!Y user pressed Google on Sign-up: signed in, as before this change.
-        if (!activated) await setActive!({ session: sessionId });
-        go(returnPath);
+      if (result.ok) {
+        // Registration confirmed by the backend (new, or an existing X!Y user): signed in.
+        go(await activateRegisteredSession(clerk, setActive!, sessionId, activated, returnPath));
         return;
       }
+      // Not finalized: no active session, no access; Sign-up shows the existing error.
       await endSession(clerk, sessionId);
-      go(result.ok ? authPageHref("/sign-in", returnPath, "registered") : authPageHref("/sign-up", returnPath, "signup_failed"));
+      go(authPageHref("/sign-up", returnPath, "signup_failed"));
     }
 
     async function run() {

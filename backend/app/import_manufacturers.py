@@ -13,6 +13,14 @@ Each new company is created with the existing schema exactly like an admin-impor
 `organizations` (organization_type 'manufacturer', status 'claim_pending', entry_source
 'IMPORTED', no owner), `organization_profiles`, and a headquarters `facilities` row holding the
 location. Nobody gets ownership; owners are only ever added through the normal workflow.
+Imported companies are NOT approved: they are selectable in onboarding lookup, never visible to
+Visionaries until an admin approves them and their profile is 100% complete.
+
+Onboarding source: every company this job inserts gets onboarding_source 'database_import' and
+the id of the run's `import_batches` row (file name, content SHA-256, operator / job, time), and
+an 'imported' history event. The batch is identified by the file's content, so re-running the same
+file reuses its batch. Companies that were already present are left untouched (their original
+source is never changed). `--actor` names the operator or job (default: the OS user).
 
 Duplicates: a row is "already present" when it matches an existing listed company (or an
 earlier row of the same file) by
@@ -28,6 +36,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import getpass
+import hashlib
+import json
 import re
 import sys
 from dataclasses import dataclass, field
@@ -35,7 +46,10 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from app.core import onboarding_source
 from app.repositories.manufacturer import COUNTRY_CODES, LISTED_COMPANY_SQL, normalize_company_name
+
+SOURCE = "database_import"
 
 ALIASES = {
     "name": ("company_name", "name", "company", "manufacturer", "manufacturer_name"),
@@ -78,6 +92,7 @@ def read_rows(path: Path) -> list[dict]:
 
 @dataclass
 class Report:
+    batch_id: str | None = None
     inserted: list[tuple[int, str, str]] = field(default_factory=list)
     present: list[tuple[int, str, str, str]] = field(default_factory=list)
     ambiguous: list[tuple[int, str, str]] = field(default_factory=list)
@@ -121,9 +136,33 @@ def match(row: dict, candidates) -> tuple[str, object | None]:
     return "new", None
 
 
-async def import_rows(session, rows: list[dict]) -> Report:
+def _default_actor() -> str:
+    try:
+        return f"os:{getpass.getuser()}"
+    except Exception:  # noqa: BLE001 - no login name in some containers
+        return "os:unknown"
+
+
+async def ensure_batch(session, *, reference: str, content_sha256: str, actor: str, row_count: int):
+    """The import_batches row for this content (created once; a re-run only updates last_run_at)."""
+    return await session.scalar(text("""
+        INSERT INTO import_batches (source_reference, content_sha256, imported_by, row_count)
+        VALUES (:ref, :sha, :actor, :n)
+        ON CONFLICT (content_sha256) DO UPDATE SET last_run_at = now()
+        RETURNING id
+    """), {"ref": reference, "sha": content_sha256, "actor": actor, "n": row_count})
+
+
+async def import_rows(session, rows: list[dict], *, reference: str = "(rows passed in code)",
+                      content_sha256: str | None = None, actor: str | None = None) -> Report:
+    onboarding_source.require(SOURCE)
     report = Report()
     await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended('xy-import-manufacturers', 0))"))
+    if content_sha256 is None:
+        content_sha256 = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+    batch_id = await ensure_batch(session, reference=reference, content_sha256=content_sha256,
+                                  actor=actor or _default_actor(), row_count=len(rows))
+    report.batch_id = str(batch_id)
     for number, row in enumerate(rows, start=2):  # line 1 is the header
         if not row["name"]:
             report.invalid.append((number, "missing company name"))
@@ -142,10 +181,11 @@ async def import_rows(session, rows: list[dict]) -> Report:
             code = None
         org_id = await session.scalar(text("""
             INSERT INTO organizations (display_name, legal_name, organization_type, status, website_domain,
-                                       entry_source, record_type)
-            VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'IMPORTED', 'REAL')
+                                       entry_source, record_type, onboarding_source, import_batch_id)
+            VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'IMPORTED', 'REAL',
+                    :src, :batch)
             RETURNING id
-        """), {"name": row["name"], "web": website_domain(row["website"])})
+        """), {"name": row["name"], "web": website_domain(row["website"]), "src": SOURCE, "batch": batch_id})
         await session.execute(text("""
             INSERT INTO organization_profiles (organization_id, registration_id, contact_email, contact_phone,
                                                address_line1, country_code, country_name, company_category,
@@ -163,6 +203,10 @@ async def import_rows(session, rows: list[dict]) -> Report:
                         NULLIF(:state, ''), NULLIF(:country, ''), :code)
             """), {"org": org_id, "fname": f"{row['name']} Headquarters", "address": row["address"],
                     "city": row["city"], "state": row["state"], "country": row["country"], "code": code})
+        from app.manufacturer_approval import record_event
+        await record_event(session, event="imported", role="system", source=SOURCE, organization_id=org_id,
+                           import_batch_id=batch_id, key=f"imported:{org_id}",
+                           details={"line": number, "reference": reference})
         report.inserted.append((number, row["name"], str(org_id)))
     return report
 
@@ -171,12 +215,15 @@ async def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("csv", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="report what would happen; change nothing")
+    parser.add_argument("--actor", help="operator or job name recorded on the import batch (default: OS user)")
     args = parser.parse_args(argv)
     from app.core.database import SessionFactory, engine
 
     rows = read_rows(args.csv)
     async with SessionFactory() as session:
-        report = await import_rows(session, rows)
+        report = await import_rows(session, rows, reference=args.csv.name,
+                                   content_sha256=hashlib.sha256(args.csv.read_bytes()).hexdigest(),
+                                   actor=args.actor)
         if args.dry_run:
             await session.rollback()
         else:
@@ -184,7 +231,8 @@ async def main(argv: list[str] | None = None) -> int:
     await engine.dispose()
     label = "would insert" if args.dry_run else "inserted"
     print(f"rows: {len(rows)}  {label}: {len(report.inserted)}  already present: {len(report.present)}  "
-          f"ambiguous (skipped): {len(report.ambiguous)}  invalid: {len(report.invalid)}")
+          f"ambiguous (skipped): {len(report.ambiguous)}  invalid: {len(report.invalid)}  "
+          f"batch: {'(not saved)' if args.dry_run else report.batch_id}")
     for n, name, why in report.ambiguous:
         print(f"  AMBIGUOUS line {n}: {name} - {why}")
     for n, why in report.invalid:

@@ -35,6 +35,21 @@ class NoteIn(_Model):
     share: bool = False  # True: the manufacturer sees it and gets a notification
 
 
+class UpdateRequestEdit(_Model):
+    """Admin review of an update request: edit proposed values and / or verification notes."""
+    values: dict[str, str | None] | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class UpdateRequestDecision(_Model):
+    decision: Literal["approve", "request_changes", "decline"]
+    # approve: the fields to merge (default: every proposed change)
+    fields: list[str] | None = Field(default=None, max_length=10)
+    feedback: str | None = Field(default=None, max_length=2000)
+    # what the admin reviewed (returned with the request); a mismatch means it changed meanwhile
+    fingerprint: str = Field(min_length=8, max_length=64)
+
+
 class ArchiveIn(_Model):
     reason: str | None = Field(default=None, max_length=500)
 
@@ -81,3 +96,20 @@ class AdminRoleIn(_Model):
 
 class AdminRestoreIn(_Model):
     role: AdminRole | None = None
+
+
+class CompanyCreate(_Model):
+    """Admin dashboard "Add company" (Admin Entry). The onboarding source is not a field: the
+    backend sets admin_entry; unknown keys (a 'source', for example) are rejected (extra=forbid)."""
+    name: str = Field(min_length=1, max_length=200)
+    country: str = Field(default="", max_length=100)
+    state: str = Field(default="", max_length=100)
+    city: str = Field(default="", max_length=100)
+    address: str = Field(default="", max_length=300)
+    category: str = Field(default="", max_length=150)
+    website: str = Field(default="", max_length=200)
+    registration_id: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=30)
+    capacity: str = Field(default="", max_length=100)
+    reason: str = Field(default="", max_length=500)

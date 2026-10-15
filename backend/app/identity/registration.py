@@ -226,7 +226,9 @@ async def ensure_registered(session: AsyncSession, settings: Settings, clerk_use
         raise RegistrationRequired()
     await session.execute(text("""
         UPDATE users SET registration_completed_at = now(), registration_method = :m,
-                         registration_session_id = :sid, updated_at = now()
+                         registration_session_id = :sid, updated_at = now(),
+                         -- channel (how they registered), separate from the evidence / sign-in method
+                         registration_channel = COALESCE(registration_channel, 'legacy_account')
         WHERE id = :id AND registration_completed_at IS NULL
     """), {"id": row["id"], "m": label, "sid": clerk_session_id})
     await session.commit()
@@ -309,6 +311,8 @@ async def complete(session: AsyncSession, settings: Settings, *, clerk_user_id: 
         await session.execute(text("""
             UPDATE users SET registration_completed_at = now(), registration_method = :m,
                              registration_session_id = :sid,
+                             -- website Sign-up is the channel; :m (manual / google) is the method
+                             registration_channel = COALESCE(registration_channel, 'web_signup'),
                              accepted_terms_version = :tv, terms_accepted_at = to_timestamp(:ta),
                              updated_at = now()
             WHERE id = :id AND registration_completed_at IS NULL

@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, ChevronLeft, ChevronRight, Inbox, Loader2, Search, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Inbox, Loader2, Search, X } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   ACCOUNT_LABELS,
   ENTRY_LABELS,
@@ -10,6 +11,7 @@ import {
   accountTone,
   recordTone,
   reviewTone,
+  roleLabel,
 } from "@/lib/admin/format";
 import type { AccountStatus, EntrySource, RecordType, ReviewStatus } from "@/lib/admin/types";
 
@@ -23,7 +25,12 @@ export function RecordBadge({ type, hideReal = false }: { type: RecordType; hide
 }
 
 export function EntryBadge({ source }: { source: EntrySource }) {
-  return <span className="badge badge-neutral">{ENTRY_LABELS[source] ?? source}</span>;
+  // entry_source: an admin-editable classification, NOT the company's onboarding source
+  return (
+    <span className="badge badge-neutral" title="Entry source (admin classification) — not the onboarding source">
+      {ENTRY_LABELS[source] ?? source}
+    </span>
+  );
 }
 
 export function AccountBadge({ status }: { status: AccountStatus }) {
@@ -264,5 +271,217 @@ export function SearchInput({
         aria-label={placeholder}
       />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ Actions menu */
+export type ActionItem = {
+  label: string;
+  onSelect: () => void;
+  icon?: ReactNode;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Not shown at all (e.g. an action that does not apply to this record). */
+  hidden?: boolean;
+  /** Starts a new group (a divider above it). */
+  group?: boolean;
+};
+
+const MENU_WIDTH = 224;
+
+/**
+ * One labelled "Actions" button per row instead of a row of unlabelled icons. The menu is
+ * rendered in a fixed layer (portal), so table containers with overflow never clip it.
+ * Keyboard: Enter / Space / ArrowDown opens and focuses the first item; ArrowUp / ArrowDown /
+ * Home / End move; Escape closes and returns focus to the button; Tab closes.
+ */
+export function ActionsMenu({ items, label = "Actions", context }: { items: ActionItem[]; label?: string; context?: string }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  /** Where the menu layer is rendered: the admin root (keeps its styles), found when opening. */
+  const [host, setHost] = useState<Element | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const shown = items.filter((i) => !i.hidden);
+
+  const close = useCallback((focusButton: boolean) => {
+    setOpen(false);
+    setPos(null);
+    if (focusButton) button.current?.focus();
+  }, []);
+
+  // Position next to the button, flipped above it when there is no room below. Returns false
+  // when the button is no longer on screen (then the menu closes).
+  const place = useCallback(() => {
+    if (!button.current) return false;
+    const r = button.current.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return false;
+    const height = menu.current?.offsetHeight ?? 0;
+    const left = Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
+    const below = r.bottom + 4;
+    const top = below + height > window.innerHeight - 8 && r.top - height - 4 > 8 ? r.top - height - 4 : below;
+    setPos((p) => (p && p.top === top && p.left === left ? p : { top, left }));
+    return true;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, shown.length, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const first = menu.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])');
+    first?.focus();
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!menu.current?.contains(t) && !button.current?.contains(t)) close(false);
+    };
+    // The page or a table scrolled (e.g. the row was scrolled into view): follow the button;
+    // close only when it left the screen. Scrolling inside the menu itself is ignored.
+    const onMove = (e: Event) => {
+      if (e.target instanceof Node && menu.current?.contains(e.target)) return;
+      if (!place()) close(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open, close, place]);
+
+  function onMenuKey(e: ReactKeyboardEvent<HTMLDivElement>) {
+    const list = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])') ?? []);
+    const i = list.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "ArrowDown") list[(i + 1) % list.length]?.focus();
+    else if (e.key === "ArrowUp") list[(i - 1 + list.length) % list.length]?.focus();
+    else if (e.key === "Home") list[0]?.focus();
+    else if (e.key === "End") list[list.length - 1]?.focus();
+    else if (e.key === "Escape") close(true);
+    else if (e.key === "Tab") return close(false);
+    else return;
+    e.preventDefault();
+  }
+
+  function openMenu() {
+    setHost(button.current?.closest(".adm-root") ?? document.body);
+    setOpen(true);
+  }
+
+  if (shown.length === 0) return null;
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className={`adm-actions-btn${open ? " open" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-label={context ? `${label} for ${context}` : label}
+        onClick={() => (open ? close(false) : openMenu())}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" && !open) {
+            e.preventDefault();
+            openMenu();
+          }
+        }}
+      >
+        {label} <ChevronDown size={14} aria-hidden />
+      </button>
+      {open &&
+        host &&
+        createPortal(
+          <div
+            ref={menu}
+            id={menuId}
+            role="menu"
+            aria-label={context ? `${label} for ${context}` : label}
+            className="adm-menu"
+            style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: MENU_WIDTH }}
+            onKeyDown={onMenuKey}
+          >
+            {shown.map((item, i) => (
+              <button
+                key={`${item.label}-${i}`}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                disabled={item.disabled}
+                className={`adm-menu-item${item.danger ? " danger" : ""}${item.group && i > 0 ? " group" : ""}`}
+                onClick={() => {
+                  close(true);
+                  item.onSelect();
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>,
+          host,
+        )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ expandable row details */
+/** "Details" toggle for a table row; the details render in a full-width row below it. */
+export function DetailsToggle({ open, onToggle, controls, label }: { open: boolean; onToggle: () => void; controls: string; label: string }) {
+  return (
+    <button
+      type="button"
+      className={`adm-expand${open ? " open" : ""}`}
+      aria-expanded={open}
+      aria-controls={controls}
+      aria-label={`${open ? "Hide" : "Show"} details for ${label}`}
+      title={open ? "Hide details" : "Show details"}
+      onClick={onToggle}
+    >
+      <ChevronRight size={15} aria-hidden />
+    </button>
+  );
+}
+
+export function DetailsRow({ id, colSpan, items }: { id: string; colSpan: number; items: [string, ReactNode][] }) {
+  return (
+    <tr className="adm-details-row" id={id}>
+      <td colSpan={colSpan}>
+        <dl className="adm-details-grid">
+          {items.map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{v === null || v === undefined || v === "" ? <span className="adm-muted">—</span> : v}</dd>
+            </div>
+          ))}
+        </dl>
+      </td>
+    </tr>
+  );
+}
+
+/** Long text in a cell: shortened to one line, the full value on hover / for screen readers. */
+export function Truncate({ text, className = "" }: { text: string | null | undefined; className?: string }) {
+  if (!text) return <span className="adm-muted">—</span>;
+  return (
+    <span className={`adm-truncate ${className}`} title={text}>
+      {text}
+    </span>
+  );
+}
+
+export function RoleBadges({ roles }: { roles: string[] }) {
+  if (!roles.length) return <span className="adm-muted">No role yet</span>;
+  return (
+    <span className="adm-role-list">
+      {roles.map((r) => (
+        <span key={r} className={`badge ${r === "manufacturer" ? "badge-info" : r === "demand_requester" ? "badge-purple" : "badge-neutral"}`}>
+          {roleLabel(r)}
+        </span>
+      ))}
+    </span>
   );
 }

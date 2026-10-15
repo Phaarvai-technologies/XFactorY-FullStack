@@ -47,7 +47,7 @@ describe("admin: company details awaiting approval", () => {
 
     const select = screen.getByLabelText("Change status") as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.textContent)).toEqual(
-      ["Not started", "In progress", "Submitted", "Needs correction", "Reviewed", "Rejected"]);
+      ["Not started", "In progress", "Submitted", "Needs correction", "Approved", "Rejected"]);
     fireEvent.change(select, { target: { value: "REJECTED" } });
     expect(screen.getByText(/Reason for rejection/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Reason for rejection/), { target: { value: "Not a manufacturer" } });

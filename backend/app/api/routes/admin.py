@@ -3,18 +3,25 @@ from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.admins import AdminManager
 from app.admin.auth import AdminContext, current_admin
 from app.admin.schemas import (AccountStatusIn, AdminAddIn, AdminFields, AdminRestoreIn, AdminRoleIn, ArchiveIn,
-                               BatchArchiveIn, FieldEdit, NoteIn, TestEmailIn)
+                               BatchArchiveIn, CompanyCreate, FieldEdit, NoteIn, TestEmailIn, UpdateRequestDecision,
+                               UpdateRequestEdit)
 from app.admin.service import AdminService
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def jsonable(value):
+    from fastapi.encoders import jsonable_encoder
+    return jsonable_encoder(value)
 Admin = Annotated[AdminContext, Depends(current_admin)]
 
 
@@ -100,6 +107,24 @@ async def manufacturers(admin: Admin, svc: Svc, q: str | None = None, industry: 
     return await svc.manufacturers(filters, page, page_size, sort)
 
 
+@router.post("/manufacturers", status_code=201)
+async def create_manufacturer(body: CompanyCreate, admin: Admin, svc: Svc,
+                              idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+    """Admin Entry: add a manufacturer company (administrators / operators). The onboarding source
+    is set to admin_entry by the backend. Duplicates -> 409 with the existing company's id."""
+    from app.admin.company_create import CreateError, create_company
+    try:
+        org_id, created = await create_company(svc.db, admin_id=admin.user_id, roles=admin.roles,
+                                               data=body.model_dump(), idempotency_key=idempotency_key)
+    except CreateError as exc:
+        await svc.db.rollback()
+        return JSONResponse({"detail": exc.message, "code": exc.code, "existingId": exc.existing_id},
+                            status_code=exc.status)
+    await svc.db.commit()
+    detail = await svc.detail(org_id)
+    return JSONResponse(jsonable(detail), status_code=201 if created else 200)
+
+
 @router.get("/review-queue")
 async def review_queue(admin: Admin, svc: Svc, q: str | None = None, review_status: ListParam = None,
                        assigned: Literal["me", "unassigned"] | None = None, include_test: bool = False):
@@ -113,6 +138,13 @@ async def manufacturer(org_id: UUID, admin: Admin, svc: Svc):
     return await svc.detail(str(org_id))
 
 
+@router.get("/manufacturers/{org_id}/people")
+async def manufacturer_people(org_id: UUID, admin: Admin, svc: Svc):
+    """Registered users (memberships, any status) and onboarding / change requests for this company.
+    Requesters are listed separately and are not counted as members."""
+    return await svc.people(str(org_id))
+
+
 @router.patch("/manufacturers/{org_id}/fields")
 async def edit_field(org_id: UUID, body: FieldEdit, admin: Admin, svc: Svc):
     """XY-ADMIN-06: correct one manufacturer response; old/new value, admin, time and reason are recorded."""
@@ -123,6 +155,20 @@ async def edit_field(org_id: UUID, body: FieldEdit, admin: Admin, svc: Svc):
 async def admin_fields(org_id: UUID, body: AdminFields, admin: Admin, svc: Svc):
     """XY-ADMIN-07/08: review status, assignment, record type, entry source, referral source."""
     return await svc.admin_fields(admin, str(org_id), body.model_dump(exclude_unset=True))
+
+
+@router.patch("/manufacturers/{org_id}/update-requests/{request_id}")
+async def edit_update_request(org_id: UUID, request_id: UUID, body: UpdateRequestEdit, admin: Admin, svc: Svc):
+    """Review an update request from a user who does not manage the company: edit the proposed
+    values and / or record verification and contact notes (internal)."""
+    return await svc.edit_update_request(admin, str(org_id), str(request_id), body.values, body.notes)
+
+
+@router.post("/manufacturers/{org_id}/update-requests/{request_id}/decision")
+async def decide_update_request(org_id: UUID, request_id: UUID, body: UpdateRequestDecision, admin: Admin,
+                                svc: Svc):
+    """Approve (merge the chosen fields), request corrections, or decline (feedback recorded)."""
+    return await svc.decide_update_request(admin, str(org_id), str(request_id), body.model_dump())
 
 
 @router.post("/manufacturers/{org_id}/archive")
@@ -153,9 +199,34 @@ async def users(admin: Admin, svc: Svc, q: str | None = None,
                 account_status: Literal["active", "suspended", "deactivated"] | None = None,
                 onboarding_status: Literal["NO_PROFILE", "NOT_STARTED", "IN_PROGRESS", "SUBMITTED",
                                            "NEEDS_CORRECTION", "REVIEWED"] | None = None,
+                role: Literal["manufacturer", "visionary"] | None = None,
                 page: int = Query(1, ge=1), page_size: int = Query(25, ge=5, le=100)):
-    return await svc.users({"q": q, "account_status": account_status, "onboarding_status": onboarding_status},
-                           page, page_size)
+    return await svc.users({"q": q, "account_status": account_status, "onboarding_status": onboarding_status,
+                            "role": role}, page, page_size)
+
+
+@router.get("/visionaries")
+async def visionaries(admin: Admin, svc: Svc, q: str | None = None,
+                      account_status: Literal["active", "suspended", "deactivated"] | None = None,
+                      profile: Literal["saved", "missing"] | None = None,
+                      page: int = Query(1, ge=1), page_size: int = Query(25, ge=5, le=100)):
+    """Visionary (demand-side) users: one row per user, with their saved profile and counts. Read-only."""
+    return await svc.visionaries({"q": q, "account_status": account_status, "profile": profile}, page, page_size)
+
+
+@router.get("/visionaries/{user_id}")
+async def visionary(user_id: UUID, admin: Admin, svc: Svc):
+    """A Visionary's saved profile, projects (requirements) and manufacturing requests. Read-only."""
+    return await svc.visionary_detail(str(user_id))
+
+
+@router.get("/machinery")
+async def machinery(admin: Admin, svc: Svc, q: str | None = None,
+                    status: Literal["Published", "Draft", "Unpublished", "Archived"] | None = None,
+                    org: UUID | None = None,
+                    page: int = Query(1, ge=1), page_size: int = Query(25, ge=5, le=100)):
+    """Machinery records (company assets) across manufacturer companies. Read-only."""
+    return await svc.machinery({"q": q, "status": status, "org": str(org) if org else None}, page, page_size)
 
 
 @router.get("/users/{user_id}")

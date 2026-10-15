@@ -58,6 +58,14 @@ export type ManufacturerRow = {
   reviewStatus: ReviewStatus;
   recordType: RecordType;
   entrySource: EntrySource;
+  /** How the company first came onto X!Y (null = unknown). Separate from the review status. */
+  onboardingSource?: OnboardingSource | null;
+  /** Why the source is unknown (evidence backfill), when it is. */
+  onboardingSourceNote?: string | null;
+  /** The first active member (owner first) — a person, kept apart from the company contact. */
+  primaryUser?: { id: string; name: string | null; email: string | null } | null;
+  /** A new company not approved yet: the channel on its staged submission and that status. */
+  stagedSource?: StagedSource | null;
   referralSource: string | null;
   assignedAdminId: string | null;
   assignedAdminName?: string | null;
@@ -72,6 +80,16 @@ export type ManufacturerRow = {
   sections: SectionState[];
   stoppedAt: string | null;
   lastCompletedSection: string | null;
+  /** Users linked to exactly this company by an active membership. */
+  linkedUsers?: number;
+  /** Review queue: the newest request awaiting a decision on this company. */
+  request?: {
+    kind: "new_company" | "claim" | "update" | "update_request";
+    label: string;
+    requestedBy: string | null;
+    submittedAt: string | null;
+    openCount: number;
+  } | null;
 };
 
 export type OverviewData = {
@@ -167,6 +185,8 @@ export type ManufacturerDetail = {
     created_at: string;
     last_seen_at: string | null;
   }[];
+  /** Every user linked to exactly this company by membership (any status). */
+  members?: CompanyMember[];
   notes: Note[];
   history: ChangeEntry[];
   timeline: { at: string; event: string }[];
@@ -181,6 +201,10 @@ export type ManufacturerDetail = {
     feedback: string | null;
     fields: { key: string; label: string; submitted: string; current: string }[];
   } | null;
+  /** Onboarding source, import batch and the company's onboarding history (migration 020). */
+  onboarding?: CompanyOnboarding;
+  /** Update requests from users who do not manage this company (reviewed one by one). */
+  updateRequests: CompanyUpdateRequest[];
   admins: AdminUserRef[];
   requiredFields: { key: string; label: string; section: string; done: boolean }[];
   sectionsOrder: string[];
@@ -190,6 +214,122 @@ export type ManufacturerDetail = {
     machinery: Record<string, string>;
     required: string[];
   };
+};
+
+/** Company onboarding source (backend-assigned). admin_entry / ai_voice_call / ground_sales are
+ * reserved and not produced by the backend yet. */
+export type OnboardingSource = "database_import" | "web_dashboard" | "admin_entry" | "ai_voice_call" | "ground_sales";
+
+export type StagedSource = { source: string; status: "draft" | "pending" | "changes_requested" | "approved" | "rejected" };
+
+export type RegistrationChannel = "web_signup" | "legacy_account" | "admin_portal";
+
+export type LinkedCompany = {
+  id: string;
+  name: string | null;
+  onboardingSource: OnboardingSource | null;
+  sourceNote?: string | null;
+  stagedSource?: StagedSource | null;
+  reviewStatus: ReviewStatus;
+  membershipRole: string;
+  isArchived: boolean;
+};
+
+export type CompanyOnboarding = {
+  source: OnboardingSource | null;
+  sourceLabel: string;
+  /** Why it is unknown, when the evidence backfill could not resolve it. */
+  note?: string | null;
+  /** New company not approved yet: source recorded on the staged submission. */
+  staged?: StagedSource | null;
+  /** Set when the value was assigned by the evidence backfill rather than at creation. */
+  backfill?: { outcome: string; rule: string; at: string; evidence: string[]; reason: string | null } | null;
+  importBatch: { id: string; reference: string; importedBy: string; importedAt: string } | null;
+  history: {
+    id: string;
+    event: string;
+    label: string;
+    source: string | null;
+    sourceLabel: string;
+    actor: string | null;
+    actorRole: "requester" | "admin" | "system";
+    at: string;
+    submissionKind: string | null;
+    decision: string | null;
+  }[];
+};
+
+export type VisionaryRow = {
+  id: string;
+  name: string | null;
+  accountName: string | null;
+  email: string;
+  phone: string | null;
+  accountStatus: AccountStatus;
+  registeredAt: string;
+  lastActivity: string | null;
+  profileSaved: boolean;
+  roleTitle: string | null;
+  organizationName: string | null;
+  location: string | null;
+  projectCount: number;
+  requestCount: number;
+  lastSavedAt: string | null;
+};
+
+export type VisionaryList = { total: number; page: number; pageSize: number; rows: VisionaryRow[] };
+
+export type VisionaryDetailData = {
+  visionary: VisionaryRow;
+  profile: {
+    fullName: string;
+    roleTitle: string;
+    organizationName: string | null;
+    location: string;
+    introduction: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+  } | null;
+  projects: {
+    id: string;
+    name: string;
+    idea: string | null;
+    status: string;
+    product: string | null;
+    industry: string | null;
+    stage: string | null;
+    location: string | null;
+    quantity: number | null;
+    quantityUnit: string | null;
+    budget: number | null;
+    currency: string | null;
+    timeline: string | null;
+    additionalRequirements: string | null;
+    requestCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }[];
+  requests: {
+    id: string;
+    number: string;
+    status: string;
+    manufacturerId: string;
+    manufacturerName: string | null;
+    projectId: string;
+    projectName: string;
+    machine: string;
+    quantity: number | null;
+    unit: string | null;
+    duration: string;
+    location: string;
+    budget: number;
+    currency: string;
+    timeline: string;
+    additionalRequirements: string | null;
+    createdAt: string;
+    respondedAt: string | null;
+  }[];
+  draftCount: number;
 };
 
 export type ReviewQueue = { rows: ManufacturerRow[]; admins: AdminUserRef[] };
@@ -206,6 +346,11 @@ export type UserRow = {
   companyName: string | null;
   completeness: number | null;
   recordType: RecordType | null;
+  /** How the person registered (channel) and the sign-up method / legacy evidence. */
+  registrationChannel?: RegistrationChannel | null;
+  registrationMethod?: string | null;
+  /** Every linked manufacturer company with its own onboarding source; empty = not applicable. */
+  companies?: LinkedCompany[];
   registeredAt: string;
   lastActivity: string | null;
   accountStatus: AccountStatus;
@@ -239,6 +384,12 @@ export type UserDetail = {
     record_type: RecordType;
     is_archived: boolean;
     membership_role: string;
+    membership_status?: string;
+    entry_source?: EntrySource;
+    onboarding_source?: OnboardingSource | null;
+    onboarding_source_label?: string;
+    staged_source?: StagedSource | null;
+    machinery_count?: number;
   }[];
   troubleshooting: {
     accountStatus: AccountStatus;
@@ -301,3 +452,99 @@ export type Analytics = {
   missingFields: { label: string; section: string; count: number }[];
   excludedDemoTest: number;
 };
+
+/** A proposed change to an existing company by someone who does not manage it. */
+export type CompanyUpdateRequest = {
+  id: string;
+  status: "pending" | "changes_requested" | "approved" | "rejected";
+  source: string;
+  requestType: "existing_company_update";
+  requester: { id: string; name: string; email: string };
+  submittedAt: string;
+  updatedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  appliedAt: string | null;
+  feedback: string | null;
+  adminNotes: string;
+  appliedChanges: Record<string, { from: string; to: string }> | null;
+  fields: {
+    key: string;
+    label: string;
+    /** the company record now */
+    current: string;
+    /** proposed value (after any admin edits) */
+    proposed: string;
+    /** as the requester submitted it */
+    submitted: string;
+    /** the company's value when the request was submitted */
+    atSubmission: string;
+    companyChanged: boolean;
+    differs: boolean;
+    edited: boolean;
+  }[];
+  /** what the admin is looking at; required to decide (null once decided) */
+  fingerprint: string | null;
+  events: { event: string; by: string | null; role: "requester" | "admin"; at: string; details: Record<string, unknown> }[];
+};
+
+/** GET /admin/manufacturers/{id}/people: memberships and requests of exactly this company. */
+export type CompanyPeople = {
+  registeredUsers: {
+    id: string;
+    name: string | null;
+    email: string;
+    role: string;
+    membershipStatus: string;
+    accountStatus: AccountStatus;
+    linkedAt: string | null;
+    registeredAt: string | null;
+    roles: string[];
+  }[];
+  requests: {
+    id: string;
+    kind: string;
+    kindLabel: string;
+    status: "pending" | "changes_requested" | "approved" | "rejected" | "draft";
+    statusLabel: string;
+    source: string;
+    submittedAt: string;
+    reviewedAt: string | null;
+    reviewer: string | null;
+    feedback: string | null;
+    requester: { id: string; name: string | null; email: string } | null;
+    requesterIsMember: boolean;
+  }[];
+  counts: { linkedUsers: number; openRequests: number };
+};
+
+export type CompanyMember = {
+  id: string;
+  name: string | null;
+  email: string;
+  accountStatus: AccountStatus;
+  membershipRole: string;
+  membershipStatus: "active" | "suspended" | "removed";
+  roles: string[];
+  linkedAt: string;
+  lastSeenAt: string | null;
+};
+
+/** GET /admin/machinery (Machinery tab): company assets, not users. */
+export type MachineRow = {
+  id: string;
+  name: string;
+  industry: string | null;
+  capacity: string | null;
+  maker: string | null;
+  model: string | null;
+  year: number | null;
+  listingStatus: "Published" | "Draft" | "Unpublished" | "Archived";
+  companyId: string;
+  companyName: string | null;
+  recordType: RecordType;
+  imageCount: number;
+  availability: string | null;
+  createdAt: string;
+};
+export type MachineList = { total: number; page: number; pageSize: number; rows: MachineRow[]; company: string | null };

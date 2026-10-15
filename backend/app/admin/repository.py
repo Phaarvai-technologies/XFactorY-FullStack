@@ -50,8 +50,43 @@ LIST_COLUMNS = """
     referral_source, assigned_admin_user_id, is_archived, archived_at, registered_at,
     last_updated, last_seen_at, current_step, submitted_at,
     r_first_name, r_last_name, r_contact, r_dob, r_company_name, r_industry, r_account_country,
-    r_about, r_address, r_city, r_location_country, r_certification, r_infrastructure, r_faq
+    r_about, r_address, r_city, r_location_country, r_certification, r_infrastructure, r_faq,
+    (SELECT count(DISTINCT lm.user_id) FROM memberships lm
+      WHERE lm.organization_id = admin_manufacturer_overview.organization_id AND lm.status = 'active') AS linked_users,
+    (SELECT so.onboarding_source FROM organizations so
+      WHERE so.id = admin_manufacturer_overview.organization_id) AS onboarding_source,
+    (SELECT bl.evidence->>'why' FROM onboarding_source_backfill_log bl
+      WHERE bl.record_type = 'company' AND bl.record_id = admin_manufacturer_overview.organization_id
+        AND bl.field = 'onboarding_source' AND bl.outcome <> 'applied') AS onboarding_source_note,
+    -- a new company not approved yet: its source is still on the staged submission
+    (SELECT json_build_object('source', ss.source, 'status', ss.status) FROM manufacturer_submissions ss
+       WHERE ss.target_organization_id = admin_manufacturer_overview.organization_id AND ss.organization_id = ss.target_organization_id
+         AND ss.kind = 'new_company' ORDER BY ss.updated_at DESC LIMIT 1) AS staged_source
 """
+# Open requests awaiting a decision on a company (one review area for all of them): the newest
+# one's type, requester and date, plus how many are open. Joined to admin_manufacturer_overview.
+OPEN_REQUEST_JOIN = """
+    LEFT JOIN LATERAL (
+      SELECT s.kind AS request_kind, s.updated_at AS request_submitted_at,
+             coalesce(nullif(btrim(concat_ws(' ', ru.first_name, ru.last_name)), ''), ru.email::text) AS requested_by,
+             count(*) OVER () AS open_requests
+      FROM manufacturer_submissions s JOIN users ru ON ru.id = s.submitted_by_user_id
+      WHERE s.target_organization_id = admin_manufacturer_overview.organization_id
+        AND s.status IN ('pending', 'changes_requested')
+      ORDER BY (s.status = 'pending') DESC, s.updated_at DESC LIMIT 1
+    ) req ON true
+"""
+# Marketplace roles admins filter users by (Visionaries record the demand_requester persona).
+USER_ROLE_FILTERS = {"manufacturer": "manufacturer", "visionary": "demand_requester"}
+MACHINE_STATUS_SQL = """CASE WHEN m.status = 'archived' THEN 'Archived'
+                             WHEN m.publication_status = 'published' THEN 'Published'
+                             WHEN m.publication_status = 'draft' THEN 'Draft' ELSE 'Unpublished' END"""
+MACHINE_STATUSES = ("Published", "Draft", "Unpublished", "Archived")
+# Company name as the admin lists show it (a new company awaiting approval: its submitted name).
+COMPANY_NAME_SQL = """COALESCE((SELECT s.payload->>'companyName' FROM manufacturer_submissions s
+                         WHERE s.target_organization_id = o.id AND s.kind = 'new_company'
+                           AND s.status IN ('pending', 'changes_requested')
+                         ORDER BY s.updated_at DESC LIMIT 1), o.display_name)"""
 SORTS = {
     "updated": "last_updated DESC NULLS LAST, company_name",
     "name": "lower(company_name), registered_at DESC",
@@ -219,7 +254,9 @@ class AdminRepository:
             where.append("review_status <> 'REVIEWED'")
         clause = "WHERE " + " AND ".join(where)
         return await self.rows(f"""
-            SELECT {LIST_COLUMNS} FROM admin_manufacturer_overview {clause}
+            SELECT {LIST_COLUMNS}, req.request_kind, req.request_submitted_at, req.requested_by,
+                   coalesce(req.open_requests, 0) AS open_requests
+            FROM admin_manufacturer_overview {OPEN_REQUEST_JOIN} {clause}
             ORDER BY array_position(ARRAY['SUBMITTED','NEEDS_CORRECTION','IN_PROGRESS','NOT_STARTED','REVIEWED'],
                                     review_status),
                      coalesce(last_updated, registered_at) DESC
@@ -234,6 +271,39 @@ class AdminRepository:
             FROM memberships m JOIN users u ON u.id=m.user_id
             WHERE m.organization_id=CAST(:o AS uuid) AND m.status='active'
             ORDER BY (m.membership_role='owner') DESC, m.created_at
+        """, {"o": org_id})
+
+    async def members(self, org_id: str) -> list[dict]:
+        """Every user linked to exactly this company through a membership (any status), with
+        their membership role / status and marketplace roles. Never matched by name or email."""
+        return await self.rows("""
+            SELECT u.id, u.first_name, u.last_name, u.display_name, u.email::text AS email, u.status AS account_status,
+                   m.membership_role, m.status AS membership_status, m.created_at AS linked_at,
+                   m.accepted_at, u.registration_completed_at, u.last_seen_at,
+                   coalesce((SELECT array_agg(r.role_selected ORDER BY r.selected_at) FROM marketplace_role_selections r
+                             WHERE r.user_id = u.id AND r.status = 'active'), '{}') AS roles
+            FROM memberships m JOIN users u ON u.id = m.user_id
+            WHERE m.organization_id = CAST(:o AS uuid)
+            ORDER BY (m.status = 'active') DESC, (m.membership_role = 'owner') DESC, m.created_at
+        """, {"o": org_id})
+
+    async def company_requests(self, org_id: str) -> list[dict]:
+        """Every onboarding / change request submitted for exactly this company (by database id),
+        with the requester's user record and whether they are a confirmed (active) member now.
+        A request never creates a membership; it is listed, not counted as a member."""
+        return await self.rows("""
+            SELECT s.id, s.kind, s.status, s.source, s.submitted_at, s.created_at, s.updated_at, s.reviewed_at,
+                   s.review_feedback, s.applied_at,
+                   u.id AS user_id, u.first_name, u.last_name, u.display_name, u.email::text AS email,
+                   EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id = s.target_organization_id
+                           AND m.user_id = s.submitted_by_user_id AND m.status = 'active') AS is_member,
+                   coalesce(nullif(btrim(concat_ws(' ', r.first_name, r.last_name)), ''), r.display_name) AS reviewer
+            FROM manufacturer_submissions s
+            LEFT JOIN users u ON u.id = s.submitted_by_user_id
+            LEFT JOIN users r ON r.id = s.reviewed_by_user_id
+            WHERE s.target_organization_id = CAST(:o AS uuid) AND s.status <> 'draft'
+            ORDER BY (s.status IN ('pending', 'changes_requested')) DESC, s.submitted_at DESC, s.id
+            LIMIT 100
         """, {"o": org_id})
 
     async def history(self, org_id: str) -> list[dict]:
@@ -341,18 +411,36 @@ class AdminRepository:
     USER_SELECT = """
         WITH mf AS (
           SELECT DISTINCT ON (user_id) user_id, organization_id, company_name, review_status, completeness,
-                 record_type, is_archived
+                 record_type, is_archived, entry_source
           FROM admin_manufacturer_overview WHERE user_id IS NOT NULL
           ORDER BY user_id, is_archived, registered_at
         )
         SELECT u.id, u.clerk_user_id, u.first_name, u.last_name, u.display_name, u.email::text AS email, u.phone,
                u.status AS account_status, u.created_at, u.last_seen_at,
+               u.registration_channel, u.registration_method, u.registration_completed_at,
                coalesce((SELECT array_agg(role_selected ORDER BY selected_at) FROM marketplace_role_selections r
                          WHERE r.user_id=u.id AND r.status='active'), '{}') AS roles,
                EXISTS (SELECT 1 FROM platform_role_assignments p WHERE p.user_id=u.id
                        AND p.status='active' AND p.revoked_at IS NULL) AS is_admin,
-               mf.organization_id, mf.company_name, mf.completeness, mf.record_type,
+               mf.organization_id, mf.company_name, mf.completeness, mf.record_type, mf.entry_source,
                coalesce(mf.review_status, 'NO_PROFILE') AS onboarding_status,
+               -- every manufacturer company the user is an active member of, each with its own
+               -- onboarding source (NULL = unknown) and, separately, its approval status
+               coalesce((SELECT json_agg(json_build_object(
+                           'id', lc.organization_id, 'name', lc.company_name, 'source', lo.onboarding_source,
+                           'stagedSource', (SELECT json_build_object('source', ss.source, 'status', ss.status) FROM manufacturer_submissions ss
+                                  WHERE ss.target_organization_id = lo.id AND ss.organization_id = ss.target_organization_id
+                                    AND ss.kind = 'new_company' ORDER BY ss.updated_at DESC LIMIT 1),
+                           'sourceNote', (SELECT bl.evidence->>'why' FROM onboarding_source_backfill_log bl
+                                          WHERE bl.record_type = 'company' AND bl.record_id = lo.id
+                                            AND bl.field = 'onboarding_source' AND bl.outcome <> 'applied'),
+                           'reviewStatus', lc.review_status, 'membershipRole', lmm.membership_role,
+                           'isArchived', lc.is_archived)
+                         ORDER BY lc.is_archived, lc.registered_at)
+                         FROM memberships lmm
+                         JOIN admin_manufacturer_overview lc ON lc.organization_id = lmm.organization_id
+                         JOIN organizations lo ON lo.id = lmm.organization_id
+                         WHERE lmm.user_id = u.id AND lmm.status = 'active'), '[]'::json) AS companies,
                aa.last_login_at AS password_last_login, aa.status AS password_account_status
         FROM users u LEFT JOIN mf ON mf.user_id=u.id LEFT JOIN admin_accounts aa ON aa.user_id=u.id
     """
@@ -369,6 +457,10 @@ class AdminRepository:
             where.append("(concat_ws(' ', u.first_name, u.last_name) ILIKE :q OR u.display_name ILIKE :q "
                          "OR u.email::text ILIKE :q OR mf.company_name ILIKE :q)")
             p["q"] = f"%{f['q'].strip()}%"
+        if f.get("role") in USER_ROLE_FILTERS:
+            where.append("""EXISTS (SELECT 1 FROM marketplace_role_selections rs WHERE rs.user_id = u.id
+                            AND rs.status = 'active' AND rs.role_selected = :role)""")
+            p["role"] = USER_ROLE_FILTERS[f["role"]]
         if f.get("account_status") in ACCOUNT_STATUSES:
             where.append("u.status = :account_status")
             p["account_status"] = f["account_status"]
@@ -389,10 +481,157 @@ class AdminRepository:
     async def user_manufacturers(self, user_id: str) -> list[dict]:
         return await self.rows("""
             SELECT v.organization_id, v.company_name, v.review_status, v.completeness, v.record_type,
-                   v.is_archived, m.membership_role
+                   v.is_archived, m.membership_role, m.status AS membership_status, v.entry_source,
+                   (SELECT o.onboarding_source FROM organizations o WHERE o.id = v.organization_id) AS onboarding_source,
+                   (SELECT json_build_object('source', ss.source, 'status', ss.status) FROM manufacturer_submissions ss
+                     WHERE ss.target_organization_id = v.organization_id AND ss.organization_id = ss.target_organization_id
+                       AND ss.kind = 'new_company' ORDER BY ss.updated_at DESC LIMIT 1) AS staged_source,
+                   (SELECT count(*) FROM machines mc WHERE mc.organization_id = v.organization_id
+                      AND mc.status <> 'archived') AS machinery_count
             FROM memberships m JOIN admin_manufacturer_overview v ON v.organization_id=m.organization_id
             WHERE m.user_id=CAST(:u AS uuid) AND m.status='active' ORDER BY v.registered_at
         """, {"u": user_id})
+
+    # ------------------------------------------------------------------ onboarding source + history
+    async def onboarding_info(self, org_id: str) -> dict:
+        org = await self.row("""
+            SELECT o.onboarding_source, b.id AS batch_id, b.source_reference, b.imported_by, b.created_at AS imported_at,
+                   bl.outcome AS backfill_outcome, bl.rule AS backfill_rule, bl.evidence AS backfill_evidence,
+                   bl.created_at AS backfill_at,
+                   (SELECT json_build_object('source', ss.source, 'status', ss.status) FROM manufacturer_submissions ss
+       WHERE ss.target_organization_id = o.id AND ss.organization_id = ss.target_organization_id
+         AND ss.kind = 'new_company' ORDER BY ss.updated_at DESC LIMIT 1) AS staged_source
+            FROM organizations o LEFT JOIN import_batches b ON b.id = o.import_batch_id
+            LEFT JOIN onboarding_source_backfill_log bl ON bl.record_type = 'company' AND bl.record_id = o.id
+                 AND bl.field = 'onboarding_source'
+            WHERE o.id = CAST(:o AS uuid)
+        """, {"o": org_id}) or {}
+        events = await self.rows("""
+            SELECT e.id, e.event, e.source, e.actor_role, e.details, e.created_at, e.submission_id,
+                   s.kind AS submission_kind,
+                   coalesce(nullif(btrim(concat_ws(' ', u.first_name, u.last_name)), ''), u.display_name,
+                            u.email::text) AS actor
+            FROM manufacturer_submission_events e
+            LEFT JOIN manufacturer_submissions s ON s.id = e.submission_id
+            LEFT JOIN users u ON u.id = e.actor_user_id
+            WHERE e.organization_id = CAST(:o AS uuid)
+            ORDER BY e.created_at DESC LIMIT 50
+        """, {"o": org_id})
+        return {"org": org, "events": events}
+
+    # ------------------------------------------------------------------ visionaries (demand side)
+    # A Visionary = a non-admin user who chose the Visionary role (marketplace_role_selections
+    # 'demand_requester', active) or saved a Visionary profile. One row per user.
+    VISIONARY_WHERE = f"""{NOT_ADMIN} AND (
+        EXISTS (SELECT 1 FROM marketplace_role_selections rs WHERE rs.user_id = u.id
+                AND rs.role_selected = 'demand_requester' AND rs.status = 'active')
+        OR EXISTS (SELECT 1 FROM visionary_profiles vp0 WHERE vp0.user_id = u.id))"""
+    VISIONARY_SELECT = """
+        SELECT u.id, u.first_name, u.last_name, u.display_name, u.email::text AS email, u.phone,
+               u.status AS account_status, u.created_at, u.last_seen_at,
+               vp.full_name, vp.role_title, vp.organization_name, vp.location, vp.introduction,
+               vp.organization_id AS buyer_organization_id, vp.created_at AS profile_created_at,
+               vp.updated_at AS profile_updated_at,
+               (SELECT count(*) FROM visionary_projects pj WHERE pj.user_id = u.id) AS project_count,
+               (SELECT count(*) FROM manufacturer_booking_requests br
+                  JOIN visionary_request_details d ON d.booking_request_id = br.id
+                 WHERE br.requested_by_user_id = u.id) AS request_count,
+               (SELECT max(x) FROM (VALUES (vp.updated_at),
+                  ((SELECT max(pj.updated_at) FROM visionary_projects pj WHERE pj.user_id = u.id)),
+                  ((SELECT max(br.created_at) FROM manufacturer_booking_requests br
+                     WHERE br.requested_by_user_id = u.id))) AS t(x)) AS last_saved_at
+        FROM users u LEFT JOIN visionary_profiles vp ON vp.user_id = u.id
+    """
+
+    async def visionaries(self, f: dict, page: int, page_size: int) -> dict:
+        where, p = [self.VISIONARY_WHERE], {}
+        if f.get("q"):
+            where.append("""(concat_ws(' ', u.first_name, u.last_name) ILIKE :q OR u.display_name ILIKE :q
+                             OR u.email::text ILIKE :q OR vp.full_name ILIKE :q OR vp.organization_name ILIKE :q
+                             OR vp.location ILIKE :q)""")
+            p["q"] = f"%{f['q'].strip()}%"
+        if f.get("account_status") in ACCOUNT_STATUSES:
+            where.append("u.status = :account_status")
+            p["account_status"] = f["account_status"]
+        if f.get("profile") == "saved":
+            where.append("vp.user_id IS NOT NULL")
+        elif f.get("profile") == "missing":
+            where.append("vp.user_id IS NULL")
+        clause = "WHERE " + " AND ".join(where)
+        total = await self.db.scalar(text(
+            f"SELECT count(*) FROM users u LEFT JOIN visionary_profiles vp ON vp.user_id = u.id {clause}"), p)
+        rows = await self.rows(f"{self.VISIONARY_SELECT} {clause} ORDER BY u.created_at DESC, u.id "
+                               "LIMIT :limit OFFSET :offset", {**p, "limit": page_size, "offset": (page - 1) * page_size})
+        return {"total": total, "rows": rows}
+
+    async def visionary(self, user_id: str) -> dict | None:
+        return await self.row(f"{self.VISIONARY_SELECT} WHERE u.id = CAST(:u AS uuid) AND {self.VISIONARY_WHERE}",
+                              {"u": user_id})
+
+    async def visionary_projects(self, user_id: str) -> list[dict]:
+        return await self.rows("""
+            SELECT pj.id, op.title AS project_name, op.narrative AS idea_description, op.status AS opportunity_status,
+                   pj.product, pj.industry, pj.project_stage, pj.manufacturing_location, pj.quantity, pj.quantity_unit,
+                   pj.budget_amount, pj.budget_currency, pj.timeline, pj.additional_requirements,
+                   pj.idea_saved_at, pj.stage_saved_at, pj.requirements_saved_at, pj.created_at, pj.updated_at,
+                   (SELECT count(*) FROM visionary_request_details d WHERE d.project_id = pj.id) AS request_count
+            FROM visionary_projects pj JOIN opportunities op ON op.id = pj.opportunity_id
+            WHERE pj.user_id = CAST(:u AS uuid)
+            ORDER BY pj.created_at DESC, pj.id
+        """, {"u": user_id})
+
+    async def visionary_requests(self, user_id: str) -> list[dict]:
+        return await self.rows("""
+            SELECT br.id, br.request_number, br.status, br.requested_capacity, br.unit_code, br.created_at,
+                   br.responded_at, br.manufacturer_organization_id, mo.display_name AS manufacturer_name,
+                   d.project_id, d.project_name, d.machine_name, d.required_duration, d.manufacturing_location,
+                   d.budget_amount, d.budget_currency, d.timeline, d.additional_requirements
+            FROM manufacturer_booking_requests br
+            JOIN visionary_request_details d ON d.booking_request_id = br.id
+            JOIN organizations mo ON mo.id = br.manufacturer_organization_id
+            WHERE br.requested_by_user_id = CAST(:u AS uuid)
+            ORDER BY br.created_at DESC, br.id
+        """, {"u": user_id})
+
+    async def visionary_draft_count(self, user_id: str) -> int:
+        return int(await self.db.scalar(text(
+            "SELECT count(*) FROM visionary_request_drafts WHERE user_id = CAST(:u AS uuid)"), {"u": user_id}) or 0)
+
+    # ------------------------------------------------------------------ machinery (company assets)
+    async def machinery(self, f: dict, page: int, page_size: int) -> dict:
+        """Machinery records of manufacturer companies (not archived companies), newest first."""
+        where = ["o.organization_type = 'manufacturer'", "NOT o.is_archived"]
+        p: dict = {}
+        if f.get("q"):
+            where.append(f"(m.name ILIKE :q OR {COMPANY_NAME_SQL} ILIKE :q OR m.manufacturer ILIKE :q OR m.model ILIKE :q)")
+            p["q"] = f"%{f['q'].strip()}%"
+        if f.get("status") in MACHINE_STATUSES:
+            where.append(f"({MACHINE_STATUS_SQL}) = :status")
+            p["status"] = f["status"]
+        if f.get("org"):
+            where.append("m.organization_id = CAST(:org AS uuid)")
+            p["org"] = f["org"]
+        clause = "WHERE " + " AND ".join(where)
+        base = f"FROM machines m JOIN organizations o ON o.id = m.organization_id {clause}"
+        total = await self.db.scalar(text(f"SELECT count(*) {base}"), p)
+        rows = await self.rows(f"""
+            SELECT m.id, m.name, m.manufacturer AS maker, m.model, m.year, m.created_at,
+                   {MACHINE_STATUS_SQL} AS listing_status,
+                   o.id AS organization_id, {COMPANY_NAME_SQL} AS company_name, o.record_type,
+                   (SELECT ms.value_text FROM machine_specs ms WHERE ms.machine_id = m.id
+                      AND ms.spec_code = 'industry' LIMIT 1) AS industry,
+                   (SELECT ms.value_text FROM machine_specs ms WHERE ms.machine_id = m.id
+                      AND ms.spec_code = 'capacity' LIMIT 1) AS capacity,
+                   (SELECT count(*) FROM machine_images mi WHERE mi.machine_id = m.id) AS image_count,
+                   ap.capacity AS plan, ap.recurring AS hours
+            {base.replace("WHERE", "LEFT JOIN manufacturer_availability_preferences ap ON ap.organization_id = o.id WHERE", 1)}
+            ORDER BY m.created_at DESC, m.id LIMIT :limit OFFSET :offset
+        """, {**p, "limit": page_size, "offset": (page - 1) * page_size})
+        company = None
+        if f.get("org"):
+            company = await self.db.scalar(text(f"SELECT {COMPANY_NAME_SQL} FROM organizations o WHERE o.id = CAST(:o AS uuid)"),
+                                           {"o": f["org"]})
+        return {"total": total, "rows": rows, "company": company}
 
     async def set_user_status(self, user_id: str, status: str, admin_id: UUID, reason: str) -> None:
         await self.db.execute(text("UPDATE users SET status=:s, updated_at=now() WHERE id=CAST(:u AS uuid)"),

@@ -47,7 +47,14 @@ REQUIRED = [
     ("users", "registration_completed_at", "014_user_registration.sql"),
     ("registration_flows", None, "014_user_registration.sql"),
     ("users", "terms_accepted_at", "016_terms_acceptance.sql"),
+    ("manufacturer_submissions", None, "017_manufacturer_approval.sql"),
     ("registration_settings", None, "018_registration_compat.sql"),
+    ("manufacturer_submissions", "base_snapshot", "019_company_update_requests.sql"),
+    ("manufacturer_submission_events", None, "019_company_update_requests.sql"),
+    ("import_batches", None, "020_onboarding_source.sql"),
+    ("organizations", "onboarding_source", "020_onboarding_source.sql"),
+    ("manufacturer_submissions", "submitted_at", "020_onboarding_source.sql"),
+    ("manufacturer_submission_events", "organization_id", "020_onboarding_source.sql"),
 ]
 
 

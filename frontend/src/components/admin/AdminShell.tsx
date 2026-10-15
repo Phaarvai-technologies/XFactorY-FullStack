@@ -3,10 +3,12 @@
 import {
   BarChart3,
   ClipboardCheck,
+  Cog,
   Factory,
   KeyRound,
   LayoutDashboard,
   LifeBuoy,
+  Lightbulb,
   LogOut,
   Menu,
   ShieldAlert,
@@ -21,11 +23,13 @@ import { Admins } from "@/components/admin/Admins";
 import { Analytics } from "@/components/admin/Analytics";
 import { ChangePasswordModal } from "@/components/admin/ChangePasswordModal";
 import { ManufacturerDetail } from "@/components/admin/ManufacturerDetail";
+import { Machinery } from "@/components/admin/Machinery";
 import { Manufacturers } from "@/components/admin/Manufacturers";
 import { Overview } from "@/components/admin/Overview";
 import { ReviewQueue } from "@/components/admin/ReviewQueue";
 import { Support } from "@/components/admin/Support";
 import { UserDetailView, Users as UsersScreen } from "@/components/admin/Users";
+import { VisionaryDetail, Visionaries } from "@/components/admin/Visionaries";
 import { ErrorBox, Loading } from "@/components/admin/ui";
 import { useAdminHost, useResource } from "@/lib/admin/api";
 import { initials } from "@/lib/admin/format";
@@ -38,6 +42,8 @@ const NAV = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/admins", label: "Admins", icon: ShieldCheck },
   { href: "/admin/manufacturers", label: "Manufacturers", icon: Factory },
+  { href: "/admin/machinery", label: "Machinery", icon: Cog },
+  { href: "/admin/visionaries", label: "Visionaries", icon: Lightbulb },
   { href: "/admin/review", label: "Onboarding & review", icon: ClipboardCheck },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/support", label: "Support", icon: LifeBuoy },
@@ -57,7 +63,8 @@ function route(path: string): { screen: string; id?: string } {
   if (section === "login") return { screen: "login" };
   if (section === "manufacturers") return id ? { screen: "manufacturer", id } : { screen: "manufacturers" };
   if (section === "users") return id ? { screen: "user", id } : { screen: "users" };
-  if (["review", "analytics", "support", "admins"].includes(section)) return { screen: section };
+  if (section === "visionaries") return id ? { screen: "visionary", id } : { screen: "visionaries" };
+  if (["review", "analytics", "support", "admins", "machinery"].includes(section)) return { screen: section };
   return { screen: "notfound" };
 }
 
@@ -169,6 +176,15 @@ export function AdminShell() {
       break;
     case "manufacturer":
       content = <ManufacturerDetail id={id!} />;
+      break;
+    case "machinery":
+      content = <Machinery />;
+      break;
+    case "visionaries":
+      content = <Visionaries />;
+      break;
+    case "visionary":
+      content = <VisionaryDetail id={id!} />;
       break;
     case "review":
       content = <ReviewQueue />;

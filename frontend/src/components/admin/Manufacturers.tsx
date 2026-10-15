@@ -1,10 +1,14 @@
 "use client";
 
-import { Archive, ArchiveRestore, Eye, Pencil, SlidersHorizontal } from "lucide-react";
+import { Archive, ArchiveRestore, ClipboardCheck, Cog, Eye, Pencil, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useToast } from "@/components/admin/AdminShell";
+import { AddCompanyModal } from "@/components/admin/AddCompany";
+import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import {
+  ActionsMenu,
   Completeness,
+  DetailsRow,
+  DetailsToggle,
   EntryBadge,
   ErrorBox,
   Loading,
@@ -15,6 +19,7 @@ import {
   RecordBadge,
   ReviewBadge,
   SearchInput,
+  Truncate,
 } from "@/components/admin/ui";
 import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
 import {
@@ -25,6 +30,8 @@ import {
   REVIEW_LABELS,
   REVIEW_ORDER,
   fmtAgo,
+  fmtDate,
+  sourceText,
 } from "@/lib/admin/format";
 import type { EntrySource, ManufacturerList, ManufacturerRow, RecordType, ReviewStatus } from "@/lib/admin/types";
 
@@ -39,9 +46,14 @@ export function Manufacturers() {
     ),
   );
   const [selected, setSelected] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ ids: string[]; archive: boolean; batch: boolean } | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  // Admin Entry: administrators / operators only (the backend checks the same roles).
+  const me = useAdminMe();
+  const canAdd = !!me?.roles.some((r) => r === "platform_administrator" || r === "platform_operator");
 
   const params = {
     q: f.get("q"),
@@ -109,7 +121,13 @@ export function Manufacturers() {
       <PageHeader
         title="Manufacturers"
         subtitle="Search and filter manufacturer records. Archived records are hidden unless you choose to show them."
+        actions={canAdd ? (
+          <button type="button" className="btn-primary adm-btn-md" onClick={() => setAdding(true)}>
+            <Plus size={15} /> Add company
+          </button>
+        ) : undefined}
       />
+      {adding && <AddCompanyModal onClose={() => setAdding(false)} />}
 
       <div className="card adm-toolbar">
         <div className="adm-toolbar-row">
@@ -253,7 +271,17 @@ export function Manufacturers() {
       ) : (
         <div className={`card adm-table-card${loading ? " adm-stale" : ""}`}>
           <div className="adm-table-wrap">
-            <table className="adm-table">
+            <table className="adm-table adm-table-fixed adm-mfg-table">
+              <colgroup>
+                <col className="adm-w-check" />
+                <col className="adm-w-expand" />
+                <col className="adm-w-main" />
+                <col className="adm-w-status" />
+                <col className="adm-w-complete" />
+                <col className="adm-w-count" />
+                <col className="adm-w-date" />
+                <col className="adm-w-actions" />
+              </colgroup>
               <thead>
                 <tr>
                   <th className="adm-check-col">
@@ -267,22 +295,19 @@ export function Manufacturers() {
                       }
                     />
                   </th>
+                  <th aria-label="Details" />
                   <th>Company</th>
-                  <th>Contact</th>
-                  <th>Location</th>
-                  <th>Industry</th>
-                  <th>Major process</th>
-                  <th>Completeness</th>
-                  <th>Status</th>
-                  <th>Record / source</th>
-                  <th>Last updated</th>
-                  <th className="adm-sticky-right" aria-label="Actions" />
+                  <th>Approval</th>
+                  <th>Profile</th>
+                  <th title="Users linked to this company">Users</th>
+                  <th>Updated</th>
+                  <th className="adm-th-actions">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="adm-empty-cell">
+                    <td colSpan={8} className="adm-empty-cell">
                       No manufacturers match these filters.
                     </td>
                   </tr>
@@ -291,6 +316,9 @@ export function Manufacturers() {
                   <Row
                     key={r.id}
                     r={r}
+                    expanded={expanded === r.id}
+                    onToggle={() => setExpanded(expanded === r.id ? null : r.id)}
+                    onMachinery={() => go(`/admin/machinery?org=${r.id}`)}
                     selected={selected.includes(r.id)}
                     onSelect={(on) => setSelected(on ? [...selected, r.id] : selected.filter((id) => id !== r.id))}
                     onOpen={(tab) => go(`/admin/manufacturers/${r.id}${tab ? `?tab=${tab}` : ""}`)}
@@ -362,76 +390,99 @@ function ProcessInput({ value, onCommit }: { value: string; onCommit: (v: string
 function Row({
   r,
   selected,
+  expanded,
+  onToggle,
   onSelect,
   onOpen,
   onArchive,
+  onMachinery,
 }: {
   r: ManufacturerRow;
   selected: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onSelect: (on: boolean) => void;
   onOpen: (tab?: string) => void;
   onArchive: () => void;
+  onMachinery: () => void;
 }) {
   const canBatch = r.recordType !== "REAL" && !r.isArchived;
+  const name = r.companyName || "Unnamed company";
+  const detailsId = `mfg-${r.id}`;
   return (
-    <tr className={r.isArchived ? "adm-row-archived" : undefined}>
-      <td className="adm-check-col">
-        {canBatch && (
-          <input
-            type="checkbox"
-            aria-label={`Select ${r.companyName ?? "record"}`}
-            checked={selected}
-            onChange={(e) => onSelect(e.target.checked)}
+    <>
+      <tr className={r.isArchived ? "adm-row-archived" : undefined}>
+        <td className="adm-check-col">
+          {canBatch && (
+            <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} />
+          )}
+        </td>
+        <td>
+          <DetailsToggle open={expanded} onToggle={onToggle} controls={detailsId} label={name} />
+        </td>
+        <td>
+          <div className="adm-name-line">
+            <button type="button" className="adm-link adm-truncate" title={name} onClick={() => onOpen()}>
+              {name}
+            </button>
+            <RecordBadge type={r.recordType} hideReal />
+            {r.isArchived && <span className="badge badge-neutral">Archived</span>}
+          </div>
+          {(r.location || r.industry) && (
+            <div className="adm-cell-sub">
+              <Truncate text={[r.location, r.industry].filter(Boolean).join(" · ")} />
+            </div>
+          )}
+          <div className="adm-cell-sub" title={r.onboardingSourceNote ?? undefined}>
+            Source: {sourceText(r.onboardingSource, r.stagedSource)}
+          </div>
+        </td>
+        <td>
+          <ReviewBadge status={r.reviewStatus} />
+        </td>
+        <td>
+          <Completeness value={r.completeness} done={r.requiredDone} total={r.requiredTotal} />
+        </td>
+        <td className="adm-num" title={`${r.linkedUsers ?? 0} linked user${r.linkedUsers === 1 ? "" : "s"}`}>
+          {r.linkedUsers ?? 0}
+        </td>
+        <td className="adm-nowrap">{fmtAgo(r.lastUpdated)}</td>
+        <td className="adm-td-actions">
+          <ActionsMenu
+            context={name}
+            items={[
+              { label: "View details", icon: <Eye size={15} />, onSelect: () => onOpen() },
+              { label: "Edit company details", icon: <Pencil size={15} />, onSelect: () => onOpen("company") },
+              { label: "Onboarding & review", icon: <ClipboardCheck size={15} />, onSelect: () => onOpen("onboarding") },
+              { label: "View machinery", icon: <Cog size={15} />, onSelect: onMachinery },
+              r.isArchived
+                ? { label: "Restore", icon: <ArchiveRestore size={15} />, onSelect: onArchive, group: true }
+                : { label: "Archive", icon: <Archive size={15} />, onSelect: onArchive, danger: true, group: true },
+            ]}
           />
-        )}
-      </td>
-      <td className="adm-col-company">
-        <button type="button" className="adm-link" onClick={() => onOpen()}>
-          {r.companyName || "Unnamed company"}
-        </button>
-        {r.isArchived && <span className="badge badge-neutral adm-inline-badge">Archived</span>}
-      </td>
-      <td>
-        <div className="adm-cell-main">{r.contactName || "—"}</div>
-        <div className="adm-cell-sub">{r.contactEmail || r.contactPhone || ""}</div>
-      </td>
-      <td>{r.location || <span className="adm-muted">—</span>}</td>
-      <td className="adm-col-industry">{r.industry || <span className="adm-muted">—</span>}</td>
-      <td>
-        {r.majorProcess || <span className="adm-muted">No listings</span>}
-        {r.listingCount > 1 && <div className="adm-cell-sub">+{r.listingCount - 1} more</div>}
-      </td>
-      <td>
-        <Completeness value={r.completeness} done={r.requiredDone} total={r.requiredTotal} />
-      </td>
-      <td>
-        <ReviewBadge status={r.reviewStatus} />
-      </td>
-      <td>
-        <div className="adm-badge-stack">
-          <RecordBadge type={r.recordType} />
-          <EntryBadge source={r.entrySource} />
-        </div>
-      </td>
-      <td className="adm-nowrap">{fmtAgo(r.lastUpdated)}</td>
-      <td className="adm-sticky-right">
-        <div className="adm-row-actions">
-          <button type="button" className="adm-icon-action" title="View" onClick={() => onOpen()}>
-            <Eye size={16} />
-          </button>
-          <button type="button" className="adm-icon-action" title="Edit" onClick={() => onOpen("company")}>
-            <Pencil size={16} />
-          </button>
-          <button
-            type="button"
-            className="adm-icon-action"
-            title={r.isArchived ? "Restore" : "Archive"}
-            onClick={onArchive}
-          >
-            {r.isArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
-          </button>
-        </div>
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {expanded && (
+        <DetailsRow
+          id={detailsId}
+          colSpan={8}
+          items={[
+            ["Company contact", [r.contactEmail, r.contactPhone].filter(Boolean).join(" · ") || "No company contact details"],
+            ["Primary user", r.primaryUser ? `${r.primaryUser.name || "—"} · ${r.primaryUser.email ?? ""}` : "No linked user"],
+            ["Location", r.location],
+            ["Industry", r.industry],
+            ["Major process", r.majorProcess ? `${r.majorProcess}${r.listingCount > 1 ? ` (+${r.listingCount - 1} more)` : ""}` : "No listings"],
+            ["Onboarding source", `${sourceText(r.onboardingSource, r.stagedSource)}${r.onboardingSourceNote ? ` — ${r.onboardingSourceNote}` : ""}`],
+            ["Record type / entry source (admin)", (
+              <span key="source" className="adm-badge-row">
+                <RecordBadge type={r.recordType} />
+                <EntryBadge source={r.entrySource} />
+              </span>
+            )],
+            ["Registered", fmtDate(r.registeredAt)],
+          ]}
+        />
+      )}
+    </>
   );
 }

@@ -109,9 +109,24 @@ export type Resource<T> = {
  * GET an admin resource and keep it in state. Changing `path` refetches; the previous
  * data stays visible while the next response loads (no flicker on filter changes).
  */
-export function useResource<T>(path: string | null): Resource<T> {
+export function useResource<T>(path: string | null, options: { refreshOnFocus?: boolean } = {}): Resource<T> {
   const call = useAdminApi();
   const [version, setVersion] = useState(0);
+  const { refreshOnFocus = false } = options;
+  // Optional: refetch when the admin comes back to the tab / window (data changed elsewhere, e.g.
+  // a new onboarding submission), keeping the current data visible meanwhile.
+  useEffect(() => {
+    if (!refreshOnFocus || !path || typeof window === "undefined") return;
+    const again = () => {
+      if (document.visibilityState === "visible") setVersion((v) => v + 1);
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, [refreshOnFocus, path]);
   const [res, setRes] = useState<{ key: string; data?: T; error: Error | null } | null>(null);
   const key = `${path}#${version}`;
 

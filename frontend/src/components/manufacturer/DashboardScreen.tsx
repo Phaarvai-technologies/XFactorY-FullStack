@@ -10,6 +10,7 @@ import {
   MachineIcon,
 } from "@/components/manufacturer/icons";
 import { CHECKLIST_ITEMS, type ProfileCompletionFlags } from "@/components/manufacturer/ProfileWizard";
+import type { CompanyUpdateRequest } from "@/components/manufacturer/ManufacturerApp";
 import type {
   BookingRequest,
   CapacityPlan,
@@ -26,6 +27,8 @@ type DashboardScreenProps = {
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
   /** Set when X!Y asked for corrections to the submitted company details. */
   onFixCompanyDetails?: () => void;
+  /** The user's update requests for companies managed by someone else (status and feedback). */
+  updateRequests?: CompanyUpdateRequest[];
   onOpenMachineryWizard: () => void;
   onEditMachinery: (machine: MachineryListing) => void;
   onSetMachineryStatus: (id: number, status: MachineryListing["status"]) => void;
@@ -47,6 +50,13 @@ const BOOKING_STATUS_BADGE: Record<BookingRequest["status"], string> = {
   New: "badge-neutral",
 };
 
+const UPDATE_REQUEST_BADGE: Record<CompanyUpdateRequest["status"], [string, string]> = {
+  pending: ["badge-pending", "Awaiting X!Y review"],
+  changes_requested: ["badge-pending", "Corrections requested"],
+  approved: ["badge-verified", "Approved"],
+  rejected: ["badge-rejected", "Declined"],
+};
+
 const MACHINERY_STATUS_BADGE: Record<MachineryListing["status"], string> = {
   Published: "badge-verified",
   Archived: "badge-neutral",
@@ -64,6 +74,7 @@ export function DashboardScreen({
   flags,
   onOpenProfileWizard,
   onFixCompanyDetails,
+  updateRequests = [],
   onOpenMachineryWizard,
   onEditMachinery,
   onSetMachineryStatus,
@@ -227,6 +238,34 @@ export function DashboardScreen({
                 <span className="nav-card-meta">{pendingBookings} pending →</span>
               </button>
             </div>
+
+            {updateRequests.length ? (
+              <>
+                <p className="section-label">Company update requests</p>
+                <div className="card">
+                  {updateRequests.map((r) => {
+                    const [badge, label] = UPDATE_REQUEST_BADGE[r.status];
+                    return (
+                      <div className="wiz-check-row" key={r.id}>
+                        <div className="wiz-check-text">
+                          <b>{r.companyName}</b>
+                          <span>
+                            Submitted {r.submittedAt ? new Date(r.submittedAt).toLocaleDateString() : ""}
+                            {r.feedback ? ` · X!Y: ${r.feedback}` : ""}
+                          </span>
+                        </div>
+                        <span className={`badge ${badge}`}>{label}</span>
+                        {r.status === "changes_requested" && onFixCompanyDetails ? (
+                          <button className="btn-ghost" type="button" onClick={onFixCompanyDetails}>
+                            Correct details
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
           </div>
         ) : null}
 

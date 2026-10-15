@@ -1,8 +1,17 @@
 "use client";
 
 import { Mail, Send, UserRound } from "lucide-react";
-import { useCallback, useState } from "react";
-import { EmailStatusBadge, ErrorBox, Loading, PageHeader, SearchInput } from "@/components/admin/ui";
+import { Fragment, useCallback, useState } from "react";
+import {
+  DetailsRow,
+  DetailsToggle,
+  EmailStatusBadge,
+  ErrorBox,
+  Loading,
+  PageHeader,
+  SearchInput,
+  Truncate,
+} from "@/components/admin/ui";
 import { jsonBody, useAdminApi, useAdminHost, useResource } from "@/lib/admin/api";
 import { fmtDateTime } from "@/lib/admin/format";
 import type { EmailLog, RecentError, TestEmailResult } from "@/lib/admin/types";
@@ -10,7 +19,7 @@ import type { EmailLog, RecentError, TestEmailResult } from "@/lib/admin/types";
 const TEMPLATE_LABELS: Record<string, string> = {
   welcome: "Welcome (new user)",
   review_needs_correction: "Profile needs changes",
-  review_reviewed: "Profile reviewed",
+  review_reviewed: "Profile approved",
   account_suspended: "Account suspended",
   account_reactivated: "Account reactivated",
   admin_account_created: "Admin account created",
@@ -89,7 +98,13 @@ function EmailCard() {
         <p className="adm-muted">No emails sent yet.</p>
       ) : (
         <div className="adm-table-wrap">
-          <table className="adm-table">
+          <table className="adm-table adm-table-fixed">
+            <colgroup>
+              <col className="adm-w-datetime" />
+              <col className="adm-w-company" />
+              <col className="adm-w-main" />
+              <col className="adm-w-status" />
+            </colgroup>
             <thead>
               <tr>
                 <th>When</th>
@@ -102,14 +117,14 @@ function EmailCard() {
               {log.data.emails.map((e) => (
                 <tr key={e.id}>
                   <td className="adm-nowrap">{fmtDateTime(e.created_at)}</td>
-                  <td>{e.to_email}</td>
-                  <td className="adm-wrap">
-                    <div className="adm-cell-main">{e.subject}</div>
-                    <div className="adm-cell-sub">{TEMPLATE_LABELS[e.template] ?? (e.template.startsWith("clerk_") ? `Clerk email (${e.template.slice(6)})` : e.template)}</div>
+                  <td><Truncate text={e.to_email} /></td>
+                  <td>
+                    <div className="adm-cell-main"><Truncate text={e.subject} /></div>
+                    <div className="adm-cell-sub"><Truncate text={TEMPLATE_LABELS[e.template] ?? (e.template.startsWith("clerk_") ? `Clerk email (${e.template.slice(6)})` : e.template)} /></div>
                   </td>
                   <td>
                     <EmailStatusBadge status={e.status} />
-                    {e.error && <div className="adm-cell-sub adm-wrap">{e.error}</div>}
+                    {e.error && <div className="adm-cell-sub"><Truncate text={e.error} /></div>}
                   </td>
                 </tr>
               ))}
@@ -126,6 +141,7 @@ export function Support() {
   const { go } = useAdminHost();
   const { data, error, loading, reload } = useResource<RecentError[]>("/support/recent-errors");
   const lookup = useCallback((q: string) => q && go(`/admin/users?q=${encodeURIComponent(q)}`), [go]);
+  const [open, setOpen] = useState<number | null>(null);
 
   return (
     <>
@@ -154,46 +170,67 @@ export function Support() {
           <p className="adm-muted">No failed operations recorded. </p>
         ) : (
           <div className="adm-table-wrap">
-            <table className="adm-table">
+            <table className="adm-table adm-table-fixed">
+              <colgroup>
+                <col className="adm-w-expand" />
+                <col className="adm-w-datetime" />
+                <col className="adm-w-main" />
+                <col className="adm-w-status" />
+                <col className="adm-w-actions" />
+              </colgroup>
               <thead>
                 <tr>
+                  <th aria-label="Details" />
                   <th>When</th>
                   <th>User</th>
-                  <th>Operation</th>
-                  <th>What happened</th>
-                  <th>Error reference</th>
-                  <th aria-label="Actions" />
+                  <th>Problem</th>
+                  <th className="adm-th-actions">User profile</th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((e, i) => (
-                  <tr key={`${e.request_id}-${i}`}>
-                    <td className="adm-nowrap">{fmtDateTime(e.created_at)}</td>
-                    <td>
-                      <div className="adm-cell-main">{e.name || "Unknown user"}</div>
-                      <div className="adm-cell-sub">{e.email || ""}</div>
-                    </td>
-                    <td>
-                      <span className="badge badge-rejected">
-                        {e.status_code} {e.method}
-                      </span>
-                      <div className="adm-cell-sub">
-                        <code className="adm-code">{e.path}</code>
-                      </div>
-                    </td>
-                    <td className="adm-wrap">{e.detail || "—"}</td>
-                    <td>
-                      <code className="adm-code">{e.request_id || "—"}</code>
-                    </td>
-                    <td>
-                      {e.user_id && (
-                        <button type="button" className="btn-text adm-nowrap" onClick={() => go(`/admin/users/${e.user_id}`)}>
-                          <UserRound size={14} /> View user profile
-                        </button>
+                {data.map((e, i) => {
+                  const detailsId = `err-${i}`;
+                  const isOpen = open === i;
+                  return (
+                    <Fragment key={`${e.request_id}-${i}`}>
+                      <tr>
+                        <td>
+                          <DetailsToggle open={isOpen} onToggle={() => setOpen(isOpen ? null : i)} controls={detailsId} label={`failed ${e.method ?? ""} at ${fmtDateTime(e.created_at)}`} />
+                        </td>
+                        <td className="adm-nowrap">{fmtDateTime(e.created_at)}</td>
+                        <td>
+                          <div className="adm-cell-main"><Truncate text={e.name || "Unknown user"} /></div>
+                          <div className="adm-cell-sub"><Truncate text={e.email || null} /></div>
+                        </td>
+                        <td>
+                          <span className="badge badge-rejected">
+                            {e.status_code} {e.method}
+                          </span>
+                          <div className="adm-cell-sub"><Truncate text={e.detail || null} /></div>
+                        </td>
+                        <td className="adm-td-actions">
+                          {e.user_id && (
+                            <button type="button" className="btn-text adm-nowrap" onClick={() => go(`/admin/users/${e.user_id}`)}>
+                              <UserRound size={14} /> View user
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <DetailsRow
+                          id={detailsId}
+                          colSpan={5}
+                          items={[
+                            ["What happened", e.detail],
+                            ["Request", e.path ? <code key="p" className="adm-code">{`${e.method ?? ""} ${e.path}`}</code> : null],
+                            ["Error reference", e.request_id ? <code key="r" className="adm-code">{e.request_id}</code> : null],
+                            ["User", [e.name, e.email].filter(Boolean).join(" · ") || null],
+                          ]}
+                        />
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

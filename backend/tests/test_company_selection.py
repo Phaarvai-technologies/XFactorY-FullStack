@@ -221,7 +221,7 @@ async def test_new_company_duplicates_are_refused_only_in_the_same_location(clie
     assert n == 2  # the imported one (India) + the user's, approved (Germany)
 
 
-async def test_owner_updates_their_selected_company_and_others_cannot(client):  # noqa: F811
+async def test_owner_updates_their_selected_company_and_others_only_request_changes(client):  # noqa: F811
     t = _tag()
     owner = f"user_own_{_tag()}"
     r = await client.post("/manufacturer/account", headers=_hdr(client, owner),
@@ -250,7 +250,9 @@ async def test_owner_updates_their_selected_company_and_others_cannot(client):  
     assert seen["access"] == "claimed" and seen["phone"] == "" and seen["canUpdate"] is False
     r = await client.post("/manufacturer/account", headers=_hdr(client, other), json={
         **ACCOUNT, "companyName": f"Sigma Fab {t}", "companyId": org_id["id"], "capacity": "1 unit"})
-    assert r.status_code == 403 and "managed by its owner" in r.json()["detail"]
+    # No longer refused: staged as an update request for admin review (test_company_update_requests.py).
+    assert r.status_code == 201, r.text
+    assert r.json()["submitted"]["kind"] == "update_request"
     row = (await client.sql("SELECT production_capacity_label FROM organization_profiles WHERE organization_id=CAST(:i AS uuid)",
                             i=org_id["id"]))[0][0]
     assert row == "25 units"

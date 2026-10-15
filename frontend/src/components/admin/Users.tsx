@@ -1,11 +1,13 @@
 "use client";
 
-import { Ban, Factory, RotateCcw, ShieldCheck } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Ban, Cog, Factory, RotateCcw, ShieldCheck } from "lucide-react";
+import { Fragment, useCallback, useState } from "react";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import {
   AccountBadge,
   Completeness,
+  DetailsRow,
+  DetailsToggle,
   EmailStatusBadge,
   ErrorBox,
   Loading,
@@ -14,11 +16,48 @@ import {
   Pagination,
   RecordBadge,
   ReviewBadge,
+  RoleBadges,
   SearchInput,
+  Truncate,
 } from "@/components/admin/ui";
 import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
-import { REVIEW_LABELS, REVIEW_ORDER, fmtAgo, fmtDate, fmtDateTime } from "@/lib/admin/format";
+import {
+  MEMBERSHIP_LABELS,
+  REVIEW_LABELS,
+  REVIEW_ORDER,
+  SOURCE_NOT_APPLICABLE,
+  fmtAgo,
+  fmtDate,
+  fmtDateTime,
+  registrationLabel,
+  sourceText,
+  roleLabel,
+} from "@/lib/admin/format";
 import type { UserDetail, UserList, UserRow } from "@/lib/admin/types";
+
+/** Each company the user is linked to, with that company's own onboarding source (from the
+ * backend). Approval is shown separately in the Onboarding column. */
+function LinkedCompanies({ user, go }: { user: UserRow; go: (path: string) => void }) {
+  const companies = user.companies ?? [];
+  if (companies.length === 0) return <span className="adm-muted">{SOURCE_NOT_APPLICABLE}</span>;
+  return (
+    <ul className="adm-company-sources">
+      {companies.map((c) => (
+        <li key={c.id}>
+          <div className="adm-name-line">
+            <button type="button" className="adm-link adm-truncate" title={c.name ?? ""} onClick={() => go(`/admin/manufacturers/${c.id}`)}>
+              {c.name || "Unnamed company"}
+            </button>
+            {c.id === user.manufacturerId && user.recordType && user.recordType !== "REAL" && <RecordBadge type={user.recordType} />}
+          </div>
+          <div className="adm-cell-sub" title={c.sourceNote ?? undefined}>
+            Source: {sourceText(c.onboardingSource, c.stagedSource)}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function OnboardingCell({ status }: { status: UserRow["onboardingStatus"] }) {
   if (status === "NO_PROFILE") return <span className="badge badge-neutral">No profile</span>;
@@ -32,22 +71,34 @@ export function Users() {
     q: f.get("q"),
     account_status: f.get("account_status"),
     onboarding_status: f.get("onboarding_status"),
+    role: f.get("role"),
     page: f.get("page") || "1",
     page_size: "25",
   };
   const { data, error, loading, reload } = useResource<UserList>(`/users${toQuery(params)}`);
   const setFilters = f.set;
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
+  const [open, setOpen] = useState<string | null>(null);
 
   return (
     <>
       <PageHeader
         title="Users"
-        subtitle="Everyone who has registered. A user and the manufacturer they manage are separate records."
+        subtitle="People who registered on X!Y. Admin accounts are managed in the Admins tab; companies and their machinery in Manufacturers and Machinery."
       />
       <div className="card adm-toolbar">
         <div className="adm-toolbar-row">
           <SearchInput value={params.q} onCommit={commitSearch} placeholder="Search name, email, phone or company" />
+          <select
+            className="adm-select-sm"
+            value={params.role}
+            onChange={(e) => f.set({ role: e.target.value })}
+            aria-label="Role"
+          >
+            <option value="">All roles</option>
+            <option value="manufacturer">Manufacturers</option>
+            <option value="visionary">Visionaries</option>
+          </select>
           <select
             className="adm-select-sm"
             value={params.account_status}
@@ -82,67 +133,101 @@ export function Users() {
       ) : (
         <div className={`card adm-table-card${loading ? " adm-stale" : ""}`}>
           <div className="adm-table-wrap">
-            <table className="adm-table">
+            <table className="adm-table adm-table-fixed">
+              <colgroup>
+                <col className="adm-w-expand" />
+                <col className="adm-w-main" />
+                <col className="adm-w-roles" />
+                <col className="adm-w-company" />
+                <col className="adm-w-status" />
+                <col className="adm-w-status" />
+                <col className="adm-w-date" />
+              </colgroup>
               <thead>
                 <tr>
+                  <th aria-label="Details" />
                   <th>User</th>
-                  <th>Phone</th>
-                  <th>Type</th>
-                  <th>Linked manufacturer</th>
-                  <th>Registered</th>
-                  <th>Last activity</th>
+                  <th>Roles</th>
+                  <th>Linked company</th>
                   <th>Account</th>
                   <th>Onboarding</th>
+                  <th>Registered</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="adm-empty-cell">
+                    <td colSpan={7} className="adm-empty-cell">
                       No users match these filters.
                     </td>
                   </tr>
                 )}
-                {data.rows.map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <button type="button" className="adm-link" onClick={() => go(`/admin/users/${u.id}`)}>
-                        {u.name || u.email}
-                      </button>
-                      <div className="adm-cell-sub">{u.email}</div>
-                    </td>
-                    <td>{u.phone || <span className="adm-muted">—</span>}</td>
-                    <td>
-                      {u.isAdmin ? (
-                        <span className="badge badge-info">
-                          <ShieldCheck size={11} style={{ marginRight: 3 }} /> {u.staffOnly ? "Admin (staff)" : "Admin"}
-                        </span>
-                      ) : (
-                        u.userType
-                      )}
-                    </td>
-                    <td>
-                      {u.manufacturerId ? (
-                        <>
-                          <button type="button" className="adm-link" onClick={() => go(`/admin/manufacturers/${u.manufacturerId}`)}>
-                            {u.companyName || "Unnamed company"}
+                {data.rows.map((u) => {
+                  const detailsId = `user-${u.id}`;
+                  const isOpen = open === u.id;
+                  return (
+                    <Fragment key={u.id}>
+                      <tr>
+                        <td>
+                          <DetailsToggle open={isOpen} onToggle={() => setOpen(isOpen ? null : u.id)} controls={detailsId} label={u.name || u.email} />
+                        </td>
+                        <td>
+                          <button type="button" className="adm-link adm-truncate" title={u.name || u.email} onClick={() => go(`/admin/users/${u.id}`)}>
+                            {u.name || u.email}
                           </button>
-                          {u.recordType && u.recordType !== "REAL" && <RecordBadge type={u.recordType} />}
-                        </>
-                      ) : (
-                        <span className="adm-muted">—</span>
+                          <div className="adm-cell-sub"><Truncate text={u.email} /></div>
+                        </td>
+                        <td>
+                          {u.isAdmin ? (
+                            <span className="badge badge-info">
+                              <ShieldCheck size={11} style={{ marginRight: 3 }} /> {u.staffOnly ? "Admin (staff)" : "Admin"}
+                            </span>
+                          ) : (
+                            <RoleBadges roles={u.roles} />
+                          )}
+                        </td>
+                        <td>
+                          <LinkedCompanies user={u} go={go} />
+                        </td>
+                        <td>
+                          <AccountBadge status={u.accountStatus} />
+                        </td>
+                        <td>
+                          <OnboardingCell status={u.onboardingStatus} />
+                        </td>
+                        <td className="adm-nowrap">
+                          {fmtDate(u.registeredAt)}
+                          <div className="adm-cell-sub adm-truncate" title={registrationLabel(u.registrationChannel, u.registrationMethod)}>
+                            {registrationLabel(u.registrationChannel, null)}
+                          </div>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <DetailsRow
+                          id={detailsId}
+                          colSpan={7}
+                          items={[
+                            ["Email", u.email],
+                            ["Phone", u.phone],
+                            ["User type", u.isAdmin ? "Admin" : u.userType],
+                            ["Roles", u.roles.length ? u.roles.map(roleLabel).join(", ") : "None selected yet"],
+                            ["Registration", registrationLabel(u.registrationChannel, u.registrationMethod)],
+                            ["Profile completion", u.completeness === null ? null : `${u.completeness}%`],
+                            [
+                              "Onboarding source",
+                              (u.companies ?? []).length === 0
+                                ? SOURCE_NOT_APPLICABLE
+                                : (u.companies ?? [])
+                                    .map((c) => `${c.name || "Unnamed company"}: ${sourceText(c.onboardingSource, c.stagedSource)}${c.sourceNote ? ` (${c.sourceNote})` : ""}`)
+                                    .join(" · "),
+                            ],
+                            ["Last activity", fmtAgo(u.lastActivity)],
+                          ]}
+                        />
                       )}
-                    </td>
-                    <td className="adm-nowrap">{fmtDate(u.registeredAt)}</td>
-                    <td className="adm-nowrap">{fmtAgo(u.lastActivity)}</td>
-                    <td>
-                      <AccountBadge status={u.accountStatus} />
-                    </td>
-                    <td>
-                      <OnboardingCell status={u.onboardingStatus} />
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -243,6 +328,10 @@ export function UserDetailView({ id }: { id: string }) {
                 </p>
               </div>
               <div className="detail-item">
+                <p className="detail-label">Registered via</p>
+                <p className="detail-value">{registrationLabel(u.registrationChannel, u.registrationMethod)}</p>
+              </div>
+              <div className="detail-item">
                 <p className="detail-label">Account status</p>
                 <div className="detail-value">
                   <AccountBadge status={u.accountStatus} />
@@ -257,10 +346,12 @@ export function UserDetailView({ id }: { id: string }) {
 
           <section className="card adm-section">
             <div className="adm-section-head">
-              <h3>Linked manufacturer</h3>
+              <h3>Linked company</h3>
             </div>
             {data.manufacturers.length === 0 ? (
-              <p className="adm-muted">This user has not created a manufacturer profile.</p>
+              <p className="adm-muted">
+                This user has not created a manufacturer profile. Onboarding source: {SOURCE_NOT_APPLICABLE}.
+              </p>
             ) : (
               <div className="adm-stack">
                 {data.manufacturers.map((m) => (
@@ -275,14 +366,29 @@ export function UserDetailView({ id }: { id: string }) {
                     </span>
                     <div>
                       <b>{m.company_name || "Unnamed company"}</b>
-                      <span className="adm-capitalize">{m.membership_role}</span>
+                      <span className="adm-capitalize">
+                        {m.membership_role}
+                        {m.membership_status ? ` · ${MEMBERSHIP_LABELS[m.membership_status] ?? m.membership_status} membership` : ""}
+                      </span>
                     </div>
                     <div className="adm-linked-side">
                       <ReviewBadge status={m.review_status} />
                       <RecordBadge type={m.record_type} hideReal />
+                      <span className="badge badge-neutral" title="How this company first came onto X!Y">
+                        Source: {m.onboarding_source ? (m.onboarding_source_label ?? sourceText(m.onboarding_source)) : sourceText(null, m.staged_source)}
+                      </span>
                       <Completeness value={m.completeness} />
                     </div>
                   </button>
+                ))}
+                {data.manufacturers.map((m) => (
+                  <p key={`mach-${m.organization_id}`} className="adm-section-hint adm-machinery-link">
+                    <Cog size={14} aria-hidden /> {m.company_name || "This company"} lists{" "}
+                    <b>{m.machinery_count ?? 0}</b> machine{m.machinery_count === 1 ? "" : "s"} (company assets).{" "}
+                    <button type="button" className="btn-text" onClick={() => go(`/admin/machinery?org=${m.organization_id}`)}>
+                      View in Machinery
+                    </button>
+                  </p>
                 ))}
               </div>
             )}

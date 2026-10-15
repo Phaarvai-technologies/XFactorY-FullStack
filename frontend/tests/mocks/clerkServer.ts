@@ -4,7 +4,15 @@ type AuthFn = (() => Promise<{ userId: string | null; getToken: () => Promise<st
   protect: () => Promise<void>;
 };
 
-type ServerAuthState = { userId: string | null; token: string | null; protected: string[] };
+type ServerAuthState = {
+  userId: string | null;
+  token: string | null;
+  protected: string[];
+  /** Session behind the cookie and what Clerk's backend API says about it (auth-page tests). */
+  sessionId?: string | null;
+  sessionStatus?: "active" | "removed" | "ended" | "error";
+  sessionLookups?: string[];
+};
 // Kept on globalThis so tests that reset modules still share one state object.
 const store = globalThis as { __xyServerAuth?: ServerAuthState };
 export const serverAuth: ServerAuthState = (store.__xyServerAuth ??= {
@@ -33,5 +41,21 @@ export function clerkFrontendApiProxy() {
 }
 
 export async function auth() {
-  return { userId: serverAuth.userId, getToken: async () => serverAuth.token };
+  return {
+    userId: serverAuth.userId,
+    sessionId: serverAuth.sessionId ?? (serverAuth.userId ? "sess_cookie" : null),
+    getToken: async () => serverAuth.token,
+  };
+}
+
+export async function clerkClient() {
+  return {
+    sessions: {
+      getSession: async (id: string) => {
+        (serverAuth.sessionLookups ??= []).push(id);
+        if (serverAuth.sessionStatus === "error") throw new Error("Clerk API unreachable");
+        return { id, status: serverAuth.sessionStatus ?? "active" };
+      },
+    },
+  };
 }
