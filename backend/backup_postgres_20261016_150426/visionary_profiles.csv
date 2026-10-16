@@ -1,0 +1,6 @@
+user_id,organization_id,full_name,role_title,organization_name,location,introduction,created_at,updated_at
+86c7d4b6-8c2b-46d6-b1e2-381e48e35e3e,55f57aa5-1eb3-42b2-8846-b2f50ab7c18d,phaarvai,Inventor,,"Chennai, Tamil Nadu, India",,2026-10-03 07:07:26.901054+00,2026-10-08 10:47:41.744795+00
+507c6053-9179-4baf-a744-b6c6e877f463,8da8db12-6af6-4020-bc4d-2cb69f573ddf,Anu,Engineer,Kaveri,madurai,,2026-10-10 07:15:34.755334+00,2026-10-10 07:15:34.755334+00
+686448be-eb20-4ac7-b5f6-933427b4fc17,2bd78473-0b8a-4808-981e-a0caaa365c41,Priya,Product designer,Product organization,Chennai,wertyuiopsdfghjkl;xcvbnm,2026-10-13 05:24:01.509677+00,2026-10-13 09:48:43.684186+00
+16f29ce7-db6c-40fb-9a06-cc8aac34c1e3,1ccc3d4a-aa8b-47f7-8d6e-ff1f7bae4501,John Doe,Programmer,Argon Labs,Chennai,I am an inventor with crazy ideas,2026-10-13 14:43:22.953836+00,2026-10-13 14:43:22.953836+00
+5fccd5bb-8dfa-40fe-96a5-e495c977eb3b,e550550c-7d70-4fef-a2d1-8af229a9f1e5,phaarvai,Product designer,Kaveri,Madurai,asdfgl,2026-10-09 11:08:53.171225+00,2026-10-14 13:27:48.36236+00

@@ -1,0 +1,16 @@
+organization_id,current_step,personal_information_completed,company_information_completed,location_completed,certification_completed,infrastructure_completed,faq_completed,completion_percentage,status,submitted_at,reviewed_at,reviewed_by_user_id,rejection_reason,version,created_at,updated_at
+4cee99c1-37d2-4d08-bbc0-0a1d2f6b391d,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-09-29 05:31:54.694824+00,2026-09-29 05:31:54.694824+00
+842775fe-09ad-4e7d-8e66-5c4ef23a5403,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-10-05 14:52:34.35658+00,2026-10-05 14:52:34.35658+00
+5bc895d5-63dd-4856-894f-db6d9543df78,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-10-09 07:59:45.105072+00,2026-10-09 07:59:45.105072+00
+4d4551f3-5adb-49a7-b500-519dc4b91ac0,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-10-09 18:46:51.122769+00,2026-10-09 18:46:51.122769+00
+151285df-1393-49b2-bfa4-bf427ef4b9cf,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-10-10 06:45:15.581331+00,2026-10-10 06:45:15.581331+00
+86ed7f9a-f560-4128-8300-0bd7ccc92aba,certification,t,t,t,f,f,f,49,in_progress,,,,,13,2026-10-10 07:08:37.218627+00,2026-10-10 07:48:16.764694+00
+8e5fd131-79b9-4aba-b633-4c601d5da6de,location,t,t,f,f,f,f,32,in_progress,,,,,3,2026-10-10 07:56:26.262086+00,2026-10-12 07:51:41.599961+00
+87c806f3-9b43-4fa5-8383-955dddb398b9,company_information,t,f,f,f,f,f,15,in_progress,,,,,2,2026-10-12 07:59:54.912845+00,2026-10-12 15:17:30.34518+00
+cf9f2982-c746-48e7-9f28-bb8adf3f8deb,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-10-12 16:39:26.190868+00,2026-10-12 16:39:26.190868+00
+3f01dcd1-d641-4fe9-aedb-126bfdcef2a1,company_information,t,f,f,f,f,f,15,in_progress,,,,,1,2026-10-12 17:05:33.15849+00,2026-10-12 17:05:33.15849+00
+d65586c0-9ef4-4ec6-944f-0e7bdd0cb70b,company_information,t,f,f,f,f,f,15,in_progress,,,,,4,2026-10-09 09:30:23.762543+00,2026-10-13 07:57:02.282075+00
+5f5f63a6-ca2a-4079-ade6-b557445bc2d3,company_information,t,f,f,f,f,f,15,in_progress,,,,,4,2026-10-09 10:57:37.040175+00,2026-10-13 07:59:21.676789+00
+0de0974a-9b25-4431-9fab-2a56cc4f5d9b,company_information,t,f,f,f,f,f,15,in_progress,,,,,2,2026-10-13 08:03:03.579959+00,2026-10-13 08:03:11.54874+00
+dc243e5b-41fd-42b9-9344-ff676726b468,company_information,t,f,f,f,f,f,15,in_progress,,,,,8,2026-10-13 05:16:40.079726+00,2026-10-13 15:50:14.38216+00
+02cd39f6-3709-4f0e-8c49-7aa97f62cec2,company_information,t,f,f,f,f,f,15,in_progress,,,,,7,2026-10-10 14:35:24.313825+00,2026-10-14 10:54:38.137498+00

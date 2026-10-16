@@ -1,0 +1,1991 @@
+From cc4a3387269262be7e80c9624d52ebf36965fc77 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 07:14:54 +0000
+Subject: [PATCH] Distinguish demo from real manufacturer data
+
+Reuse organizations.record_type (REAL/DEMO/TEST) as the classification.
+
+- Eligibility: Visionary visibility and booking now require REAL data.
+- Onboarding company lookup: REAL companies plus the viewer's own.
+- Duplicate checks (CSV import, Admin Entry) keep DEMO records and report
+  cross-type matches as conflicts, never converting them.
+- CSV import requires --record-type; Admin Entry takes record_type.
+- Changing the classification is limited to administrators/operators,
+  requires a reason, and is recorded in change history.
+- Admin list returns recordTypeCounts for All/Real/Demo tabs; the list
+  shows a Real or Demo badge; the detail page has a confirmed control.
+- Migration 023: re-assert record_type, add organizations.source_ref
+  where missing, add record_type_classification_log.
+- One-time scripts in database/backfills/023_demo_classification:
+  preview, apply, verify, rollback.
+- Docs: DEMO_REAL_DATA.md, README, API contract.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01HzRHiDDMNJoYJD4rs7BHRX
+---
+ backend/DEMO_REAL_DATA.md                     | 124 +++++++++
+ backend/README.md                             |   5 +
+ backend/app/admin/company_create.py           |  21 +-
+ backend/app/admin/repository.py               |  11 +-
+ backend/app/admin/schemas.py                  |   3 +
+ backend/app/admin/service.py                  |  17 +-
+ backend/app/claims/service.py                 |   5 +-
+ backend/app/core/eligibility.py               |  16 +-
+ backend/app/import_manufacturers.py           |  65 ++++-
+ backend/app/repositories/manufacturer.py      |  38 ++-
+ backend/app/services/company_search.py        |   2 +-
+ backend/app/services/manufacturer.py          |   2 +-
+ backend/app/visionary/repository.py           |   8 +-
+ .../023_demo_classification/1_preview.sql     | 110 ++++++++
+ .../023_demo_classification/2_apply.sql       | 124 +++++++++
+ .../023_demo_classification/3_verify.sql      |  61 +++++
+ .../023_demo_classification/4_rollback.sql    |  43 ++++
+ .../023_record_type_classification.sql        |  51 ++++
+ backend/infrastructure/API_CONTRACT.md        |   5 +-
+ backend/tests/test_admin.py                   |   3 +-
+ .../tests/test_demo_real_classification.py    | 242 ++++++++++++++++++
+ frontend/src/app/admin/admin.css              |   8 +
+ frontend/src/components/admin/AddCompany.tsx  |  27 +-
+ .../components/admin/ManufacturerDetail.tsx   |  97 ++++++-
+ .../src/components/admin/Manufacturers.tsx    |  35 ++-
+ frontend/src/lib/admin/format.ts              |  13 +-
+ frontend/src/lib/admin/types.ts               |   2 +
+ frontend/tests/admin-demo-real.test.tsx       | 144 +++++++++++
+ frontend/tests/admin-entry.test.tsx           |  24 +-
+ 29 files changed, 1236 insertions(+), 70 deletions(-)
+ create mode 100644 backend/DEMO_REAL_DATA.md
+ create mode 100644 backend/database/backfills/023_demo_classification/1_preview.sql
+ create mode 100644 backend/database/backfills/023_demo_classification/2_apply.sql
+ create mode 100644 backend/database/backfills/023_demo_classification/3_verify.sql
+ create mode 100644 backend/database/backfills/023_demo_classification/4_rollback.sql
+ create mode 100644 backend/database/migrations/023_record_type_classification.sql
+ create mode 100644 backend/tests/test_demo_real_classification.py
+ create mode 100644 frontend/tests/admin-demo-real.test.tsx
+
+diff --git a/backend/DEMO_REAL_DATA.md b/backend/DEMO_REAL_DATA.md
+new file mode 100644
+index 0000000..8d78375
+--- /dev/null
++++ b/backend/DEMO_REAL_DATA.md
+@@ -0,0 +1,124 @@
++# Demo vs real manufacturer data
++
++The classification of a company is `organizations.record_type`. It already existed (migration 008)
++and is reused. No new column was added.
++
++| Value | Meaning | Visionaries (search, profile, booking) | Onboarding company lookup (other users) | Admin portal |
++|---|---|---|---|---|
++| `REAL` | real manufacturer data | visible once approved **and** 100% complete | listed | listed, counted in totals and analytics |
++| `DEMO` | demonstration data | **never** | not listed (the owner still sees their own) | listed under the Demo tab, Demo badge |
++| `TEST` | internal test data (existing) | never | not listed (owner still sees their own) | listed under the Demo tab, Test badge |
++
++The classification is independent of approval (`manufacturer_onboarding.status`), `verification_status`,
++`onboarding_source`, `entry_source`, profile completeness and ownership (memberships). Changing it changes
++none of these. Users have no classification: a person can own a demo company and a real one.
++
++## Who sets it
++
++| Path | Value |
++|---|---|
++| Manufacturer self-registration (`/manufacturer/account`) | `REAL` (column default) |
++| Admin portal → Add company | Real or Demo: the form requires an explicit choice (the API defaults to `REAL`) |
++| CSV import `python -m app.import_manufacturers file.csv --record-type REAL\|DEMO` | the required `--record-type` |
++| Research seed files (`seed_part1.sql`, `seed_part2.sql`, `seed_tamil_nadu.sql`) | always `REAL` |
++| Change afterwards | admin portal → company → Onboarding & review → **Real or demo data**. Administrators and operators only, a reason is required, and a confirmation dialog explains the effect. Every change is recorded in the company's change history (who, old → new, reason). Support and verification roles can view but not change it (403). |
++
++## Where demo data is excluded (backend)
++
++- `app/core/eligibility.py`: `visionary_visible` and `booking` both require the new fact `real`
++  (`record_type = 'REAL'`), on top of approval and completeness. This covers Visionary search,
++  recommendations, profile pages, drafts and new requests. Machinery, certifications and availability are
++  only read for companies that pass this rule.
++- `app/visionary/repository.py` `DISCOVERABLE`: `record_type = 'REAL'` (was `<> 'TEST'`).
++- `app/repositories/manufacturer.py`:
++  - `LISTED_COMPANY_SQL` (onboarding company search, details, selection, new-company name clash) lists REAL
++    companies, plus the viewer's own company.
++  - `DEDUP_COMPANY_SQL` (duplicate checks for imports and Admin Entry) keeps DEMO records, so a match with
++    demo data is reported, never duplicated.
++- The manufacturer's own status (`/manufacturer/bootstrap` → `approval.eligibility`) shows a demo company
++  as not visible and not bookable.
++- Admin overview cards and analytics already counted REAL only. The manufacturer list returns
++  `recordTypeCounts` for the All / Real / Demo tabs, using the same filters as the list.
++- `app/services/company_search.py` and `app/claims/service.py` (claim feature, not routed at present): REAL
++  only.
++
++## Demo / real conflicts during imports
++
++An import never converts, merges or overwrites an existing record. When a row matches an existing company
++of the other classification (same registration id; same name + website; same name + country + city):
++
++- **CSV import** reports `CONFLICT line N: <name> matches DEMO record <name> (<id>)` and skips the row.
++- **Research seed files** list the row as `CONFLICT with existing DEMO record (rule …)` in section 8 of
++  their output, and skip it.
++- **Admin Entry** answers `409 classification_conflict` with the existing id. The form offers "Open the
++  existing company".
++
++Resolve each conflict in the admin portal, then re-run the import (re-runs never duplicate):
++
++1. **It is the same real company.** Open the demo record and change it to Real, with a reason. A re-run
++   then reports the row as a duplicate of that (now real) record and skips it. The research data is not
++   merged in: copy anything useful from the research row (the seed output shows its id; the source
++   workbook has the details).
++2. **The demo record is unrelated sample data.** Archive it (archived records are not duplicate
++   candidates), then re-run the import. The real company is inserted as a new record.
++
++## One-time classification of the existing records
++
++These live in `database/backfills/023_demo_classification/` and are not run by `app.migrate`.
++
++| File | Changes data? | Purpose |
++|---|---|---|
++| `1_preview.sql` | no | The scope count to approve, and every in-scope record with its relationships (owners and their sign-up channel, shared owners / Visionaries / admins, approval, bookings, engagements, published machines, open requests from others, visible to Visionaries today). |
++| `2_apply.sql` | yes | `REAL` → `DEMO` for the scope below. Requires `expected_count` and an optional KEEP-REAL id list. Logs every record (with a snapshot) in `record_type_classification_log` and in `admin_change_history`. Refuses to run twice. One transaction. |
++| `3_verify.sql` | no | All `problems_*` columns must be 0. |
++| `4_rollback.sql` | yes | Restores `REAL` on exactly the logged records, except records an admin has reclassified since; it lists those and keeps them. |
++
++**Scope.** Records are updated when ALL of these hold; nothing else is updated:
++
++1. `organization_type = 'manufacturer'`
++2. `record_type = 'REAL'`
++3. `created_at` before the moment `2_apply.sql` runs
++4. `source_ref` not `india_mfr_research:%`
++5. not in the KEEP-REAL list
++
++What is never touched:
++- users;
++- buyer / Visionary organizations;
++- existing DEMO and TEST rows;
++- ids, memberships, owners, approval, verification, onboarding source, archive state, `updated_at`.
++
++What protects later real imports:
++- the run-once guard;
++- rule 3 (created before the run);
++- rule 4 (research seed rows excluded);
++- the deployment order below.
++
++## Production deployment order
++
++Take a database backup first. Do steps 2–6 in one maintenance window.
++
++1. **Review.** Run the preview against a copy of production, or read-only:
++   `psql "$PROD_URL" -f database/backfills/023_demo_classification/1_preview.sql > preview.txt`.
++   Decide the KEEP-REAL ids, if any.
++2. **Migrate.** Run `PYTHONPATH=. python -m app.migrate`. It applies 023: it adds `source_ref` where it
++   is missing, plus the classification log. It is idempotent, and the running app is unaffected.
++3. **Classify the existing records.** Re-run `1_preview.sql`. In `2_apply.sql`, set `expected_count`
++   (`in_scope_total` minus the kept ids) and the KEEP-REAL ids, then run
++   `psql "$PROD_URL" -v ON_ERROR_STOP=1 -f 2_apply.sql`.
++4. **Verify.** Run `3_verify.sql`. Every `problems_*` value must be 0.
++5. **Deploy the backend, then the frontend.** From this point the Visionary side hides demo data,
++   self-registration creates Real records, and the admin portal has the tabs and badges.
++6. **Import the real manufacturer data.** Run `run_seed.py seed_part1.sql`, then `seed_part2.sql`
++   (dry run first with `SEED_DRY_RUN=1`). `seed_tamil_nadu.sql` is optional, because every Tamil Nadu
++   company is already in the India files.
++7. **Resolve conflicts and verify.** Resolve the listed demo conflicts in the admin portal (see above).
++   Run `3_verify.sql` again: section 5 must show 0 research rows that are not REAL.
++
++The order matters: step 3 must run before step 6. If the backend is deployed before step 3, nothing
++breaks, but existing demo companies stay visible to Visionaries until step 3 runs.
++
++**Rollback.**
++- Data: `4_rollback.sql` undoes step 3. Imported research rows can be removed with `unseed.sql`, which
++  removes only unclaimed imported rows.
++- Code: redeploy the previous version. It ignores DEMO for Visionaries (the old rule hid only TEST) and
++  never reads the new log table.
+diff --git a/backend/README.md b/backend/README.md
+index 2da9949..b94ba09 100644
+--- a/backend/README.md
++++ b/backend/README.md
+@@ -36,6 +36,11 @@ Either run the SQL files in the Supabase SQL editor, in order:
+     registration channel). Then fill existing records from evidence: dry run
+     `PYTHONPATH=. python -m app.backfill_onboarding_source --report source_report.csv`, review, then `--apply`.
+ 16. `database/migrations/022_admin_entry.sql` (Admin Entry: admins add companies in the dashboard).
++17. `database/migrations/023_record_type_classification.sql` (demo vs real data: re-asserts
++    `organizations.record_type`, adds `source_ref` where missing and the one-time classification log).
++    Then classify the existing records once with `database/backfills/023_demo_classification/`
++    (preview → apply → verify; not run by `app.migrate`). See `DEMO_REAL_DATA.md` for the scope and
++    the production deployment order.
+ 
+ or, from this folder: `PYTHONPATH=. python -m app.migrate` — it applies the
+ schema only if the database is empty, then runs all migrations (they are idempotent).
+diff --git a/backend/app/admin/company_create.py b/backend/app/admin/company_create.py
+index bb7c877..3fa2111 100644
+--- a/backend/app/admin/company_create.py
++++ b/backend/app/admin/company_create.py
+@@ -12,6 +12,9 @@
+ * Duplicates: the importer's matching rules (registration id, name + website, name + country +
+   city; never the name alone) - an existing match is refused with its id.
+ * Retries: an Idempotency-Key header makes a repeated request return the company it created.
++* Classification: the admin chooses Real or Demo (organizations.record_type). A company that
++  matches an existing record of the other classification is refused (409 classification_conflict)
++  with that record's id: the existing record is never converted here.
+ """
+ from __future__ import annotations
+ 
+@@ -21,7 +24,7 @@ from sqlalchemy import text
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core import onboarding_source
+-from app.import_manufacturers import EXISTING_SQL, match, website_domain
++from app.import_manufacturers import EXISTING_SQL, RECORD_TYPES, match_typed, website_domain
+ from app.manufacturer_approval import record_event
+ from app.repositories.manufacturer import COUNTRY_CODES, normalize_company_name
+ 
+@@ -50,9 +53,17 @@ async def create_company(db: AsyncSession, *, admin_id: UUID, roles: tuple[str,
+             return str(done), False
+     row = {"name": data["name"], "registration_id": data.get("registration_id", ""), "website": data.get("website", ""),
+            "country": data.get("country", ""), "city": data.get("city", "")}
++    record_type = (data.get("record_type") or "REAL").upper()
++    if record_type not in RECORD_TYPES:
++        raise CreateError("Choose Real or Demo for the company.", 422, "invalid_record_type")
+     candidates = (await db.execute(text(EXISTING_SQL), {
+         "norm": normalize_company_name(row["name"]), "reg": row["registration_id"].lower()})).all()
+-    verdict, found = match(row, candidates)
++    verdict, found = match_typed(row, candidates, record_type)
++    if verdict == "conflict":
++        label = {"REAL": "real", "DEMO": "demo", "TEST": "test"}.get(found.record_type, found.record_type)
++        raise CreateError(f"This company already exists as a {label} record: {found.display_name}. Open it and "
++                          f"change its classification instead of adding a second copy.",
++                          409, "classification_conflict", str(found.id))
+     if verdict == "present":
+         raise CreateError(f"This company already exists: {found.display_name}. Open it instead of adding it again.",
+                           409, "duplicate_company", str(found.id))
+@@ -65,9 +76,9 @@ async def create_company(db: AsyncSession, *, admin_id: UUID, roles: tuple[str,
+     org_id = await db.scalar(text("""
+         INSERT INTO organizations (display_name, legal_name, organization_type, status, website_domain,
+                                    entry_source, record_type, onboarding_source)
+-        VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'ADMIN_ASSISTED', 'REAL', :src)
++        VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'ADMIN_ASSISTED', :rt, :src)
+         RETURNING id
+-    """), {"name": data["name"], "web": website_domain(data.get("website", "")), "src": SOURCE})
++    """), {"name": data["name"], "web": website_domain(data.get("website", "")), "src": SOURCE, "rt": record_type})
+     await db.execute(text("""
+         INSERT INTO organization_profiles (organization_id, registration_id, contact_email, contact_phone,
+                                            address_line1, country_code, country_name, company_category,
+@@ -88,7 +99,7 @@ async def create_company(db: AsyncSession, *, admin_id: UUID, roles: tuple[str,
+                 "city": data.get("city", ""), "state": data.get("state", ""), "country": data.get("country", ""),
+                 "code": code})
+     await record_event(db, event="created", role="admin", source=SOURCE, organization_id=org_id, actor=admin_id,
+-                       details={"reason": data.get("reason") or None}, key=key)
++                       details={"reason": data.get("reason") or None, "record_type": record_type}, key=key)
+     await db.execute(text("""
+         INSERT INTO admin_change_history (manufacturer_id, field_changed, old_value, new_value, changed_by, reason)
+         VALUES (:o, 'Company created', NULL, :n, :a, NULLIF(:r, ''))
+diff --git a/backend/app/admin/repository.py b/backend/app/admin/repository.py
+index 8a44a46..94b9f37 100644
+--- a/backend/app/admin/repository.py
++++ b/backend/app/admin/repository.py
+@@ -239,7 +239,16 @@ class AdminRepository:
+                    array_remove(array_agg(DISTINCT country ORDER BY country), NULL) AS countries
+             FROM admin_manufacturer_overview
+         """)
+-        return {"total": total, "rows": rows, "facets": facets}
++        # Counts per record type under every other active filter (search, archive, review, ...),
++        # so the All / Real / Demo tabs always agree with the list they open.
++        cwhere, cp = self._filters({**f, "record_type": None})
++        cclause = ("WHERE " + " AND ".join(cwhere)) if cwhere else ""
++        counts = {t: 0 for t in RECORD_TYPES}
++        for r in (await self.db.execute(text(f"""
++            SELECT record_type, count(*) AS n FROM admin_manufacturer_overview {cclause} GROUP BY record_type
++        """), cp)).mappings():
++            counts[r["record_type"]] = int(r["n"])
++        return {"total": total, "rows": rows, "facets": facets, "record_type_counts": counts}
+ 
+     async def overview_row(self, org_id: str) -> dict | None:
+         return await self.row(f"""
+diff --git a/backend/app/admin/schemas.py b/backend/app/admin/schemas.py
+index 83cad26..5cec1d8 100644
+--- a/backend/app/admin/schemas.py
++++ b/backend/app/admin/schemas.py
+@@ -113,3 +113,6 @@ class CompanyCreate(_Model):
+     phone: str = Field(default="", max_length=30)
+     capacity: str = Field(default="", max_length=100)
+     reason: str = Field(default="", max_length=500)
++    # Real or Demo (organizations.record_type). Optional for API compatibility (default REAL);
++    # the dashboard form always sends an explicit choice.
++    record_type: Literal["REAL", "DEMO"] = "REAL"
+diff --git a/backend/app/admin/service.py b/backend/app/admin/service.py
+index 4708fda..177b70b 100644
+--- a/backend/app/admin/service.py
++++ b/backend/app/admin/service.py
+@@ -122,6 +122,11 @@ def normalize(value: Any) -> Any:
+     return value
+ 
+ 
++
++# Who may change organizations.record_type (Real / Demo / Test): the same roles that may add
++# companies (Admin Entry). Support and verification roles can see the classification only.
++CLASSIFY_ROLES = ("platform_administrator", "platform_operator")
++
+ class AdminService:
+     def __init__(self, session: AsyncSession, settings: Settings):
+         self.db = session
+@@ -180,7 +185,9 @@ class AdminService:
+             r["assignedAdminName"] = names.get(r["assignedAdminId"] or "")
+         return {"total": data["total"], "page": page, "pageSize": page_size, "rows": rows,
+                 "facets": {"industries": data["facets"]["industries"] or [],
+-                           "countries": data["facets"]["countries"] or []}}
++                           "countries": data["facets"]["countries"] or []},
++                # same filters except record type: the counts shown on the All / Real / Demo tabs
++                "recordTypeCounts": data["record_type_counts"]}
+ 
+     async def review_queue(self, filters: dict, admin: AdminContext) -> dict:
+         if filters.get("assigned") == "me":
+@@ -480,6 +487,14 @@ class AdminService:
+             if body.get(key) is None:
+                 continue
+             new = normalize(body[key]) or None
++            if key == "record_type" and new != meta[column]:
++                # Real / Demo classification: decides whether Visionaries can ever see the company.
++                # Administrators and operators only, always with a reason (kept in change history).
++                if not set(admin.roles) & set(CLASSIFY_ROLES):
++                    raise HTTPException(403, "Only administrators and operators can change whether a company "
++                                             "is real or demo data.")
++                if not (reason or "").strip():
++                    raise HTTPException(422, "Add a short reason for changing the record type.")
+             if new != meta[column]:
+                 await self.repo.set_org_field(org_id, column, new)
+                 await self.repo.add_history(org_id, label, meta[column], new, admin.user_id, reason)
+diff --git a/backend/app/claims/service.py b/backend/app/claims/service.py
+index ae4e187..a686323 100644
+--- a/backend/app/claims/service.py
++++ b/backend/app/claims/service.py
+@@ -129,11 +129,12 @@ class ClaimService:
+ 
+     async def _claimable(self, org_id: str, lock: bool = False) -> dict:
+         row = (await self.db.execute(text(f"""
+-            SELECT o.id, o.display_name, o.status, o.entry_source, o.is_archived, o.clerk_organization_id
++            SELECT o.id, o.display_name, o.status, o.entry_source, o.is_archived, o.clerk_organization_id,
++                   o.record_type
+             FROM organizations o WHERE o.id = CAST(:o AS uuid) AND o.organization_type = 'manufacturer'
+             {"FOR UPDATE" if lock else ""}
+         """), {"o": org_id})).mappings().first()
+-        if not row or row["entry_source"] != "IMPORTED" or row["is_archived"]:
++        if not row or row["entry_source"] != "IMPORTED" or row["is_archived"] or row["record_type"] != "REAL":
+             raise HTTPException(404, "Company not found")
+         taken = await self.db.scalar(text("""
+             SELECT EXISTS (SELECT 1 FROM organization_claims WHERE organization_id = CAST(:o AS uuid) AND status = 'approved')
+diff --git a/backend/app/core/eligibility.py b/backend/app/core/eligibility.py
+index 3b4371f..cae6176 100644
+--- a/backend/app/core/eligibility.py
++++ b/backend/app/core/eligibility.py
+@@ -1,12 +1,16 @@
+ """Manufacturer eligibility for Visionaries: one place for the rules.
+ 
+-Two separate facts about a manufacturer company (organization):
++Three separate facts about a manufacturer company (organization):
+ 
+ * APPROVAL  - an X!Y admin approved its submitted company details
+               (manufacturer_onboarding.status = 'approved').
+ * COMPLETE  - its profile meets every required item of the existing completeness check
+               (admin_manufacturer_overview.completeness, the 14 required fields, computed by the
+               database from saved data; a percentage sent by a client is never used).
++* REAL      - the company is real manufacturer data (organizations.record_type = 'REAL'). DEMO and
++              TEST records are kept for testing and demonstrations and are never shown to
++              Visionaries or bookable, whatever their approval or completeness. Only authorized
++              admins change record_type (app/admin/service.py, CLASSIFY_ROLES).
+ 
+ Each capability below says which facts it needs. To change a rule later (e.g. let approved
+ but incomplete manufacturers be found), edit RULES only: the SQL used by Visionary search,
+@@ -23,11 +27,12 @@ COMPLETE_PERCENT = 100
+ 
+ # capability -> facts required (all must hold)
+ RULES: dict[str, tuple[str, ...]] = {
+-    "visionary_visible": ("approved", "complete"),   # search, recommendations, profile page
+-    "booking": ("approved", "complete"),             # new booking requests (subject to existing rules)
++    "visionary_visible": ("real", "approved", "complete"),   # search, recommendations, profile page
++    "booking": ("real", "approved", "complete"),             # new booking requests (subject to existing rules)
+ }
+ 
+ _FACT_SQL = {
++    "real": "elig.record_type = 'REAL'",
+     "approved": "elig.onboarding_raw_status = 'approved'",
+     "complete": f"elig.completeness >= {COMPLETE_PERCENT}",
+ }
+@@ -40,9 +45,10 @@ def sql_condition(capability: str, org_alias: str = "o") -> str:
+             f"WHERE elig.organization_id = {org_alias}.id AND {facts})")
+ 
+ 
+-def evaluate(approval_status: str | None, completeness: int | None) -> dict:
++def evaluate(approval_status: str | None, completeness: int | None, record_type: str | None = "REAL") -> dict:
+     """The same rules in Python, for status displays (never for access decisions)."""
+-    facts = {"approved": approval_status == "approved",
++    facts = {"real": (record_type or "REAL") == "REAL",
++             "approved": approval_status == "approved",
+              "complete": (completeness or 0) >= COMPLETE_PERCENT}
+     return {
+         "approved": facts["approved"],
+diff --git a/backend/app/import_manufacturers.py b/backend/app/import_manufacturers.py
+index 3a794d7..c1703be 100644
+--- a/backend/app/import_manufacturers.py
++++ b/backend/app/import_manufacturers.py
+@@ -1,7 +1,11 @@
+ """Import manufacturer companies from a CSV file, without duplicates.
+ 
+-    PYTHONPATH=. python -m app.import_manufacturers companies.csv --dry-run   # report only
+-    PYTHONPATH=. python -m app.import_manufacturers companies.csv             # import
++    PYTHONPATH=. python -m app.import_manufacturers companies.csv --record-type REAL --dry-run  # report only
++    PYTHONPATH=. python -m app.import_manufacturers companies.csv --record-type REAL            # import
++
++--record-type is required: REAL for real manufacturer data, DEMO for demonstration / test data.
++Every company the run inserts gets that organizations.record_type; DEMO companies are never shown
++to Visionaries (app/core/eligibility.py). Only an authorized admin changes it later.
+ 
+ Columns (header names are case-insensitive; only a company name is required):
+     company_name | name | company        country           state | state_province
+@@ -30,6 +34,14 @@ earlier row of the same file) by
+ A company is never identified by its name alone: a row whose name exists but which has no
+ location or identifier to compare is reported as AMBIGUOUS and skipped (fix the row and re-run).
+ Re-running the same file therefore inserts nothing new. Everything runs in one transaction.
++
++Demo / real conflicts: a row that matches an existing company of the OTHER classification (a REAL
++import matching a DEMO record, or the reverse) is reported as CONFLICT and skipped. The existing
++record is never changed, converted or merged. Resolve each conflict in the admin portal:
++  * it is the same real company: open the DEMO record and change its classification to Real
++    (administrators / operators, with a reason; recorded in its change history), or
++  * the demo record is unrelated sample data: archive it, then re-run the import (archived
++    records are not duplicate candidates).
+ """
+ from __future__ import annotations
+ 
+@@ -47,9 +59,10 @@ from pathlib import Path
+ from sqlalchemy import text
+ 
+ from app.core import onboarding_source
+-from app.repositories.manufacturer import COUNTRY_CODES, LISTED_COMPANY_SQL, normalize_company_name
++from app.repositories.manufacturer import COUNTRY_CODES, DEDUP_COMPANY_SQL, normalize_company_name
+ 
+ SOURCE = "database_import"
++RECORD_TYPES = ("REAL", "DEMO")
+ 
+ ALIASES = {
+     "name": ("company_name", "name", "company", "manufacturer", "manufacturer_name"),
+@@ -97,10 +110,12 @@ class Report:
+     present: list[tuple[int, str, str, str]] = field(default_factory=list)
+     ambiguous: list[tuple[int, str, str]] = field(default_factory=list)
+     invalid: list[tuple[int, str]] = field(default_factory=list)
++    # (line, name, existing id, existing name, existing record_type)
++    conflicts: list[tuple[int, str, str, str, str]] = field(default_factory=list)
+ 
+ 
+ EXISTING_SQL = f"""
+-    SELECT o.id::text AS id, o.display_name,
++    SELECT o.id::text AS id, o.display_name, o.record_type,
+            lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) AS norm,
+            lower(btrim(COALESCE(op.registration_id, ''))) AS reg,
+            lower(btrim(COALESCE(o.website_domain, ''))) AS web,
+@@ -110,7 +125,7 @@ EXISTING_SQL = f"""
+     LEFT JOIN organization_profiles op ON op.organization_id = o.id
+     LEFT JOIN LATERAL (SELECT city, country_name FROM facilities
+                        WHERE organization_id = o.id AND is_headquarters AND status <> 'suspended' LIMIT 1) f ON true
+-    WHERE {LISTED_COMPANY_SQL}
++    WHERE {DEDUP_COMPANY_SQL}
+       AND (lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) = :norm
+            OR (:reg <> '' AND lower(btrim(COALESCE(op.registration_id, ''))) = :reg))
+ """
+@@ -136,6 +151,18 @@ def match(row: dict, candidates) -> tuple[str, object | None]:
+     return "new", None
+ 
+ 
++def match_typed(row: dict, candidates, record_type: str) -> tuple[str, object | None]:
++    """Like match(), but aware of Real / Demo: a match with a record of the same classification
++    is 'present'; a match only with the other classification is 'conflict' (never converted)."""
++    verdict, found = match(row, [c for c in candidates if c.record_type == record_type])
++    if verdict == "present":
++        return verdict, found
++    verdict, found = match(row, candidates)
++    if verdict == "present":
++        return "conflict", found
++    return verdict, found
++
++
+ def _default_actor() -> str:
+     try:
+         return f"os:{getpass.getuser()}"
+@@ -154,8 +181,11 @@ async def ensure_batch(session, *, reference: str, content_sha256: str, actor: s
+ 
+ 
+ async def import_rows(session, rows: list[dict], *, reference: str = "(rows passed in code)",
+-                      content_sha256: str | None = None, actor: str | None = None) -> Report:
++                      content_sha256: str | None = None, actor: str | None = None,
++                      record_type: str = "REAL") -> Report:
+     onboarding_source.require(SOURCE)
++    if record_type not in RECORD_TYPES:
++        raise ValueError(f"record_type must be one of {', '.join(RECORD_TYPES)}")
+     report = Report()
+     await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended('xy-import-manufacturers', 0))"))
+     if content_sha256 is None:
+@@ -169,7 +199,11 @@ async def import_rows(session, rows: list[dict], *, reference: str = "(rows pass
+             continue
+         candidates = (await session.execute(text(EXISTING_SQL), {
+             "norm": normalize_company_name(row["name"]), "reg": row["registration_id"].lower()})).all()
+-        verdict, found = match(row, candidates)
++        verdict, found = match_typed(row, candidates, record_type)
++        if verdict == "conflict":
++            # Never import a second copy, and never convert the existing record: an admin decides.
++            report.conflicts.append((number, row["name"], found.id, found.display_name, found.record_type))
++            continue
+         if verdict == "present":
+             report.present.append((number, row["name"], found.id, found.display_name))
+             continue
+@@ -182,10 +216,11 @@ async def import_rows(session, rows: list[dict], *, reference: str = "(rows pass
+         org_id = await session.scalar(text("""
+             INSERT INTO organizations (display_name, legal_name, organization_type, status, website_domain,
+                                        entry_source, record_type, onboarding_source, import_batch_id)
+-            VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'IMPORTED', 'REAL',
++            VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'IMPORTED', :rt,
+                     :src, :batch)
+             RETURNING id
+-        """), {"name": row["name"], "web": website_domain(row["website"]), "src": SOURCE, "batch": batch_id})
++        """), {"name": row["name"], "web": website_domain(row["website"]), "src": SOURCE, "batch": batch_id,
++                "rt": record_type})
+         await session.execute(text("""
+             INSERT INTO organization_profiles (organization_id, registration_id, contact_email, contact_phone,
+                                                address_line1, country_code, country_name, company_category,
+@@ -206,7 +241,7 @@ async def import_rows(session, rows: list[dict], *, reference: str = "(rows pass
+         from app.manufacturer_approval import record_event
+         await record_event(session, event="imported", role="system", source=SOURCE, organization_id=org_id,
+                            import_batch_id=batch_id, key=f"imported:{org_id}",
+-                           details={"line": number, "reference": reference})
++                           details={"line": number, "reference": reference, "record_type": record_type})
+         report.inserted.append((number, row["name"], str(org_id)))
+     return report
+ 
+@@ -216,6 +251,8 @@ async def main(argv: list[str] | None = None) -> int:
+     parser.add_argument("csv", type=Path)
+     parser.add_argument("--dry-run", action="store_true", help="report what would happen; change nothing")
+     parser.add_argument("--actor", help="operator or job name recorded on the import batch (default: OS user)")
++    parser.add_argument("--record-type", required=True, choices=RECORD_TYPES, type=str.upper,
++                        help="classification of every company this run inserts: REAL or DEMO")
+     args = parser.parse_args(argv)
+     from app.core.database import SessionFactory, engine
+ 
+@@ -223,16 +260,20 @@ async def main(argv: list[str] | None = None) -> int:
+     async with SessionFactory() as session:
+         report = await import_rows(session, rows, reference=args.csv.name,
+                                    content_sha256=hashlib.sha256(args.csv.read_bytes()).hexdigest(),
+-                                   actor=args.actor)
++                                   actor=args.actor, record_type=args.record_type)
+         if args.dry_run:
+             await session.rollback()
+         else:
+             await session.commit()
+     await engine.dispose()
+     label = "would insert" if args.dry_run else "inserted"
+-    print(f"rows: {len(rows)}  {label}: {len(report.inserted)}  already present: {len(report.present)}  "
++    print(f"record type: {args.record_type}  rows: {len(rows)}  {label}: {len(report.inserted)}  "
++          f"already present: {len(report.present)}  demo/real conflicts (skipped): {len(report.conflicts)}  "
+           f"ambiguous (skipped): {len(report.ambiguous)}  invalid: {len(report.invalid)}  "
+           f"batch: {'(not saved)' if args.dry_run else report.batch_id}")
++    for n, name, existing_id, existing_name, existing_type in report.conflicts:
++        print(f"  CONFLICT line {n}: {name} matches {existing_type} record {existing_name} ({existing_id}) - "
++              f"not imported, existing record unchanged; resolve in the admin portal")
+     for n, name, why in report.ambiguous:
+         print(f"  AMBIGUOUS line {n}: {name} - {why}")
+     for n, why in report.invalid:
+diff --git a/backend/app/repositories/manufacturer.py b/backend/app/repositories/manufacturer.py
+index 3d78372..59ef224 100644
+--- a/backend/app/repositories/manufacturer.py
++++ b/backend/app/repositories/manufacturer.py
+@@ -96,13 +96,15 @@ def _like_escape(value: str) -> str:
+     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+ 
+ 
+-# Every manufacturer organization is a selectable COMPANY for onboarding lookup - seeded /
+-# imported rows included, however they were loaded (entry_source may be the column default
+-# 'MANUFACTURER') - except an organization the app created for a user (created_by_user_id
+-# set) that is not an approved company yet: the empty per-user placeholder, or one whose
+-# details are still awaiting admin approval. Visionary visibility is a different rule
+-# (app/core/eligibility.py).
+-LISTED_COMPANY_SQL = """
++# Every manufacturer organization is a known COMPANY for duplicate checks (CSV import, Admin
++# Entry, research seed files) - seeded / imported rows included, however they were loaded
++# (entry_source may be the column default 'MANUFACTURER') - except an organization the app
++# created for a user (created_by_user_id set) that is not an approved company yet: the empty
++# per-user placeholder, or one whose details are still awaiting admin approval. DEMO records are
++# included here on purpose: an import or admin entry that matches a DEMO record must be reported
++# as a conflict, never silently duplicated or converted. Visionary visibility is a different
++# rule (app/core/eligibility.py).
++DEDUP_COMPANY_SQL = """
+     o.organization_type = 'manufacturer'
+     AND o.status IN ('active', 'claim_pending')
+     AND NOT o.is_archived
+@@ -119,6 +121,16 @@ LISTED_COMPANY_SQL = """
+                                                           AND s.kind <> 'update_request')))))
+ """
+ 
++# What a signed-in user may find / select in onboarding company lookup: the known companies
++# above that are REAL data, plus any company the user already belongs to (so the owner of a
++# company an admin classified as DEMO can still open and update it). Queries using it must bind
++# :viewer_user_id (NULL = no viewer, REAL records only).
++LISTED_COMPANY_SQL = DEDUP_COMPANY_SQL + """
++    AND (o.record_type = 'REAL'
++         OR EXISTS (SELECT 1 FROM memberships vm WHERE vm.organization_id = o.id
++                      AND vm.user_id = CAST(:viewer_user_id AS uuid) AND vm.status = 'active'))
++"""
++
+ # Who may update an organization through the onboarding form: its active owner / admin.
+ OWNER_ROLES_SQL = "('owner', 'admin')"
+ 
+@@ -371,7 +383,7 @@ class ManufacturerRepository:
+                 SELECT o.id, o.display_name FROM organizations o
+                 WHERE o.id = CAST(:company_id AS uuid) AND {LISTED_COMPANY_SQL}
+                 FOR UPDATE OF o
+-            """), {"company_id": str(company_id)})).first()
++            """), {"company_id": str(company_id), "viewer_user_id": str(ctx["user_id"])})).first()
+             row = None if locked is None else (await self.db.execute(text(f"""
+                 SELECT CAST(:id AS uuid) AS id, CAST(:name AS text) AS display_name,
+                        EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=CAST(:id AS uuid)
+@@ -417,7 +429,8 @@ class ManufacturerRepository:
+               AND lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) = :name
+               AND lower(btrim(COALESCE(op.country_name, f.country_name, ''))) = :country
+             LIMIT 1
+-        """), {"organization_id": ctx["organization_id"], "name": name, "country": country})
++        """), {"organization_id": ctx["organization_id"], "name": name, "country": country,
++                "viewer_user_id": str(ctx["user_id"])})
+         if clash is None:
+             # Another user's company with this name + country may still be awaiting approval.
+             clash = await self.db.scalar(text("""
+@@ -472,7 +485,8 @@ class ManufacturerRepository:
+             ORDER BY rank, norm, display_name, id
+             LIMIT :limit
+         """), {"q": q, "contains": f"%{_like_escape(q)}%", "prefix": f"{_like_escape(q)}%",
+-                "word": f"% {_like_escape(q)}%", "user_id": user_id, "limit": max(1, min(limit, 10))})
++                "word": f"% {_like_escape(q)}%", "user_id": user_id,
++                "viewer_user_id": str(user_id) if user_id else None, "limit": max(1, min(limit, 10))})
+         return [{
+             "id": str(r.id),
+             "companyName": r.display_name,
+@@ -500,7 +514,7 @@ class ManufacturerRepository:
+               SELECT city, state_province, country_name FROM facilities
+               WHERE organization_id = o.id AND is_headquarters AND status <> 'suspended' LIMIT 1) f ON true
+             WHERE o.id = CAST(:id AS uuid) AND {LISTED_COMPANY_SQL}
+-        """), {"id": company_id, "user_id": user_id})).first()
++        """), {"id": company_id, "user_id": user_id, "viewer_user_id": str(user_id) if user_id else None})).first()
+         if r is None:
+             raise LookupError("Company not found")
+         access = "owner" if r.mine else ("claimed" if r.claimed else "unclaimed")
+@@ -1092,7 +1106,7 @@ class ManufacturerRepository:
+                    logo.object_key logo_object_key,cover.object_key cover_object_key,
+                    mo.personal_information_completed,mo.company_information_completed,mo.location_completed,
+                    mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage,
+-                   mo.status approval_status,
++                   mo.status approval_status, o.record_type,
+                    (SELECT ov.completeness FROM admin_manufacturer_overview ov
+                      WHERE ov.organization_id=o.id) AS completeness,
+                    (SELECT row_to_json(x) FROM (
+diff --git a/backend/app/services/company_search.py b/backend/app/services/company_search.py
+index 34b033c..8dbb002 100644
+--- a/backend/app/services/company_search.py
++++ b/backend/app/services/company_search.py
+@@ -33,7 +33,7 @@ class CompanySearchService:
+                 ORDER BY id LIMIT 1
+             ) f ON true
+             WHERE o.organization_type = 'manufacturer' AND o.entry_source = 'IMPORTED'
+-              AND o.status = 'claim_pending' AND NOT o.is_archived
++              AND o.status = 'claim_pending' AND NOT o.is_archived AND o.record_type = 'REAL'
+               AND NOT EXISTS (SELECT 1 FROM memberships m
+                   WHERE m.organization_id = o.id AND m.status = 'active')
+               {claim_filter}
+diff --git a/backend/app/services/manufacturer.py b/backend/app/services/manufacturer.py
+index 02bd852..6941b8c 100644
+--- a/backend/app/services/manufacturer.py
++++ b/backend/app/services/manufacturer.py
+@@ -227,7 +227,7 @@ class ManufacturerService:
+             "feedback": latest.get("review_feedback") if latest else None,
+             "submittedAt": latest.get("updated_at") if latest else None,
+             "reviewedAt": latest.get("reviewed_at") if latest else None,
+-            "eligibility": eligibility.evaluate(org_status, p.get("completeness")),
++            "eligibility": eligibility.evaluate(org_status, p.get("completeness"), p.get("record_type")),
+             # The user's own update requests for companies managed by someone else: their own
+             # proposed values, status and the admin's feedback only (no data of that company).
+             "updateRequests": [{
+diff --git a/backend/app/visionary/repository.py b/backend/app/visionary/repository.py
+index 70cabe4..84365b6 100644
+--- a/backend/app/visionary/repository.py
++++ b/backend/app/visionary/repository.py
+@@ -15,8 +15,10 @@ from app.core import eligibility
+ 
+ # A manufacturer is listed for Visionaries (search, recommendations, profile page, booking
+ # drafts) only when the central eligibility rule allows it (app/core/eligibility.py: admin
+-# approval AND a 100% complete profile), while the organization is active, not archived by
+-# an admin, not a TEST record, and its owner's account is not suspended.
++# approval AND a 100% complete profile AND real data), while the organization is active, not
++# archived by an admin, a REAL record (DEMO / TEST records are never shown to Visionaries; their
++# machinery, certifications and availability are only read for ids that pass this filter), and
++# its owner's account is not suspended.
+ DISCOVERABLE = f"""
+     FROM organizations o
+     JOIN LATERAL (
+@@ -28,7 +30,7 @@ DISCOVERABLE = f"""
+     LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
+     LEFT JOIN files logo ON logo.id = op.logo_file_id
+     WHERE o.organization_type = 'manufacturer' AND o.status = 'active'
+-      AND NOT o.is_archived AND o.record_type <> 'TEST'
++      AND NOT o.is_archived AND o.record_type = 'REAL'
+       AND {eligibility.sql_condition("visionary_visible")}
+ """
+ 
+diff --git a/backend/database/backfills/023_demo_classification/1_preview.sql b/backend/database/backfills/023_demo_classification/1_preview.sql
+new file mode 100644
+index 0000000..4bdf5cb
+--- /dev/null
++++ b/backend/database/backfills/023_demo_classification/1_preview.sql
+@@ -0,0 +1,110 @@
++-- =============================================================================
++-- 023 / 1_preview.sql — READ ONLY. What 2_apply.sql would classify as DEMO, and what needs review.
++-- =============================================================================
++-- Run first (migration 023 must be applied). Changes nothing:
++--   psql "$DATABASE_URL" -f 1_preview.sql > preview.txt
++--   (or: python run_seed.py 1_preview.sql — it prints every result table)
++--
++-- SCOPE (identical in 2_apply.sql). An organization is classified DEMO when ALL hold:
++--   1. organization_type = 'manufacturer'           (buyer / Visionary and other orgs: never)
++--   2. record_type = 'REAL'                          (existing DEMO / TEST rows: left as they are)
++--   3. created before the moment 2_apply.sql runs   (anything created later stays REAL)
++--   4. source_ref is not 'india_mfr_research:%'      (rows from the real research seed files stay REAL,
++--                                                     in case those were loaded before this step)
++--   5. its id is not in the KEEP-REAL list you put in 2_apply.sql
++-- Users are never classified (record_type exists on organizations only). Memberships, owners,
++-- approval, verification, onboarding source, archive state and every id stay exactly as they are.
++-- =============================================================================
++
++-- A. When this preview was taken; compare with the time you run 2_apply.sql
++SELECT now() AS preview_taken_at;
++
++-- B. The number to copy into 2_apply.sql (expected_count) if you keep no records REAL
++SELECT count(*) AS in_scope_total
++FROM organizations o
++WHERE o.organization_type = 'manufacturer' AND o.record_type = 'REAL'
++  AND (o.source_ref IS NULL OR o.source_ref NOT LIKE 'india_mfr_research:%');
++
++-- C. What stays as it is
++SELECT 'manufacturer, already ' || o.record_type AS untouched_group, count(*) AS records
++FROM organizations o WHERE o.organization_type = 'manufacturer' AND o.record_type <> 'REAL' GROUP BY 1
++UNION ALL
++SELECT 'manufacturer, research seed import (stays REAL)', count(*)
++FROM organizations o WHERE o.organization_type = 'manufacturer' AND o.record_type = 'REAL'
++  AND o.source_ref LIKE 'india_mfr_research:%'
++UNION ALL
++SELECT 'non-manufacturer organization (' || o.organization_type || ')', count(*)
++FROM organizations o WHERE o.organization_type <> 'manufacturer' GROUP BY o.organization_type
++ORDER BY 1;
++
++-- D. In-scope records by how they came onto X!Y and their state
++SELECT coalesce(o.onboarding_source, '(unknown)') AS onboarding_source, o.entry_source,
++       coalesce(mo.status, '(no onboarding)') AS approval, o.is_archived AS archived, count(*) AS records
++FROM organizations o
++LEFT JOIN manufacturer_onboarding mo ON mo.organization_id = o.id
++WHERE o.organization_type = 'manufacturer' AND o.record_type = 'REAL'
++  AND (o.source_ref IS NULL OR o.source_ref NOT LIKE 'india_mfr_research:%')
++GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC;
++
++-- E. Every in-scope record with the relationships to check before applying.
++--    Review rows where any flag is true: they may be genuine companies run by real people.
++--    To keep such a record REAL, add its id to the KEEP-REAL list in 2_apply.sql
++--    (or apply, then switch it back to Real in the admin portal with a reason).
++WITH scope AS (
++  SELECT o.* FROM organizations o
++  WHERE o.organization_type = 'manufacturer' AND o.record_type = 'REAL'
++    AND (o.source_ref IS NULL OR o.source_ref NOT LIKE 'india_mfr_research:%')
++),
++owners AS (
++  SELECT m.organization_id,
++         string_agg(u.email::text || ' [' || coalesce(u.registration_channel, 'channel unknown') || ']',
++                    '; ' ORDER BY u.email) AS owner_emails,
++         -- the same people also belong to other organizations (shared users): their other
++         -- companies / Visionary workspaces are NOT changed by this script
++         bool_or(EXISTS (SELECT 1 FROM memberships m2 JOIN organizations o2 ON o2.id = m2.organization_id
++                         WHERE m2.user_id = m.user_id AND m2.status = 'active'
++                           AND m2.organization_id <> m.organization_id)) AS owner_in_other_orgs,
++         bool_or(EXISTS (SELECT 1 FROM visionary_profiles vp WHERE vp.user_id = m.user_id)) AS owner_is_visionary,
++         bool_or(EXISTS (SELECT 1 FROM platform_role_assignments pa WHERE pa.user_id = m.user_id
++                         AND pa.status = 'active' AND pa.revoked_at IS NULL)) AS owner_is_admin
++  FROM memberships m JOIN users u ON u.id = m.user_id
++  WHERE m.status = 'active' AND m.membership_role IN ('owner', 'admin')
++  GROUP BY m.organization_id
++)
++SELECT s.id, s.display_name, s.created_at, s.status, s.verification_status,
++       coalesce(mo.status, '(none)') AS approval, s.onboarding_source, s.entry_source, s.is_archived AS archived,
++       ow.owner_emails,
++       coalesce(ow.owner_in_other_orgs, false) AS shared_owner,
++       coalesce(ow.owner_is_visionary, false) AS owner_is_visionary,
++       coalesce(ow.owner_is_admin, false) AS owner_is_admin,
++       (mo.status = 'approved') AS approved,
++       (SELECT count(*) FROM manufacturer_booking_requests b WHERE b.manufacturer_organization_id = s.id) AS booking_requests,
++       (SELECT count(*) FROM engagements e WHERE e.supply_organization_id = s.id) AS engagements,
++       (SELECT count(*) FROM machines mm WHERE mm.organization_id = s.id AND mm.publication_status = 'published') AS published_machines,
++       (SELECT count(*) FROM manufacturer_submissions ms WHERE ms.target_organization_id = s.id
++          AND ms.organization_id <> s.id AND ms.status IN ('pending', 'changes_requested')) AS open_requests_from_others,
++       (ov.completeness >= 100 AND mo.status = 'approved') AS visible_to_visionaries_today
++FROM scope s
++LEFT JOIN manufacturer_onboarding mo ON mo.organization_id = s.id
++LEFT JOIN owners ow ON ow.organization_id = s.id
++LEFT JOIN admin_manufacturer_overview ov ON ov.organization_id = s.id
++ORDER BY (ow.owner_emails IS NOT NULL) DESC, (mo.status = 'approved') DESC NULLS LAST, s.created_at;
++
++-- F. Summary of the flags above
++WITH scope AS (
++  SELECT o.id FROM organizations o
++  WHERE o.organization_type = 'manufacturer' AND o.record_type = 'REAL'
++    AND (o.source_ref IS NULL OR o.source_ref NOT LIKE 'india_mfr_research:%')
++)
++SELECT count(*) AS in_scope,
++       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id = s.id AND m.status = 'active'))
++         AS with_active_members,
++       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id = s.id
++                                      AND mo.status = 'approved')) AS approved,
++       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM admin_manufacturer_overview ov JOIN manufacturer_onboarding mo
++                                      ON mo.organization_id = ov.organization_id
++                                      WHERE ov.organization_id = s.id AND ov.completeness >= 100
++                                        AND mo.status = 'approved')) AS visible_to_visionaries_today,
++       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM manufacturer_booking_requests b
++                                      WHERE b.manufacturer_organization_id = s.id)) AS with_booking_requests
++FROM scope s;
+diff --git a/backend/database/backfills/023_demo_classification/2_apply.sql b/backend/database/backfills/023_demo_classification/2_apply.sql
+new file mode 100644
+index 0000000..c583a01
+--- /dev/null
++++ b/backend/database/backfills/023_demo_classification/2_apply.sql
+@@ -0,0 +1,124 @@
++-- =============================================================================
++-- 023 / 2_apply.sql — ONE-TIME: classify the existing manufacturer records as DEMO.
++-- =============================================================================
++-- Before running:
++--   1. Apply migration 023 (python -m app.migrate).
++--   2. Run 1_preview.sql and review section E.
++--   3. Edit the two marked places below: expected_count, and (optionally) the KEEP-REAL ids.
++--   4. Run it BEFORE importing the real manufacturer data (see DEMO_REAL_DATA.md, deployment order).
++--
++--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f 2_apply.sql
++--   (or: python run_seed.py 2_apply.sql ; dry run: SEED_DRY_RUN=1 python run_seed.py 2_apply.sql)
++--
++-- What it changes: organizations.record_type 'REAL' -> 'DEMO' for the records in SCOPE (same rules
++-- as 1_preview.sql), nothing else. updated_at is left alone so "last updated" lists do not change.
++-- Every change is written to record_type_classification_log (with a snapshot of status, approval
++-- and owners) and to admin_change_history (visible in the admin portal's history tab).
++-- It refuses to run a second time, and refuses if the count differs from what you approved.
++-- One transaction: any error leaves nothing changed.
++-- =============================================================================
++BEGIN;
++
++-- >>> EDIT 1: the in_scope_total you reviewed in 1_preview.sql (section B) MINUS the ids you keep REAL.
++CREATE TEMP TABLE demo_params ON COMMIT DROP AS
++SELECT NULL::integer AS expected_count,
++       '023_existing_manufacturers_demo'::text AS run_label;
++
++-- >>> EDIT 2 (optional): ids from the preview that are genuine companies and must stay REAL.
++CREATE TEMP TABLE demo_keep_real (id uuid PRIMARY KEY) ON COMMIT DROP;
++-- INSERT INTO demo_keep_real (id) VALUES
++--   ('00000000-0000-0000-0000-000000000000'),
++--   ('00000000-0000-0000-0000-000000000001');
++
++DO $$
++DECLARE
++  v_expected int; v_label text; v_found int; v_unknown int;
++BEGIN
++  SELECT expected_count, run_label INTO v_expected, v_label FROM demo_params;
++  IF v_expected IS NULL THEN
++    RAISE EXCEPTION '023 apply: set expected_count (EDIT 1) to the number reviewed in 1_preview.sql';
++  END IF;
++  IF to_regclass('public.record_type_classification_log') IS NULL THEN
++    RAISE EXCEPTION '023 apply: run migration 023_record_type_classification.sql first';
++  END IF;
++  IF EXISTS (SELECT 1 FROM record_type_classification_log WHERE run_label = v_label AND rolled_back_at IS NULL) THEN
++    RAISE EXCEPTION '023 apply: already applied (run_label %). It runs only once; later records are classified '
++                    'in the admin portal. Use 4_rollback.sql first if you really need to redo it.', v_label;
++  END IF;
++  SELECT count(*) INTO v_unknown FROM demo_keep_real k
++   WHERE NOT EXISTS (SELECT 1 FROM organizations o WHERE o.id = k.id AND o.organization_type = 'manufacturer');
++  IF v_unknown > 0 THEN
++    RAISE EXCEPTION '023 apply: % KEEP-REAL id(s) are not manufacturer organizations - check EDIT 2', v_unknown;
++  END IF;
++END $$;
++
++-- Freeze the scope once (row locks: nobody can change these rows until COMMIT).
++CREATE TEMP TABLE demo_scope ON COMMIT DROP AS
++SELECT o.id,
++       CASE WHEN o.onboarding_source IS NOT NULL THEN 'existing manufacturer (' || o.onboarding_source || ')'
++            ELSE 'existing manufacturer (source unknown)' END AS rule,
++       jsonb_build_object(
++         'status', o.status, 'verification_status', o.verification_status, 'is_archived', o.is_archived,
++         'created_by_user_id', o.created_by_user_id, 'entry_source', o.entry_source,
++         'onboarding_source', o.onboarding_source,
++         'approval', (SELECT mo.status FROM manufacturer_onboarding mo WHERE mo.organization_id = o.id),
++         'members', coalesce((SELECT jsonb_agg(jsonb_build_object('user_id', m.user_id, 'role', m.membership_role,
++                                                                   'status', m.status) ORDER BY m.user_id)
++                              FROM memberships m WHERE m.organization_id = o.id), '[]'::jsonb)
++       ) AS snapshot
++FROM organizations o
++WHERE o.organization_type = 'manufacturer'
++  AND o.record_type = 'REAL'
++  AND o.created_at < now()                                    -- now() = start of this transaction
++  AND (o.source_ref IS NULL OR o.source_ref NOT LIKE 'india_mfr_research:%')
++  AND NOT EXISTS (SELECT 1 FROM demo_keep_real k WHERE k.id = o.id);
++
++DO $$ BEGIN PERFORM 1 FROM organizations o JOIN demo_scope s ON s.id = o.id FOR UPDATE OF o; END $$;
++
++DO $$
++DECLARE v_expected int; v_found int;
++BEGIN
++  SELECT expected_count INTO v_expected FROM demo_params;
++  SELECT count(*) INTO v_found FROM demo_scope;
++  IF v_found <> v_expected THEN
++    RAISE EXCEPTION '023 apply: % records in scope now, but expected_count is %. Re-run 1_preview.sql and review '
++                    'the difference before applying.', v_found, v_expected;
++  END IF;
++END $$;
++
++INSERT INTO record_type_classification_log (run_label, organization_id, old_record_type, new_record_type, rule, snapshot)
++SELECT p.run_label, s.id, 'REAL', 'DEMO', s.rule, s.snapshot FROM demo_scope s CROSS JOIN demo_params p
++ON CONFLICT (run_label, organization_id) DO UPDATE      -- only after a full 4_rollback.sql
++  SET rule = EXCLUDED.rule, snapshot = EXCLUDED.snapshot, applied_at = now(), rolled_back_at = NULL;
++
++UPDATE organizations o SET record_type = 'DEMO'                -- updated_at intentionally unchanged
++FROM demo_scope s WHERE o.id = s.id AND o.record_type = 'REAL';
++
++INSERT INTO admin_change_history (manufacturer_id, field_changed, old_value, new_value, changed_by, reason)
++SELECT s.id, 'Record type', 'REAL', 'DEMO', NULL,
++       'One-time classification of existing records as demo data (023_existing_manufacturers_demo)'
++FROM demo_scope s;
++
++-- In-transaction checks: abort everything on any mismatch.
++DO $$
++DECLARE v_n int; v_bad int;
++BEGIN
++  SELECT count(*) INTO v_n FROM demo_scope;
++  SELECT count(*) INTO v_bad FROM demo_scope s JOIN organizations o ON o.id = s.id WHERE o.record_type <> 'DEMO';
++  IF v_bad > 0 THEN RAISE EXCEPTION '023 apply: % records did not change', v_bad; END IF;
++  SELECT count(*) INTO v_bad FROM demo_scope s JOIN organizations o ON o.id = s.id
++   WHERE o.status IS DISTINCT FROM s.snapshot->>'status'
++      OR o.verification_status IS DISTINCT FROM s.snapshot->>'verification_status'
++      OR o.created_by_user_id::text IS DISTINCT FROM s.snapshot->>'created_by_user_id'
++      OR o.onboarding_source IS DISTINCT FROM s.snapshot->>'onboarding_source';
++  IF v_bad > 0 THEN RAISE EXCEPTION '023 apply: % records changed more than record_type', v_bad; END IF;
++  SELECT count(*) INTO v_bad FROM organizations o
++   WHERE o.organization_type <> 'manufacturer' AND o.record_type = 'DEMO'
++     AND EXISTS (SELECT 1 FROM demo_scope s WHERE s.id = o.id);
++  IF v_bad > 0 THEN RAISE EXCEPTION '023 apply: non-manufacturer organizations in scope'; END IF;
++  RAISE NOTICE '023 apply OK: % manufacturer records classified DEMO', v_n;
++END $$;
++
++SELECT count(*) AS classified_demo FROM demo_scope;
++
++COMMIT;
+diff --git a/backend/database/backfills/023_demo_classification/3_verify.sql b/backend/database/backfills/023_demo_classification/3_verify.sql
+new file mode 100644
+index 0000000..e8e7997
+--- /dev/null
++++ b/backend/database/backfills/023_demo_classification/3_verify.sql
+@@ -0,0 +1,61 @@
++-- =============================================================================
++-- 023 / 3_verify.sql — READ ONLY. Run after 2_apply.sql, and again after importing real data.
++-- Every "problems_*" column must be 0.
++-- =============================================================================
++
++-- 1. The one-time run
++SELECT run_label, count(*) AS records, min(applied_at) AS applied_at,
++       count(*) FILTER (WHERE rolled_back_at IS NOT NULL) AS rolled_back
++FROM record_type_classification_log GROUP BY run_label;
++
++-- 2. Integrity of the classified records
++SELECT
++  -- every logged record is DEMO now, unless an admin later switched it (that shows in history)
++  (SELECT count(*) FROM record_type_classification_log l JOIN organizations o ON o.id = l.organization_id
++    WHERE l.rolled_back_at IS NULL AND o.record_type <> 'DEMO'
++      AND NOT EXISTS (SELECT 1 FROM admin_change_history h WHERE h.manufacturer_id = l.organization_id
++                      AND h.field_changed = 'Record type' AND h.created_at > l.applied_at
++                      AND h.reason IS DISTINCT FROM
++                          'One-time classification of existing records as demo data (023_existing_manufacturers_demo)'))
++                                                                                                   AS problems_not_demo,
++  -- nothing created after the run was touched by it
++  (SELECT count(*) FROM record_type_classification_log l JOIN organizations o ON o.id = l.organization_id
++    WHERE o.created_at >= l.applied_at)                                                            AS problems_created_after_run,
++  -- research seed imports are never in the run
++  (SELECT count(*) FROM record_type_classification_log l JOIN organizations o ON o.id = l.organization_id
++    WHERE o.source_ref LIKE 'india_mfr_research:%')                                                AS problems_research_rows_logged,
++  -- only manufacturers
++  (SELECT count(*) FROM record_type_classification_log l JOIN organizations o ON o.id = l.organization_id
++    WHERE o.organization_type <> 'manufacturer')                                                   AS problems_non_manufacturer,
++  -- owners / members unchanged since the run (compared with the snapshot)
++  (SELECT count(*) FROM record_type_classification_log l
++    WHERE l.rolled_back_at IS NULL
++      AND l.snapshot->'members' IS DISTINCT FROM coalesce((
++        SELECT jsonb_agg(jsonb_build_object('user_id', m.user_id, 'role', m.membership_role, 'status', m.status)
++                         ORDER BY m.user_id)
++        FROM memberships m WHERE m.organization_id = l.organization_id), '[]'::jsonb))             AS info_members_changed_since,
++  -- approval unchanged since the run
++  (SELECT count(*) FROM record_type_classification_log l
++    WHERE l.rolled_back_at IS NULL
++      AND (SELECT mo.status FROM manufacturer_onboarding mo WHERE mo.organization_id = l.organization_id)
++          IS DISTINCT FROM l.snapshot->>'approval')                                                AS info_approval_changed_since;
++-- (info_* can grow later through normal admin work; right after 2_apply.sql they must be 0.)
++
++-- 3. Nobody outside the admin portal can see demo data
++SELECT
++  (SELECT count(*) FROM organizations o
++    WHERE o.organization_type = 'manufacturer' AND o.record_type <> 'REAL'
++      AND EXISTS (SELECT 1 FROM admin_manufacturer_overview elig WHERE elig.organization_id = o.id
++                  AND elig.record_type = 'REAL' AND elig.onboarding_raw_status = 'approved'
++                  AND elig.completeness >= 100))                                                   AS problems_demo_visible_to_visionaries,
++  (SELECT count(*) FROM organizations o WHERE o.record_type NOT IN ('REAL', 'DEMO', 'TEST'))         AS problems_invalid_values;
++
++-- 4. Current totals (Real should grow only through self-registration, real imports and admin choices)
++SELECT o.record_type, coalesce(o.onboarding_source, '(unknown)') AS onboarding_source, count(*) AS manufacturers
++FROM organizations o WHERE o.organization_type = 'manufacturer'
++GROUP BY 1, 2 ORDER BY 1, 3 DESC;
++
++-- 5. After importing the real research data: those rows are REAL and none was converted
++SELECT count(*) FILTER (WHERE o.record_type = 'REAL') AS research_rows_real,
++       count(*) FILTER (WHERE o.record_type <> 'REAL') AS problems_research_rows_not_real
++FROM organizations o WHERE o.source_ref LIKE 'india_mfr_research:%';
+diff --git a/backend/database/backfills/023_demo_classification/4_rollback.sql b/backend/database/backfills/023_demo_classification/4_rollback.sql
+new file mode 100644
+index 0000000..28de041
+--- /dev/null
++++ b/backend/database/backfills/023_demo_classification/4_rollback.sql
+@@ -0,0 +1,43 @@
++-- =============================================================================
++-- 023 / 4_rollback.sql — undo the one-time DEMO classification (2_apply.sql).
++-- =============================================================================
++-- Restores record_type 'REAL' on exactly the records 2_apply.sql changed, EXCEPT records whose
++-- classification an admin has changed since (their later decision is kept; they are listed).
++-- Nothing is deleted. The log rows are kept and marked rolled_back_at; each restore is also
++-- written to admin_change_history. One transaction.
++--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f 4_rollback.sql
++-- =============================================================================
++BEGIN;
++
++CREATE TEMP TABLE rb ON COMMIT DROP AS
++SELECT l.id AS log_id, l.organization_id, o.record_type AS current_type,
++       EXISTS (SELECT 1 FROM admin_change_history h WHERE h.manufacturer_id = l.organization_id
++               AND h.field_changed = 'Record type' AND h.created_at > l.applied_at
++               AND h.reason IS DISTINCT FROM
++                   'One-time classification of existing records as demo data (023_existing_manufacturers_demo)')
++         AS changed_by_admin_since
++FROM record_type_classification_log l JOIN organizations o ON o.id = l.organization_id
++WHERE l.run_label = '023_existing_manufacturers_demo' AND l.rolled_back_at IS NULL;
++
++DO $$ BEGIN PERFORM 1 FROM organizations o JOIN rb r ON r.organization_id = o.id FOR UPDATE OF o; END $$;
++
++-- Kept as they are (an admin decided since the run)
++SELECT r.organization_id, o.display_name, r.current_type AS kept_record_type
++FROM rb r JOIN organizations o ON o.id = r.organization_id
++WHERE r.changed_by_admin_since OR r.current_type <> 'DEMO';
++
++UPDATE organizations o SET record_type = 'REAL'
++FROM rb r WHERE o.id = r.organization_id AND r.current_type = 'DEMO' AND NOT r.changed_by_admin_since;
++
++INSERT INTO admin_change_history (manufacturer_id, field_changed, old_value, new_value, changed_by, reason)
++SELECT r.organization_id, 'Record type', 'DEMO', 'REAL', NULL,
++       'Rollback of the one-time demo classification (023_existing_manufacturers_demo)'
++FROM rb r WHERE r.current_type = 'DEMO' AND NOT r.changed_by_admin_since;
++
++UPDATE record_type_classification_log l SET rolled_back_at = now() FROM rb r WHERE l.id = r.log_id;
++
++SELECT count(*) FILTER (WHERE current_type = 'DEMO' AND NOT changed_by_admin_since) AS restored_real,
++       count(*) FILTER (WHERE current_type <> 'DEMO' OR changed_by_admin_since) AS kept_admin_decision
++FROM rb;
++
++COMMIT;
+diff --git a/backend/database/migrations/023_record_type_classification.sql b/backend/database/migrations/023_record_type_classification.sql
+new file mode 100644
+index 0000000..aa43270
+--- /dev/null
++++ b/backend/database/migrations/023_record_type_classification.sql
+@@ -0,0 +1,51 @@
++-- 023: Demo vs real manufacturer data. Additive, re-runnable.
++--
++-- Reuses what exists: organizations.record_type (008: 'REAL' | 'DEMO' | 'TEST', NOT NULL,
++-- DEFAULT 'REAL') is the classification. No new column is added. Meaning:
++--   REAL  real manufacturer data. The only records Visionaries can find, view or book
++--         (app/core/eligibility.py) and the only ones counted in real analytics.
++--   DEMO  demonstration data. Kept and inspectable by admins; never shown to Visionaries,
++--         never listed in onboarding company lookup for other users.
++--   TEST  internal test data (existing meaning, same exclusions as DEMO).
++-- It is independent of approval (manufacturer_onboarding.status), verification_status,
++-- onboarding_source, entry_source, profile completeness and ownership (memberships).
++--
++-- Who sets it: self-registration -> column default REAL; CSV import / research seed files /
++-- Admin Entry -> explicit REAL or DEMO; changes afterwards -> administrators / operators only,
++-- with a reason, recorded in admin_change_history.
++--
++-- This migration only (1) re-asserts the column default and constraint, (2) adds the missing
++-- organizations.source_ref column where it is absent (see below), and (3) adds the log
++-- used by the one-time classification of existing records (database/backfills/023_*), so that
++-- run is reviewable, cannot be applied twice, and can be rolled back exactly.
++
++ALTER TABLE organizations ALTER COLUMN record_type SET DEFAULT 'REAL';
++
++-- organizations.source_ref exists in the production / development databases but was never created
++-- by these migrations (schema drift). The research seed files store their stable research id there
++-- ('india_mfr_research:<id>') as their re-run key, and the one-time classification excludes those
++-- rows. No-op where the column already exists.
++ALTER TABLE organizations ADD COLUMN IF NOT EXISTS source_ref TEXT;
++CREATE INDEX IF NOT EXISTS ix_organizations_source_ref ON organizations (source_ref) WHERE source_ref IS NOT NULL;
++DO $$ BEGIN
++  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_org_record_type') THEN
++    ALTER TABLE organizations ADD CONSTRAINT chk_org_record_type CHECK (record_type IN ('REAL', 'DEMO', 'TEST'));
++  END IF;
++END $$;
++COMMENT ON COLUMN organizations.record_type IS
++  'REAL = real manufacturer data (visible to Visionaries when approved and complete); DEMO / TEST = never shown to Visionaries. Independent of approval, onboarding source and ownership. Changed only by administrators / operators (audited in admin_change_history).';
++
++CREATE TABLE IF NOT EXISTS record_type_classification_log (
++  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  run_label        TEXT NOT NULL,                 -- e.g. '023_existing_manufacturers_demo'
++  organization_id  UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
++  old_record_type  TEXT NOT NULL,
++  new_record_type  TEXT NOT NULL,
++  rule             TEXT NOT NULL,                 -- why this record was in scope
++  snapshot         JSONB NOT NULL DEFAULT '{}'::jsonb,  -- status / approval / owners at apply time
++  applied_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
++  rolled_back_at   TIMESTAMPTZ,
++  CONSTRAINT uq_record_type_classification UNIQUE (run_label, organization_id)
++);
++ALTER TABLE record_type_classification_log ENABLE ROW LEVEL SECURITY;
++CREATE INDEX IF NOT EXISTS ix_record_type_classification_org ON record_type_classification_log (organization_id);
+diff --git a/backend/infrastructure/API_CONTRACT.md b/backend/infrastructure/API_CONTRACT.md
+index bece4e4..2ef7d5b 100644
+--- a/backend/infrastructure/API_CONTRACT.md
++++ b/backend/infrastructure/API_CONTRACT.md
+@@ -143,13 +143,14 @@ either a Clerk session token (X!Y account) or an admin session token `xya_...` f
+ | Users (03) | `GET /admin/users?q=&account_status=&onboarding_status=&page=` | onboarding_status also `NO_PROFILE` |
+ | User detail + troubleshooting (03/10) | `GET /admin/users/{id}` | last login, last save, last section, recent failed operations with error reference |
+ | Suspend / reactivate (03) | `POST /admin/users/{id}/suspend` · `/reactivate` `{reason}` | blocks the API + bans in Clerk |
+-| Manufacturer list (04) | `GET /admin/manufacturers?q=&industry=&process=&location=&completeness=&review_status=&record_type=&entry_source=&archived=&assigned=&sort=&page=` | list filters repeat (`record_type=DEMO&record_type=TEST`); archived hidden by default |
++| Manufacturer list (04) | `GET /admin/manufacturers?q=&industry=&process=&location=&completeness=&review_status=&record_type=&entry_source=&archived=&assigned=&sort=&page=` | list filters repeat (`record_type=DEMO&record_type=TEST`); archived hidden by default; response has `recordTypeCounts` `{REAL, DEMO, TEST}` under every other filter (All / Real / Demo tabs) |
+ | Detail (05) | `GET /admin/manufacturers/{id}` | profile, contacts, linked users, notes, history, timeline, required fields |
+ | Edit a response (06) | `PATCH /admin/manufacturers/{id}/fields` `{field, value, reason}` | same validation as onboarding; history keeps old/new value, admin, time, reason |
+-| Review / classification (07/08) | `PATCH /admin/manufacturers/{id}/admin-fields` `{review_status?, assigned_admin_id?, unassign?, record_type?, entry_source?, referral_source?, reason?}` | NEEDS_CORRECTION requires `reason` (also saved as a note) |
++| Review / classification (07/08) | `PATCH /admin/manufacturers/{id}/admin-fields` `{review_status?, assigned_admin_id?, unassign?, record_type?, entry_source?, referral_source?, reason?}` | NEEDS_CORRECTION requires `reason` (also saved as a note); changing `record_type` requires `reason` and the administrator / operator role (403 otherwise), recorded in change history |
+ | Queue (07) | `GET /admin/review-queue?q=&review_status=&assigned=me|unassigned&include_test=` | Submitted first; Reviewed hidden unless filtered |
+ | Notes (07) | `POST /admin/manufacturers/{id}/notes` `{note}` | |
+ | Archive (04/08) | `POST /admin/manufacturers/{id}/archive` · `/restore` `{reason?}`; `POST /admin/manufacturers/archive-batch` `{ids, reason?}` | batch archives DEMO/TEST only |
++| Admin Entry | `POST /admin/manufacturers` `{name, country?, state?, city?, address?, category?, website?, registration_id?, email?, phone?, capacity?, reason?, record_type?: REAL\|DEMO}` | administrators / operators; `409 duplicate_company` or `409 classification_conflict` (matches a record of the other type) with `existingId` |
+ | Analytics (09) | `GET /admin/analytics?from=YYYY-MM-DD&to=&include_test=` | DEMO/TEST excluded by default |
+ | Support (10) | `GET /admin/support/recent-errors` | latest 25 failed operations |
+ 
+diff --git a/backend/tests/test_admin.py b/backend/tests/test_admin.py
+index f6e3b5a..cec5176 100644
+--- a/backend/tests/test_admin.py
++++ b/backend/tests/test_admin.py
+@@ -190,7 +190,8 @@ async def test_record_types_archive_and_metrics(client, no_clerk):
+     before = (await client.get("/admin/overview", headers=admin)).json()["cards"]
+ 
+     r = await client.patch(f"/admin/manufacturers/{demo}/admin-fields", headers=admin,
+-                           json={"record_type": "DEMO", "entry_source": "ADMIN_ASSISTED", "referral_source": "Trade fair"})
++                           json={"record_type": "DEMO", "entry_source": "ADMIN_ASSISTED", "referral_source": "Trade fair",
++                                 "reason": "Sample company for demos"})
+     assert r.json()["manufacturer"]["recordType"] == "DEMO"
+     after = (await client.get("/admin/overview", headers=admin)).json()["cards"]
+     assert after["totalManufacturers"] == before["totalManufacturers"] - 1
+diff --git a/backend/tests/test_demo_real_classification.py b/backend/tests/test_demo_real_classification.py
+new file mode 100644
+index 0000000..3219b6a
+--- /dev/null
++++ b/backend/tests/test_demo_real_classification.py
+@@ -0,0 +1,242 @@
++"""Demo vs real manufacturer data (organizations.record_type): defaults, who may change it, where
++DEMO records are hidden, and how imports / admin entry treat demo-real matches.
++
++Real PostgreSQL through the real HTTP API (E2E_DATABASE_URL)."""
++import os
++import uuid
++from pathlib import Path
++
++import pytest
++
++from test_e2e_local import approve_company, client  # noqa: F401  (shared fixture)
++from test_manufacturer_approval import account, booking_status, complete_profile, eligibility, hdr, own_org, visible
++
++pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
++
++
++def _tag():
++    return uuid.uuid4().hex[:6]
++
++
++async def _role(c, role="platform_administrator"):
++    sub = f"admin_{role[:8]}_{_tag()}"
++    h = hdr(c, sub)
++    assert (await c.get("/identity/me", headers=h)).status_code == 200
++    await c.sql("""INSERT INTO platform_role_assignments (user_id, platform_role)
++                   SELECT id, :r FROM users WHERE clerk_user_id=:s""", r=role, s=sub)
++    return h
++
++
++async def _record_type(c, org):
++    return (await c.sql("SELECT record_type FROM organizations WHERE id=CAST(:o AS uuid)", o=org))[0][0]
++
++
++async def _classify(c, h, org, record_type, reason="Checked with the company"):
++    return await c.patch(f"/admin/manufacturers/{org}/admin-fields", headers=h,
++                         json={"record_type": record_type, "reason": reason})
++
++
++async def _import(rows_csv: str, tmp_path, record_type: str):
++    from app.core.database import SessionFactory
++    from app.import_manufacturers import import_rows, read_rows
++    path = Path(tmp_path) / f"m_{_tag()}.csv"
++    path.write_text(rows_csv)
++    async with SessionFactory() as session:
++        report = await import_rows(session, read_rows(path), reference=path.name, record_type=record_type)
++        await session.commit()
++    return report
++
++
++async def _approved_complete_manufacturer(c, name):
++    sub = f"user_dr_{_tag()}"
++    h = hdr(c, sub)
++    assert (await c.post("/manufacturer/account", headers=h, json=account(name))).status_code == 201
++    org = await own_org(c, sub)
++    await complete_profile(c, h)
++    assert (await approve_company(c, org)).status_code == 200
++    return sub, h, org
++
++
++# ---------------------------------------------------------------- 1. defaults
++async def test_self_registration_creates_real_records(client):  # noqa: F811
++    sub = f"user_self_{_tag()}"
++    h = hdr(client, sub)
++    assert (await client.post("/manufacturer/account", headers=h, json=account(f"Self Reg {_tag()}"))).status_code == 201
++    assert await _record_type(client, await own_org(client, sub)) == "REAL"
++
++
++# ---------------------------------------------------------------- 2. demo is never shown to Visionaries
++async def test_demo_manufacturer_is_hidden_from_visionaries_and_not_bookable(client):  # noqa: F811
++    _, h, org = await _approved_complete_manufacturer(client, f"Visible Cast {_tag()}")
++    assert await visible(client, org) and (await eligibility(client, h))["eligibility"]["visibleToVisionaries"]
++
++    admin = await _role(client)
++    r = await _classify(client, admin, org, "DEMO", "Sample company used for sales demos")
++    assert r.status_code == 200 and r.json()["manufacturer"]["recordType"] == "DEMO"
++    # approval, completeness and ownership are untouched; only visibility changes
++    assert r.json()["manufacturer"]["reviewStatus"] == "REVIEWED" and r.json()["manufacturer"]["completeness"] == 100
++    assert len(r.json()["members"]) == 1
++    assert not await visible(client, org)                        # search list + profile page
++    assert await booking_status(client, org) == 404               # booking / drafts
++    e = (await eligibility(client, h))["eligibility"]
++    assert e["approved"] and e["complete"] and not e["visibleToVisionaries"] and not e["bookingAvailable"]
++
++    # audit trail: who, old -> new, reason
++    hist = await client.sql("""SELECT field_changed, old_value, new_value, reason, changed_by IS NOT NULL
++                               FROM admin_change_history WHERE manufacturer_id=CAST(:o AS uuid)
++                                 AND field_changed='Record type' ORDER BY created_at""", o=org)
++    assert [tuple(x) for x in hist] == [("Record type", "REAL", "DEMO", "Sample company used for sales demos", True)]
++
++    # admins can still inspect it; switching back restores visibility
++    assert (await client.get(f"/admin/manufacturers/{org}", headers=admin)).status_code == 200
++    assert (await _classify(client, admin, org, "REAL", "Confirmed real")).status_code == 200
++    assert await visible(client, org)
++
++
++# ---------------------------------------------------------------- 3. who may change it
++async def test_only_administrators_and_operators_change_classification_with_a_reason(client):  # noqa: F811
++    _, _, org = await _approved_complete_manufacturer(client, f"Guarded Co {_tag()}")
++    for role in ("verification_analyst", "support_specialist"):
++        r = await _classify(client, await _role(client, role), org, "DEMO")
++        assert r.status_code == 403, (role, r.text)
++    operator = await _role(client, "platform_operator")
++    r = await _classify(client, operator, org, "DEMO", reason="  ")
++    assert r.status_code == 422 and "reason" in r.json()["detail"]
++    assert await _record_type(client, org) == "REAL"             # nothing changed by refused requests
++    assert (await _classify(client, operator, org, "DEMO")).status_code == 200
++    assert await _record_type(client, org) == "DEMO"
++    # other admin fields stay open to every admin role (unchanged behaviour)
++    analyst = await _role(client, "verification_analyst")
++    r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=analyst,
++                           json={"referral_source": "Trade fair"})
++    assert r.status_code == 200
++
++
++# ---------------------------------------------------------------- 4. onboarding company lookup
++async def test_onboarding_lookup_hides_demo_companies_except_your_own(client, tmp_path):  # noqa: F811
++    t = _tag()
++    rep = await _import(f"name,country,city\nLookup Demo {t},India,Hosur\nLookup Real {t},India,Hosur\n",
++                        tmp_path, "DEMO")
++    demo_id = rep.inserted[0][2]
++    rep2 = await _import(f"name,country,city\nLookup Real {t},India,Hosur\n", tmp_path, "REAL")
++    assert rep2.conflicts and rep2.conflicts[0][4] == "DEMO" and not rep2.inserted   # same company as a DEMO row
++    rep3 = await _import(f"name,country,city\nLookup Other {t},India,Chennai\n", tmp_path, "REAL")
++    real_id = rep3.inserted[0][2]
++
++    other = hdr(client, f"user_lk_{_tag()}")
++    found = {i["id"] for i in (await client.get("/manufacturer/companies/search", headers=other,
++                                                params={"q": f"Lookup"})).json()["items"]}
++    assert real_id in found and demo_id not in found
++    assert (await client.get(f"/manufacturer/companies/{demo_id}", headers=other)).status_code == 404
++    r = await client.post("/manufacturer/account", headers=other,
++                          json=account(f"Lookup Demo {t}", companyId=demo_id))
++    assert r.status_code in (404, 409, 422), r.text            # a DEMO record cannot be claimed / selected
++
++    # an owner whose approved company was classified DEMO keeps access to it; others no longer see it
++    _, h, mine = await _approved_complete_manufacturer(client, f"Own Demo {t}")
++    assert (await client.get(f"/manufacturer/companies/{mine}", headers=other)).status_code == 200
++    assert (await _classify(client, await _role(client), mine, "DEMO")).status_code == 200
++    assert (await client.get(f"/manufacturer/companies/{mine}", headers=h)).json()["access"] == "owner"
++    assert (await client.get(f"/manufacturer/companies/{mine}", headers=other)).status_code == 404
++    mine_found = (await client.get("/manufacturer/companies/search", headers=h, params={"q": f"Own Demo {t}"})).json()
++    assert [i["id"] for i in mine_found["items"]] == [mine]
++    assert (await client.get("/manufacturer/bootstrap", headers=h)).status_code == 200
++
++
++# ---------------------------------------------------------------- 5. imports
++async def test_import_sets_the_chosen_type_and_never_converts_the_other_type(client, tmp_path):  # noqa: F811
++    t = _tag()
++    row = f"name,country,city,website\nImport Twin {t},India,Coimbatore,https://twin{t}.example\n"
++    demo = await _import(row, tmp_path, "DEMO")
++    demo_id = demo.inserted[0][2]
++    assert await _record_type(client, demo_id) == "DEMO"
++
++    real = await _import(row, tmp_path, "REAL")                   # same company, real data
++    assert real.inserted == [] and real.present == []
++    assert [(c[2], c[4]) for c in real.conflicts] == [(demo_id, "DEMO")]
++    assert await _record_type(client, demo_id) == "DEMO"          # existing record untouched
++    count = await client.sql("SELECT count(*) FROM organizations WHERE display_name=:n", n=f"Import Twin {t}")
++    assert count[0][0] == 1                                       # no second copy
++
++    fresh = await _import(f"name,country,city\nImport Fresh {t},India,Madurai\n", tmp_path, "REAL")
++    fresh_id = fresh.inserted[0][2]
++    assert await _record_type(client, fresh_id) == "REAL"
++    again = await _import(f"name,country,city\nImport Fresh {t},India,Madurai\n", tmp_path, "REAL")
++    assert again.inserted == [] and [p[2] for p in again.present] == [fresh_id]   # existing dedup rule
++    events = await client.sql("""SELECT details->>'record_type' FROM manufacturer_submission_events
++                                 WHERE organization_id=CAST(:o AS uuid) AND event='imported'""", o=fresh_id)
++    assert [e[0] for e in events] == ["REAL"]
++
++    # a company present as both REAL and DEMO is a plain duplicate for a REAL import (no conflict)
++    blocked = await _import(f"name,country,city\nBoth Kinds {t},India,Salem\n", tmp_path, "DEMO")
++    twin_real = await _import(f"name,country,city\nBoth Kinds {t},India,Salem\n", tmp_path, "REAL")
++    assert blocked.inserted and twin_real.conflicts and not twin_real.inserted   # REAL vs earlier DEMO: conflict
++    demo_twin = blocked.inserted[0][2]
++    real_twin = str(uuid.uuid4())                                  # an older REAL copy loaded outside the importer
++    await client.sql("""INSERT INTO organizations (id, display_name, organization_type, status, entry_source, record_type)
++                        VALUES (CAST(:i AS uuid), :n, 'manufacturer', 'claim_pending', 'IMPORTED', 'REAL')""",
++                     i=real_twin, n=f"Both Kinds {t}")
++    await client.sql("""INSERT INTO facilities (organization_id, name, is_headquarters, city, country_name)
++                        VALUES (CAST(:i AS uuid), 'HQ', true, 'Salem', 'India')""", i=real_twin)
++    both = await _import(f"name,country,city\nBoth Kinds {t},India,Salem\n", tmp_path, "REAL")
++    assert both.conflicts == [] and [p[2] for p in both.present] == [real_twin]   # same-type match wins
++    assert await _record_type(client, demo_twin) == "DEMO"
++
++    # archived demo sample data no longer blocks the real import
++    admin = await _role(client)
++    assert (await client.post(f"/admin/manufacturers/{demo_id}/archive", headers=admin,
++                              json={"reason": "unrelated sample"})).status_code == 200
++    real2 = await _import(row, tmp_path, "REAL")
++    assert len(real2.inserted) == 1 and await _record_type(client, real2.inserted[0][2]) == "REAL"
++
++
++async def test_import_requires_an_explicit_record_type(tmp_path):
++    from app.import_manufacturers import import_rows, main
++    path = Path(tmp_path) / "x.csv"
++    path.write_text("name\nX\n")
++    with pytest.raises(SystemExit) as exc:
++        await main([str(path), "--dry-run"])                         # --record-type is required
++    assert exc.value.code == 2
++    with pytest.raises(ValueError):
++        await import_rows(None, [], record_type="TEST")
++
++
++# ---------------------------------------------------------------- 6. admin entry
++async def test_admin_entry_chooses_real_or_demo_and_reports_conflicts(client):  # noqa: F811
++    admin = await _role(client)
++    t = _tag()
++    base = {"name": f"Entry Twin {t}", "country": "India", "city": "Hosur", "reason": "Sales demo"}
++    r = await client.post("/admin/manufacturers", headers=admin, json={**base, "record_type": "DEMO"})
++    assert r.status_code == 201 and r.json()["manufacturer"]["recordType"] == "DEMO"
++    demo_id = r.json()["manufacturer"]["id"]
++    r = await client.post("/admin/manufacturers", headers=admin, json={**base, "record_type": "REAL"})
++    assert r.status_code == 409 and r.json()["code"] == "classification_conflict" and r.json()["existingId"] == demo_id
++    r = await client.post("/admin/manufacturers", headers=admin,
++                          json={**base, "name": f"Entry Real {t}", "record_type": "REAL"})
++    assert r.status_code == 201 and r.json()["manufacturer"]["recordType"] == "REAL"
++    r = await client.post("/admin/manufacturers", headers=admin, json={**base, "name": f"Entry Default {t}"})
++    assert r.json()["manufacturer"]["recordType"] == "REAL"        # API default stays REAL
++    r = await client.post("/admin/manufacturers", headers=admin, json={**base, "name": f"X {t}", "record_type": "TEST"})
++    assert r.status_code == 422
++
++
++# ---------------------------------------------------------------- 7. admin list tabs
++async def test_admin_list_tabs_counts_search_and_pagination(client, tmp_path):  # noqa: F811
++    t = _tag()
++    await _import("name,country,city\n" + "".join(f"Tab Real {t} {i},India,City{i}\n" for i in range(3)),
++                  tmp_path, "REAL")
++    await _import("name,country,city\n" + "".join(f"Tab Demo {t} {i},India,City{i}\n" for i in range(2)),
++                  tmp_path, "DEMO")
++    admin = await _role(client, "support_specialist")              # any admin can view
++    allr = (await client.get("/admin/manufacturers", headers=admin, params={"q": f"Tab % {t}"})).json()
++    assert allr["total"] == 5 and allr["recordTypeCounts"] == {"REAL": 3, "DEMO": 2, "TEST": 0}
++    real = (await client.get("/admin/manufacturers", headers=admin,
++                             params={"q": f"{t}", "record_type": "REAL", "page_size": 5})).json()
++    assert real["total"] == 3 and {r["recordType"] for r in real["rows"]} == {"REAL"}
++    assert real["recordTypeCounts"] == {"REAL": 3, "DEMO": 2, "TEST": 0}   # counts ignore the tab itself
++    demo = (await client.get("/admin/manufacturers", headers=admin,
++                             params={"q": f"{t}", "record_type": ["DEMO", "TEST"], "page_size": 5})).json()
++    assert demo["total"] == 2 and {r["recordType"] for r in demo["rows"]} == {"DEMO"}
++    page2 = (await client.get("/admin/manufacturers", headers=admin,
++                              params={"q": f"{t}", "page_size": 5, "page": 2})).json()
++    assert page2["rows"] == [] and page2["total"] == 5
+diff --git a/frontend/src/app/admin/admin.css b/frontend/src/app/admin/admin.css
+index ff89aaf..a02fa13 100644
+--- a/frontend/src/app/admin/admin.css
++++ b/frontend/src/app/admin/admin.css
+@@ -939,3 +939,11 @@
+ .adm-root .adm-w-ru-open { width: 84px; }
+ .adm-root .adm-ru-table { min-width: 720px; }
+ .adm-root .adm-ru-table code.adm-code { font-size: 11.5px; }
++
++/* Real / demo data: list tabs above the toolbar, and the classification control on the detail page */
++.adm-root .adm-record-tabs { margin-bottom: 12px; }
++.adm-root .adm-align-end { display: flex; align-items: flex-end; }
++.adm-root .adm-record-choice { border: 1px solid var(--slate-200); border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
++.adm-root .adm-record-choice legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
++.adm-root .adm-radio { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 6px 0; cursor: pointer; }
++.adm-root .adm-radio input { margin-top: 3px; }
+diff --git a/frontend/src/components/admin/AddCompany.tsx b/frontend/src/components/admin/AddCompany.tsx
+index 4d355e5..9ae7335 100644
+--- a/frontend/src/components/admin/AddCompany.tsx
++++ b/frontend/src/components/admin/AddCompany.tsx
+@@ -41,24 +41,28 @@ export function AddCompanyModal({ onClose }: { onClose: () => void }) {
+   const [err, setErr] = useState("");
+   const [existingId, setExistingId] = useState<string | null>(null);
+   const [busy, setBusy] = useState(false);
++  // Real or Demo data: an explicit choice every time (no default), as for bulk imports.
++  const [recordType, setRecordType] = useState<"REAL" | "DEMO" | "">("");
+ 
+   async function submit() {
+     if (!(values.name ?? "").trim()) return setErr("Enter the company name.");
++    if (!recordType) return setErr("Choose whether this is a real company or demo data.");
+     if (values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) return setErr("Enter a valid email address.");
+     setBusy(true);
+     setErr("");
+     setExistingId(null);
+     try {
+-      const body = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()]));
++      const body = { ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()])), record_type: recordType };
+       const detail = await call<ManufacturerDetail>("/manufacturers", {
+         ...jsonBody("POST", body),
+         headers: { "Idempotency-Key": idempotencyKey },
+       });
+-      toast("Company added — source: Admin Entry");
++      toast(`${recordType === "DEMO" ? "Demo" : "Real"} company added — source: Admin Entry`);
+       go(`/admin/manufacturers/${detail.manufacturer.id}`);
+     } catch (e) {
+       setErr(e instanceof Error ? e.message : "Could not add the company.");
+-      if (e instanceof ApiError && e.code === "duplicate_company" && typeof e.data?.existingId === "string") {
++      if (e instanceof ApiError && (e.code === "duplicate_company" || e.code === "classification_conflict")
++          && typeof e.data?.existingId === "string") {
+         setExistingId(e.data.existingId);
+       }
+       setBusy(false);
+@@ -71,6 +75,23 @@ export function AddCompanyModal({ onClose }: { onClose: () => void }) {
+         Adds a manufacturer company to X!Y. It is recorded as <b>Admin Entry</b>, has no owner, and is not approved: it
+         becomes visible to Visionaries only after approval and a complete profile. A user can later claim it.
+       </p>
++      <fieldset className="adm-record-choice">
++        <legend>
++          Real or demo data <span className="adm-req">*</span>
++        </legend>
++        <label className="adm-radio">
++          <input type="radio" name="add-record-type" value="REAL" checked={recordType === "REAL"} onChange={() => setRecordType("REAL")} />
++          <span>
++            <b>Real company</b> — can become visible to Visionaries after approval and a complete profile
++          </span>
++        </label>
++        <label className="adm-radio">
++          <input type="radio" name="add-record-type" value="DEMO" checked={recordType === "DEMO"} onChange={() => setRecordType("DEMO")} />
++          <span>
++            <b>Demo data</b> — for testing and demonstrations; never shown to Visionaries
++          </span>
++        </label>
++      </fieldset>
+       <div className="adm-add-company-grid">
+         {FIELDS.map((f) => (
+           <div key={f.key} className={f.key === "reason" || f.key === "address" ? "adm-span-2" : undefined}>
+diff --git a/frontend/src/components/admin/ManufacturerDetail.tsx b/frontend/src/components/admin/ManufacturerDetail.tsx
+index 94a00b9..acc1520 100644
+--- a/frontend/src/components/admin/ManufacturerDetail.tsx
++++ b/frontend/src/components/admin/ManufacturerDetail.tsx
+@@ -37,6 +37,7 @@ import {
+   RECORD_ORDER,
+   REVIEW_LABELS,
+   REVIEW_ORDER,
++  CLASSIFY_ROLES,
+   fmtAgo,
+   fmtDate,
+   fmtDateTime,
+@@ -658,6 +659,10 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
+   const [status, setStatus] = useState<ReviewStatus>(m.reviewStatus);
+   const [statusReason, setStatusReason] = useState("");
+   const [recordType, setRecordType] = useState<RecordType>(m.recordType);
++  const [classifyOpen, setClassifyOpen] = useState(false);
++  const [classifyReason, setClassifyReason] = useState("");
++  // Real / Demo is decided by administrators and operators only (the backend enforces the same).
++  const canClassify = !!me?.roles.some((r) => CLASSIFY_ROLES.includes(r));
+   const [entrySource, setEntrySource] = useState<EntrySource>(m.entrySource);
+   const [referral, setReferral] = useState(m.referralSource ?? "");
+   const [note, setNote] = useState("");
+@@ -926,18 +931,84 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
+           {err?.where === "assign" && <p className="field-error">{err.msg}</p>}
+         </Section>
+ 
+-        <Section title="Record classification">
+-          <div className="form-grid adm-form-2">
+-            <div>
+-              <label htmlFor="rv-record">Record type</label>
+-              <select id="rv-record" value={recordType} onChange={(e) => setRecordType(e.target.value as RecordType)}>
+-                {RECORD_ORDER.map((r) => (
+-                  <option key={r} value={r}>
+-                    {RECORD_LABELS[r]}
+-                  </option>
+-                ))}
+-              </select>
++        <Section title="Real or demo data">
++          <div className="adm-badge-row">
++            <RecordBadge type={m.recordType} />
++            <span className="adm-muted">
++              {m.recordType === "REAL"
++                ? "Real manufacturer data: Visionaries can find it once it is approved and 100% complete."
++                : "Not real data: never shown to Visionaries, never bookable, left out of real totals and analytics."}
++            </span>
++          </div>
++          <p className="field-hint">
++            Separate from approval, onboarding source, profile completeness and ownership — changing it changes none of these.
++          </p>
++          {canClassify ? (
++            <div className="form-grid adm-form-2">
++              <div>
++                <label htmlFor="rv-record">Change to</label>
++                <select id="rv-record" value={recordType} onChange={(e) => setRecordType(e.target.value as RecordType)}>
++                  {RECORD_ORDER.map((r) => (
++                    <option key={r} value={r}>
++                      {RECORD_LABELS[r]}
++                    </option>
++                  ))}
++                </select>
++              </div>
++              <div className="adm-align-end">
++                <button
++                  type="button"
++                  className="btn-primary adm-btn-sm"
++                  disabled={busy !== null || recordType === m.recordType}
++                  onClick={() => {
++                    setClassifyReason("");
++                    setClassifyOpen(true);
++                  }}
++                >
++                  Change classification…
++                </button>
++              </div>
+             </div>
++          ) : (
++            <p className="field-hint">Only administrators and operators can change whether a company is real or demo data.</p>
++          )}
++          {err?.where === "classify" && <p className="field-error">{err.msg}</p>}
++        </Section>
++
++        {classifyOpen && (
++          <Modal title={`Mark as ${RECORD_LABELS[recordType]} data`} onClose={() => setClassifyOpen(false)}>
++            <p className="adm-modal-text">
++              {recordType === "REAL"
++                ? `${m.companyName || "This company"} will count as real manufacturer data. It becomes visible to Visionaries only if it is approved and its profile is 100% complete.`
++                : `${m.companyName || "This company"} will be hidden from Visionaries — search, profile pages and new manufacturing requests — and left out of real totals and analytics. Its owners, approval and data are not changed, and admins can still open it.`}
++            </p>
++            <label htmlFor="classify-reason">Reason (saved in the change history)</label>
++            <textarea id="classify-reason" rows={2} value={classifyReason} onChange={(e) => setClassifyReason(e.target.value)} />
++            <div className="modal-actions">
++              <button type="button" className="btn-secondary-full" onClick={() => setClassifyOpen(false)}>
++                Cancel
++              </button>
++              <button
++                type="button"
++                className="btn-primary"
++                disabled={busy !== null || !classifyReason.trim()}
++                onClick={async () => {
++                  const ok = await patch(
++                    "classify",
++                    { record_type: recordType, reason: classifyReason.trim() },
++                    `Marked as ${RECORD_LABELS[recordType]} data`,
++                  );
++                  if (ok) setClassifyOpen(false);
++                }}
++              >
++                {busy === "classify" ? "Saving…" : `Mark as ${RECORD_LABELS[recordType]}`}
++              </button>
++            </div>
++          </Modal>
++        )}
++
++        <Section title="Entry source and referral">
++          <div className="form-grid adm-form-2">
+             <div>
+               <label htmlFor="rv-entry">Entry source</label>
+               <select id="rv-entry" value={entrySource} onChange={(e) => setEntrySource(e.target.value as EntrySource)}>
+@@ -959,7 +1030,6 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
+               />
+             </div>
+           </div>
+-          <p className="field-hint">Demo and test records are excluded from totals and analytics.</p>
+           {err?.where === "record" && <p className="field-error">{err.msg}</p>}
+           <div className="adm-btn-row">
+             <button
+@@ -967,13 +1037,12 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
+               className="btn-primary adm-btn-sm"
+               disabled={
+                 busy !== null ||
+-                (recordType === m.recordType && entrySource === m.entrySource && referral.trim() === (m.referralSource ?? ""))
++                (entrySource === m.entrySource && referral.trim() === (m.referralSource ?? ""))
+               }
+               onClick={() =>
+                 void patch(
+                   "record",
+                   {
+-                    ...(recordType !== m.recordType ? { record_type: recordType } : {}),
+                     ...(entrySource !== m.entrySource ? { entry_source: entrySource } : {}),
+                     ...(referral.trim() !== (m.referralSource ?? "") ? { referral_source: referral.trim() } : {}),
+                   },
+diff --git a/frontend/src/components/admin/Manufacturers.tsx b/frontend/src/components/admin/Manufacturers.tsx
+index 54c0847..c11688a 100644
+--- a/frontend/src/components/admin/Manufacturers.tsx
++++ b/frontend/src/components/admin/Manufacturers.tsx
+@@ -27,6 +27,7 @@ import {
+   ENTRY_ORDER,
+   RECORD_LABELS,
+   RECORD_ORDER,
++  RECORD_TABS,
+   REVIEW_LABELS,
+   REVIEW_ORDER,
+   fmtAgo,
+@@ -41,7 +42,7 @@ export function Manufacturers() {
+   const toast = useToast();
+   const f = useUrlFilters("/admin/manufacturers");
+   const [showFilters, setShowFilters] = useState(() =>
+-    ["industry", "process", "location", "completeness", "review_status", "record_type", "entry_source", "archived", "assigned"].some(
++    ["industry", "process", "location", "completeness", "review_status", "entry_source", "archived", "assigned"].some(
+       (k) => f.search.has(k),
+     ),
+   );
+@@ -75,10 +76,16 @@ export function Manufacturers() {
+   const setFilters = f.set;
+   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
+ 
++  // All / Real / Demo tabs drive the same record_type filter as the filter pills.
++  const sameTypes = (a: string[], b: string[]) => a.length === b.length && a.every((t) => b.includes(t));
++  const activeTab = RECORD_TABS.find((t) => sameTypes(t.types, params.record_type))?.key ?? null;
++  const counts = data?.recordTypeCounts;
++  const tabCount = (types: string[]) =>
++    counts ? (types.length ? types : Object.keys(counts)).reduce((n, t) => n + (counts[t as RecordType] ?? 0), 0) : null;
+   const activeFilterCount =
+     [params.industry, params.process, params.location, params.completeness, params.assigned].filter(Boolean).length +
+     params.review_status.length +
+-    params.record_type.length +
++    (activeTab === null ? params.record_type.length : 0) +
+     params.entry_source.length +
+     (params.archived !== "active" ? 1 : 0);
+ 
+@@ -120,7 +127,7 @@ export function Manufacturers() {
+     <>
+       <PageHeader
+         title="Manufacturers"
+-        subtitle="Search and filter manufacturer records. Archived records are hidden unless you choose to show them."
++        subtitle="Search and filter manufacturer records. Real records are what Visionaries can find; demo records are kept for testing and never shown to them. Archived records are hidden unless you choose to show them."
+         actions={canAdd ? (
+           <button type="button" className="btn-primary adm-btn-md" onClick={() => setAdding(true)}>
+             <Plus size={15} /> Add company
+@@ -129,6 +136,26 @@ export function Manufacturers() {
+       />
+       {adding && <AddCompanyModal onClose={() => setAdding(false)} />}
+ 
++      <div className="adm-tabs adm-record-tabs" role="tablist" aria-label="Real or demo records">
++        {RECORD_TABS.map((t) => {
++          const n = tabCount(t.types);
++          return (
++            <button
++              key={t.key}
++              type="button"
++              role="tab"
++              aria-selected={activeTab === t.key}
++              aria-label={n !== null ? `${t.label} (${n})` : t.label}
++              className={`adm-tab${activeTab === t.key ? " active" : ""}`}
++              onClick={() => f.set({ record_type: t.types })}
++            >
++              {t.label}
++              {n !== null && <span className="adm-tab-count">{n}</span>}
++            </button>
++          );
++        })}
++      </div>
++
+       <div className="card adm-toolbar">
+         <div className="adm-toolbar-row">
+           <SearchInput value={params.q} onCommit={commitSearch} placeholder="Search company, contact or email" />
+@@ -425,7 +452,7 @@ function Row({
+             <button type="button" className="adm-link adm-truncate" title={name} onClick={() => onOpen()}>
+               {name}
+             </button>
+-            <RecordBadge type={r.recordType} hideReal />
++            <RecordBadge type={r.recordType} />
+             {r.isArchived && <span className="badge badge-neutral">Archived</span>}
+           </div>
+           {(r.location || r.industry) && (
+diff --git a/frontend/src/lib/admin/format.ts b/frontend/src/lib/admin/format.ts
+index 1d53f71..b0a5646 100644
+--- a/frontend/src/lib/admin/format.ts
++++ b/frontend/src/lib/admin/format.ts
+@@ -110,9 +110,20 @@ export function reviewTone(status: ReviewStatus): string {
+ }
+ 
+ export function recordTone(type: RecordType): string {
+-  return type === "REAL" ? "badge-neutral" : "badge-purple";
++  // Real = blue, Demo / Test = purple: always distinguishable at a glance.
++  return type === "REAL" ? "badge-info" : "badge-purple";
+ }
+ 
++/** Admin roles that may change a company's Real / Demo classification (the backend checks the same). */
++export const CLASSIFY_ROLES = ["platform_administrator", "platform_operator"];
++
++/** Manufacturer list tabs: Demo also holds Test records (neither is real data). */
++export const RECORD_TABS: { key: "all" | "real" | "demo"; label: string; types: RecordType[] }[] = [
++  { key: "all", label: "All", types: [] },
++  { key: "real", label: "Real", types: ["REAL"] },
++  { key: "demo", label: "Demo", types: ["DEMO", "TEST"] },
++];
++
+ export function accountTone(status: AccountStatus): string {
+   return status === "active" ? "badge-verified" : status === "suspended" ? "badge-rejected" : "badge-neutral";
+ }
+diff --git a/frontend/src/lib/admin/types.ts b/frontend/src/lib/admin/types.ts
+index d794544..b4e9f56 100644
+--- a/frontend/src/lib/admin/types.ts
++++ b/frontend/src/lib/admin/types.ts
+@@ -113,6 +113,8 @@ export type ManufacturerList = {
+   pageSize: number;
+   rows: ManufacturerRow[];
+   facets: { industries: string[]; countries: string[] };
++  /** Records per type under every other active filter (All / Real / Demo tab counts). */
++  recordTypeCounts?: Record<RecordType, number>;
+ };
+ 
+ export type Certification = { name: string; body: string; fileName: string; status: string };
+diff --git a/frontend/tests/admin-demo-real.test.tsx b/frontend/tests/admin-demo-real.test.tsx
+new file mode 100644
+index 0000000..412900e
+--- /dev/null
++++ b/frontend/tests/admin-demo-real.test.tsx
+@@ -0,0 +1,144 @@
++/** Real vs demo manufacturer data in the admin portal: All / Real / Demo tabs with counts, a Real or
++ * Demo badge on every row, and the confirmed, reasoned classification change (administrators and
++ * operators only). The detail data is a real backend response (tests/fixtures/admin-detail-update-request.json). */
++import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import detailFixture from "./fixtures/admin-detail-update-request.json";
++import { ManufacturerDetail } from "@/components/admin/ManufacturerDetail";
++import { Manufacturers } from "@/components/admin/Manufacturers";
++import { AdminHostContext, type AdminHost } from "@/lib/admin/api";
++
++const me = vi.hoisted(() => ({ current: null as null | { id: string; roles: string[] } }));
++const toasts = vi.hoisted(() => [] as string[]);
++vi.mock("@/components/admin/AdminShell", () => ({
++  useToast: () => (m: string) => { toasts.push(m); },
++  useAdminMe: () => me.current,
++}));
++
++beforeEach(() => { toasts.length = 0; });
++afterEach(() => vi.unstubAllGlobals());
++
++function host(path: string, search = ""): AdminHost & { went: string[] } {
++  const went: string[] = [];
++  return {
++    ready: true, path, search: new URLSearchParams(search), go: (h: string) => { went.push(h); },
++    getClerkToken: async () => "t", clerkEmail: null, clerkSignIn: async () => ({ ok: true }),
++    clerkVerifyCode: async () => ({ ok: true }), clerkSignOut: async () => undefined, went,
++  } as unknown as AdminHost & { went: string[] };
++}
++
++const ROW = {
++  contactName: null, contactEmail: null, contactPhone: null, industry: "Metal", country: "India", city: "Hosur",
++  location: "Hosur, India", majorProcess: null, listingCount: 0, completeness: 50, requiredDone: 7, requiredTotal: 14,
++  entrySource: "IMPORTED", referralSource: null, assignedAdminId: null, isArchived: false, archivedAt: null,
++  registeredAt: "2026-10-01T00:00:00Z", lastUpdated: "2026-10-01T00:00:00Z", lastSeenAt: null, ownerUserId: null,
++  attentionReason: null, missingFields: [], sections: [], stoppedAt: null, lastCompletedSection: null, linkedUsers: 0,
++  request: null, reviewStatus: "NOT_STARTED", onboardingSource: "database_import",
++};
++
++function serveList(counts = { REAL: 12, DEMO: 5, TEST: 1 }) {
++  const urls: string[] = [];
++  vi.stubGlobal("fetch", async (url: string) => {
++    urls.push(String(url));
++    return new Response(JSON.stringify({
++      total: 2, page: 1, pageSize: 25, facets: { industries: [], countries: [] }, recordTypeCounts: counts,
++      rows: [{ ...ROW, id: "r1", companyName: "Real Forge", recordType: "REAL" },
++             { ...ROW, id: "d1", companyName: "Demo Forge", recordType: "DEMO" }],
++    }), { status: 200 });
++  });
++  return urls;
++}
++
++describe("Manufacturers list: All / Real / Demo", () => {
++  it("shows a Real or Demo badge on every row and counts on each tab", async () => {
++    me.current = { id: "a", roles: ["support_specialist"] };
++    serveList();
++    render(<AdminHostContext.Provider value={host("/admin/manufacturers")}><Manufacturers /></AdminHostContext.Provider>);
++    expect(within((await screen.findByText("Real Forge")).closest("tr")!).getByText("Real")).toHaveClass("badge-info");
++    expect(within(screen.getByText("Demo Forge").closest("tr")!).getByText("Demo")).toHaveClass("badge-purple");
++    const tabs = within(screen.getByRole("tablist", { name: /Real or demo/ }));
++    expect(tabs.getByRole("tab", { name: "All (18)" })).toHaveAttribute("aria-selected", "true");
++    expect(tabs.getByRole("tab", { name: "Real (12)" })).toHaveAttribute("aria-selected", "false");
++    expect(tabs.getByRole("tab", { name: "Demo (6)" })).toBeInTheDocument();   // demo + test
++  });
++
++  it("tabs set the record type filter (page reset, other filters kept) and the API is asked for that type", async () => {
++    serveList();
++    const h = host("/admin/manufacturers", "q=forge&page=3");
++    render(<AdminHostContext.Provider value={h}><Manufacturers /></AdminHostContext.Provider>);
++    await screen.findByText("Real Forge");
++    fireEvent.click(screen.getByRole("tab", { name: /^Demo/ }));
++    expect(h.went.at(-1)).toBe("/admin/manufacturers?q=forge&record_type=DEMO&record_type=TEST");
++    fireEvent.click(screen.getByRole("tab", { name: /^All/ }));
++    expect(h.went.at(-1)).toBe("/admin/manufacturers?q=forge");
++  });
++
++  it("the selected tab follows the URL and its filter reaches the API", async () => {
++    const urls = serveList();
++    render(<AdminHostContext.Provider value={host("/admin/manufacturers", "record_type=REAL")}><Manufacturers /></AdminHostContext.Provider>);
++    await screen.findByText("Real Forge");
++    expect(screen.getByRole("tab", { name: /^Real/ })).toHaveAttribute("aria-selected", "true");
++    expect(urls[0]).toContain("record_type=REAL");
++    expect(screen.getByRole("button", { name: /^Filters$/ })).toBeInTheDocument();     // a tab is not counted as a filter
++  });
++});
++
++describe("Manufacturer detail: changing Real / Demo", () => {
++  const ORG = detailFixture.manufacturer.id as string;
++
++  function serveDetail(onPatch: (body: Record<string, unknown>) => [unknown, number]) {
++    const calls: { method: string; body: Record<string, unknown> | null }[] = [];
++    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
++      const method = init.method ?? "GET";
++      const body = init.body ? JSON.parse(String(init.body)) : null;
++      calls.push({ method, body });
++      if (method === "PATCH" && String(url).endsWith("/admin-fields")) {
++        const [reply, status] = onPatch(body);
++        return new Response(JSON.stringify(reply), { status });
++      }
++      return new Response(JSON.stringify(detailFixture), { status: 200 });
++    });
++    render(<AdminHostContext.Provider value={host(`/admin/manufacturers/${ORG}`, "tab=onboarding")}>
++      <ManufacturerDetail id={ORG} />
++    </AdminHostContext.Provider>);
++    return calls;
++  }
++
++  it("administrators confirm with a required reason; only record_type and the reason are sent", async () => {
++    me.current = { id: "a", roles: ["platform_administrator"] };
++    const demo = { ...detailFixture, manufacturer: { ...detailFixture.manufacturer, recordType: "DEMO" } };
++    const calls = serveDetail(() => [demo, 200]);
++    const select = await screen.findByLabelText("Change to");
++    fireEvent.change(select, { target: { value: "DEMO" } });
++    fireEvent.click(screen.getByRole("button", { name: "Change classification…" }));
++    const dialog = within(screen.getByRole("dialog"));
++    expect(dialog.getByText(/hidden from Visionaries/)).toBeInTheDocument();
++    const confirm = dialog.getByRole("button", { name: "Mark as Demo" });
++    expect(confirm).toBeDisabled();                                       // reason required
++    fireEvent.change(dialog.getByLabelText(/Reason/), { target: { value: "Sample data for sales demos" } });
++    await act(async () => fireEvent.click(confirm));
++    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
++    const patch = calls.filter((c) => c.method === "PATCH");
++    expect(patch.map((c) => c.body)).toEqual([{ record_type: "DEMO", reason: "Sample data for sales demos" }]);
++    expect(toasts).toContain("Marked as Demo data");
++  });
++
++  it("a refusal from the backend is shown and nothing else is sent", async () => {
++    me.current = { id: "a", roles: ["platform_operator"] };
++    serveDetail(() => [{ detail: "Only administrators and operators can change whether a company is real or demo data." }, 403]);
++    fireEvent.change(await screen.findByLabelText("Change to"), { target: { value: "DEMO" } });
++    fireEvent.click(screen.getByRole("button", { name: "Change classification…" }));
++    const dialog = within(screen.getByRole("dialog"));
++    fireEvent.change(dialog.getByLabelText(/Reason/), { target: { value: "x" } });
++    await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Mark as Demo" })));
++    expect(await screen.findByText(/Only administrators and operators/)).toBeInTheDocument();
++  });
++
++  it("support and verification roles see the classification but cannot change it", async () => {
++    me.current = { id: "a", roles: ["verification_analyst"] };
++    serveDetail(() => [{}, 500]);
++    expect(await screen.findByText(/Only administrators and operators can change/)).toBeInTheDocument();
++    expect(screen.queryByLabelText("Change to")).toBeNull();
++    expect(screen.queryByRole("button", { name: "Change classification…" })).toBeNull();
++  });
++});
+diff --git a/frontend/tests/admin-entry.test.tsx b/frontend/tests/admin-entry.test.tsx
+index daf61ee..814d7e7 100644
+--- a/frontend/tests/admin-entry.test.tsx
++++ b/frontend/tests/admin-entry.test.tsx
+@@ -70,6 +70,9 @@ describe("Add company form", () => {
+     fireEvent.click(screen.getByRole("button", { name: "Add company" }));
+     expect(screen.getByText("Enter the company name.")).toBeInTheDocument();
+     fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Acme" } });
++    fireEvent.click(screen.getByRole("button", { name: "Add company" }));
++    expect(screen.getByText(/Choose whether this is a real company or demo data/)).toBeInTheDocument();
++    fireEvent.click(screen.getByLabelText(/Real company/));
+     fireEvent.change(screen.getByLabelText(/Contact email/), { target: { value: "not-an-email" } });
+     fireEvent.click(screen.getByRole("button", { name: "Add company" }));
+     expect(screen.getByText("Enter a valid email address.")).toBeInTheDocument();
+@@ -84,16 +87,17 @@ describe("Add company form", () => {
+     render(<AdminHostContext.Provider value={h}><AddCompanyModal onClose={() => undefined} /></AdminHostContext.Provider>);
+     fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "  Acme Castings " } });
+     fireEvent.change(screen.getByLabelText(/^City/), { target: { value: "Hosur" } });
++    fireEvent.click(screen.getByLabelText(/Demo data/));
+     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add company" })));
+     expect(await screen.findByText("Database unavailable")).toBeInTheDocument();
+     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add company" })));
+     await waitFor(() => expect(h.went).toEqual(["/admin/manufacturers/new-org"]));
+     expect(calls.map((c) => [c.method, c.url.endsWith("/admin/manufacturers")])).toEqual([["POST", true], ["POST", true]]);
+-    expect(calls[0].body).toEqual({ name: "Acme Castings", city: "Hosur" });
++    expect(calls[0].body).toEqual({ name: "Acme Castings", city: "Hosur", record_type: "DEMO" });
+     expect(Object.keys(calls[0].body!).some((k) => /source/i.test(k))).toBe(false);
+     expect(calls[0].headers["Idempotency-Key"]).toBeTruthy();
+     expect(calls[1].headers["Idempotency-Key"]).toBe(calls[0].headers["Idempotency-Key"]);
+-    expect(toasts).toEqual(["Company added — source: Admin Entry"]);
++    expect(toasts).toEqual(["Demo company added — source: Admin Entry"]);
+   });
+ 
+   it("duplicate: shows the message and opens the existing company", async () => {
+@@ -102,16 +106,32 @@ describe("Add company form", () => {
+     const h = host();
+     render(<AdminHostContext.Provider value={h}><AddCompanyModal onClose={() => undefined} /></AdminHostContext.Provider>);
+     fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Acme" } });
++    fireEvent.click(screen.getByLabelText(/Real company/));
+     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add company" })));
+     expect(await screen.findByText(/already exists/)).toBeInTheDocument();
+     fireEvent.click(screen.getByRole("button", { name: "Open the existing company" }));
+     expect(h.went).toEqual(["/admin/manufacturers/org-1"]);
+   });
+ 
++  it("real company that exists as demo data: explains the conflict and opens the demo record", async () => {
++    const calls = serve(() => [{ detail: "This company already exists as a demo record: Acme. Open it and change its classification instead of adding a second copy.",
++                                 code: "classification_conflict", existingId: "demo-1" }, 409]);
++    const h = host();
++    render(<AdminHostContext.Provider value={h}><AddCompanyModal onClose={() => undefined} /></AdminHostContext.Provider>);
++    fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Acme" } });
++    fireEvent.click(screen.getByLabelText(/Real company/));
++    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add company" })));
++    expect(calls[0].body).toMatchObject({ record_type: "REAL" });
++    expect(await screen.findByText(/exists as a demo record/)).toBeInTheDocument();
++    fireEvent.click(screen.getByRole("button", { name: "Open the existing company" }));
++    expect(h.went).toEqual(["/admin/manufacturers/demo-1"]);
++  });
++
+   it("ambiguous name or no permission: message only, no link", async () => {
+     serve(() => [{ detail: "Only administrators and operators can add companies.", code: "forbidden", existingId: null }, 403]);
+     render(<AdminHostContext.Provider value={host()}><AddCompanyModal onClose={() => undefined} /></AdminHostContext.Provider>);
+     fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Acme" } });
++    fireEvent.click(screen.getByLabelText(/Real company/));
+     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add company" })));
+     expect(await screen.findByText(/Only administrators and operators/)).toBeInTheDocument();
+     expect(screen.queryByRole("button", { name: "Open the existing company" })).toBeNull();
+-- 
+2.43.0
+

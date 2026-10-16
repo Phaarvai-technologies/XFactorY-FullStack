@@ -1,0 +1,1 @@
+id,organization_id,facility_id,capability_id,availability_calendar_id,availability_window_id,price_book_id,price_item_id,title,description,available_capacity,unit_code,start_date,end_date,pricing_model,currency,standard_price,special_price,minimum_booking_quantity,publication_status,published_at,created_by_membership_id,version,created_at,updated_at

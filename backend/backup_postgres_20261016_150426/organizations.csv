@@ -1,0 +1,37 @@
+id,clerk_organization_id,legal_name,display_name,organization_type,industry_id,description,website_domain,primary_geography,status,verification_status,created_by_user_id,version,created_at,updated_at,record_type,entry_source,referral_source,assigned_admin_user_id,is_archived,archived_at,source_ref
+4cee99c1-37d2-4d08-bbc0-0a1d2f6b391d,,TCLS Manufacturing,TCLS Manufacturing,manufacturer,,,,,active,unverified,deb23f0a-9bd4-43f2-aeb6-b30bf3fc458a,2,2026-09-29 05:31:06.016642+00,2026-09-29 05:31:54.694824+00,REAL,MANUFACTURER,,,f,,
+0e64f438-aaf4-4787-9bc9-02431be776b6,,,Priyadharshini Bakkiyaraj,manufacturer,,,,,active,unverified,686448be-eb20-4ac7-b5f6-933427b4fc17,1,2026-10-05 12:03:28.564973+00,2026-10-05 12:03:28.564973+00,REAL,MANUFACTURER,,,f,,
+842775fe-09ad-4e7d-8e66-5c4ef23a5403,,Ashok Leyland Limited,Ashok Leyland Limited,manufacturer,,,,,active,unverified,0aeeb490-60ff-4329-b698-65acc5943d2c,2,2026-10-05 14:49:25.142959+00,2026-10-05 14:52:34.35658+00,REAL,MANUFACTURER,,,f,,
+55f57aa5-1eb3-42b2-8846-b2f50ab7c18d,,,phaarvai,buyer,,,,"Chennai, Tamil Nadu, India",active,unverified,86c7d4b6-8c2b-46d6-b1e2-381e48e35e3e,1,2026-10-03 07:07:26.901054+00,2026-10-08 10:47:41.744795+00,REAL,MANUFACTURER,,,f,,
+5bc895d5-63dd-4856-894f-db6d9543df78,,Ai Ml,Ai Ml,manufacturer,,,,,active,unverified,86c7d4b6-8c2b-46d6-b1e2-381e48e35e3e,2,2026-10-03 10:19:28.245731+00,2026-10-09 07:59:45.105072+00,REAL,MANUFACTURER,,,f,,
+d65586c0-9ef4-4ec6-944f-0e7bdd0cb70b,,asdfghjk,asdfghjk,manufacturer,,,,,active,unverified,5fccd5bb-8dfa-40fe-96a5-e495c977eb3b,2,2026-10-09 07:47:05.320066+00,2026-10-09 09:30:23.762543+00,REAL,MANUFACTURER,,,f,,
+5f5f63a6-ca2a-4079-ade6-b557445bc2d3,,xasfdghjkl,xasfdghjkl,manufacturer,,,,,active,unverified,ecbd8306-190a-4a73-8047-5ba01ae9e21d,2,2026-10-09 10:57:01.520844+00,2026-10-09 10:57:37.040175+00,REAL,MANUFACTURER,,,f,,
+4d4551f3-5adb-49a7-b500-519dc4b91ac0,,acme manufacturing,acme manufacturing,manufacturer,,,,,active,unverified,a5901684-ca76-46b6-8fe2-dbdad70bdfda,2,2026-10-09 18:46:14.132604+00,2026-10-09 18:46:51.122769+00,REAL,MANUFACTURER,,,f,,
+201c9b5c-6ac9-409d-93d6-962fd6b5687c,,,aP,manufacturer,,,,,active,unverified,f17eb53a-705b-47e0-b442-d133fa719ddb,1,2026-10-10 00:32:41.959819+00,2026-10-10 00:32:41.959819+00,REAL,MANUFACTURER,,,f,,
+25f655d8-41b4-4e31-a1af-23d94e491a8b,,,Anu,manufacturer,,,,,active,unverified,90d83dfc-af86-4cc8-b249-4f074aa0d93b,1,2026-10-10 06:35:51.629626+00,2026-10-10 06:35:51.629626+00,REAL,MANUFACTURER,,,f,,
+151285df-1393-49b2-bfa4-bf427ef4b9cf,,asdfghjk,asdfghjk,manufacturer,,,,,active,unverified,3feec85b-285a-4b10-a577-1849c1762407,2,2026-10-10 06:44:37.330247+00,2026-10-10 06:45:15.581331+00,REAL,MANUFACTURER,,,f,,
+86ed7f9a-f560-4128-8300-0bd7ccc92aba,,AI and ML,AI and ML,manufacturer,,"Vision & Mission
+Your company's vision and mission statement.
+
+Establishment year
+e.g. 2010
+Employees
+e.g. 120
+Business type",,,active,unverified,507c6053-9179-4baf-a744-b6c6e877f463,3,2026-10-10 07:07:25.415661+00,2026-10-10 07:10:12.36762+00,REAL,MANUFACTURER,,,f,,
+8da8db12-6af6-4020-bc4d-2cb69f573ddf,,,Kaveri,buyer,,,,madurai,active,unverified,507c6053-9179-4baf-a744-b6c6e877f463,1,2026-10-10 07:15:34.755334+00,2026-10-10 07:15:34.755334+00,REAL,MANUFACTURER,,,f,,
+02cd39f6-3709-4f0e-8c49-7aa97f62cec2,,AI and ML,AI and ML,manufacturer,,,,,active,unverified,584c6f7e-1d0d-4802-a550-efbe55b8982d,2,2026-10-10 14:34:28.951285+00,2026-10-10 14:35:24.313825+00,REAL,MANUFACTURER,,,f,,
+9745b96e-8843-43e2-8869-09be14f6a8c8,,,Praveen,manufacturer,,,,,active,unverified,16f29ce7-db6c-40fb-9a06-cc8aac34c1e3,1,2026-10-10 14:53:14.112986+00,2026-10-10 14:53:14.112986+00,REAL,MANUFACTURER,,,f,,
+8e5fd131-79b9-4aba-b633-4c601d5da6de,,AI,AI,manufacturer,,"Company name
+AI",,,active,unverified,5f2aaac9-1275-4602-99eb-7da22b34aa67,3,2026-10-10 07:55:30.943684+00,2026-10-12 07:51:40.282852+00,REAL,MANUFACTURER,,,f,,
+87c806f3-9b43-4fa5-8383-955dddb398b9,,Ai Ml,Ai Ml,manufacturer,,,,,active,unverified,f16ffd27-e6e0-464b-a092-f5b0d115419f,2,2026-10-12 07:57:38.737281+00,2026-10-12 07:59:54.912845+00,REAL,MANUFACTURER,,,f,,
+cf9f2982-c746-48e7-9f28-bb8adf3f8deb,,TCLS Manufacturing,TCLS Manufacturing,manufacturer,,,,,active,unverified,784d2c87-ad15-4a34-89d1-5ad6abfd8d22,2,2026-10-12 16:35:58.264112+00,2026-10-12 16:39:26.190868+00,REAL,MANUFACTURER,,,f,,
+3f01dcd1-d641-4fe9-aedb-126bfdcef2a1,,acme manufacturing,acme manufacturing,manufacturer,,,,,active,unverified,8c7773c7-3244-4dd7-8e56-4776d530a5cb,2,2026-10-12 17:03:12.501733+00,2026-10-12 17:05:33.15849+00,REAL,MANUFACTURER,,,f,,
+dc243e5b-41fd-42b9-9344-ff676726b468,,DSA,DSA,manufacturer,,,,,active,unverified,a5da6f39-4efe-4b4e-aa23-9f23f6291a76,2,2026-10-13 05:13:28.21101+00,2026-10-13 05:16:40.079726+00,REAL,MANUFACTURER,,,f,,
+0de0974a-9b25-4431-9fab-2a56cc4f5d9b,,Ashok Leyland private Limited,Ashok Leyland private Limited,manufacturer,,,,,active,unverified,94b7259c-9eed-474e-ab8b-0ba384a35fe1,2,2026-10-13 08:01:22.192543+00,2026-10-13 08:03:03.579959+00,REAL,MANUFACTURER,,,f,,
+2bd78473-0b8a-4808-981e-a0caaa365c41,,,Product organization,buyer,,,,Chennai,active,unverified,686448be-eb20-4ac7-b5f6-933427b4fc17,1,2026-10-13 05:24:01.509677+00,2026-10-13 09:48:43.684186+00,REAL,MANUFACTURER,,,f,,
+75219436-8273-4a98-8b86-211070075caf,,,phaari,manufacturer,,,,,active,unverified,e6d74a10-f9b1-4353-972c-0eee415ab871,1,2026-10-13 14:30:10.84213+00,2026-10-13 14:30:10.84213+00,REAL,MANUFACTURER,,,f,,
+1ccc3d4a-aa8b-47f7-8d6e-ff1f7bae4501,,,Argon Labs,buyer,,,,Chennai,active,unverified,16f29ce7-db6c-40fb-9a06-cc8aac34c1e3,1,2026-10-13 14:43:22.953836+00,2026-10-13 14:43:22.953836+00,REAL,MANUFACTURER,,,f,,
+a1a17b90-8693-45f1-b7ac-626a7c16b3ea,,,Menu,manufacturer,,,,,active,unverified,1d84d7e4-b2c0-4c5b-968f-72228a4f62c4,1,2026-10-13 15:45:53.985553+00,2026-10-13 15:45:53.985553+00,REAL,MANUFACTURER,,,f,,
+8fcc54e7-0966-416d-96bd-f08ab266811d,,,Swathi Sudha,manufacturer,,,,,active,unverified,518b1e26-45d5-4ee6-8d95-62845b47dfe3,1,2026-10-13 15:50:48.186984+00,2026-10-13 15:50:48.186984+00,REAL,MANUFACTURER,,,f,,
+10c12792-6c7f-4a09-8321-ba29658c6f96,,,S Swathi,manufacturer,,,,,active,unverified,26838a8c-365c-4181-8808-5537893f6b19,1,2026-10-14 05:55:35.493941+00,2026-10-14 05:55:35.493941+00,REAL,MANUFACTURER,,,f,,
+e550550c-7d70-4fef-a2d1-8af229a9f1e5,,,Kaveri,buyer,,,,Madurai,active,unverified,5fccd5bb-8dfa-40fe-96a5-e495c977eb3b,1,2026-10-09 11:08:53.171225+00,2026-10-14 13:27:48.36236+00,REAL,MANUFACTURER,,,f,,

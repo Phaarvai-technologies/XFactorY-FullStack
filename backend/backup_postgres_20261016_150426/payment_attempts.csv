@@ -1,0 +1,1 @@
+id,transaction_id,idempotency_key,provider_request_id,status,attempted_at

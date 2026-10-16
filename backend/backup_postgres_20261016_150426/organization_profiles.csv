@@ -1,0 +1,24 @@
+organization_id,registration_id,tax_id,contact_email,contact_phone,address_line1,address_line2,country_code,region_code,postal_code,service_area,updated_at,logo_file_id,cover_file_id,company_category,business_type,organization_size,establishment_year,employee_count,about_company,vision,mission,stated_production_capacity,production_capacity_unit_code,country_name,production_capacity_label,employee_count_label
+4cee99c1-37d2-4d08-bbc0-0a1d2f6b391d,,,jansi@gmail.com,8475395124,,,US,,,,2026-09-29 05:31:54.694824+00,,,Textile & Apparel,,,,,,,,5000.0000,,United States,5000,
+842775fe-09ad-4e7d-8e66-5c4ef23a5403,,,reachus@ashokleyland.com,,,,IN,,,,2026-10-05 14:52:34.35658+00,,,Automotive & Machinery,,,,,,,,5500.0000,,India,5500,
+5bc895d5-63dd-4856-894f-db6d9543df78,,,phaarvai@gmail.com,,,,IN,,,,2026-10-09 07:59:45.105072+00,,,Other,,,,,,,,50000.0000,,India,50000,
+d65586c0-9ef4-4ec6-944f-0e7bdd0cb70b,,,phaarvai@gmail.com,12345678,,,CN,,,,2026-10-09 09:30:23.762543+00,,,Chemicals & Plastics,,,,,,,,14785.0000,,China,14785,
+5f5f63a6-ca2a-4079-ade6-b557445bc2d3,,,priya.bakkiyaraj@phaarvai.com,12324356789,,,VN,,,,2026-10-09 10:57:37.040175+00,,,Chemicals & Plastics,,,,,,,,400.0000,,Vietnam,400,
+4d4551f3-5adb-49a7-b500-519dc4b91ac0,,,jansiphilip17@gmail.com,9741235478,,,IN,,,,2026-10-09 18:46:51.122769+00,,,Electronics & Hardware,,,,,,,,50000.0000,,India,50000 unit/month,
+151285df-1393-49b2-bfa4-bf427ef4b9cf,,,phaarvai@gmail.com,12345678,,,GB,,,,2026-10-10 06:45:15.581331+00,,,Food & Beverage,,,,,,,,14785.0000,,United Kingdom,14785,
+86ed7f9a-f560-4128-8300-0bd7ccc92aba,,,test22@gmail.com,,,,IN,,,,2026-10-10 07:10:12.36762+00,d60f1892-4878-450f-a959-a2fb5bf588ad,0d45aa15-df21-4c90-8ed5-291a1e93109e,Other,,,,,"Vision & Mission
+Your company's vision and mission statement.
+
+Establishment year
+e.g. 2010
+Employees
+e.g. 120
+Business type",,,8000.0000,,India,8000,
+02cd39f6-3709-4f0e-8c49-7aa97f62cec2,,,test26@gmail.com,,,,IN,,,,2026-10-10 14:35:24.313825+00,,,Other,,,,,,,,12000.0000,,India,12000,
+8e5fd131-79b9-4aba-b633-4c601d5da6de,,,test25@gmail.com,,,,IN,,,,2026-10-12 07:51:40.282852+00,,,Other,,,,,"Company name
+AI",,,11000.0000,,India,11000,
+87c806f3-9b43-4fa5-8383-955dddb398b9,,,test27@gmail.com,,,,IN,,,,2026-10-12 07:59:54.912845+00,,,Other,,,,,,,,15000.0000,,India,15000,
+cf9f2982-c746-48e7-9f28-bb8adf3f8deb,,,testuser12@gmail.com,8475395124,,,GB,,,,2026-10-12 16:39:26.190868+00,,,Electronics & Hardware,,,,,,,,5000.0000,,United Kingdom,5000,
+3f01dcd1-d641-4fe9-aedb-126bfdcef2a1,,,testuser@gmail.com,+12255336691,,,US,,,,2026-10-12 17:05:33.15849+00,,,Electronics & Hardware,,,,,,,,,,United States,,
+dc243e5b-41fd-42b9-9344-ff676726b468,,,swathi.sudhakar@Phaarvai.com,,,,IN,,,,2026-10-13 05:16:40.079726+00,,,Other,,,,,,,,25000.0000,,India,25000,
+0de0974a-9b25-4431-9fab-2a56cc4f5d9b,,,test28@gmail.com,,,,IN,,,,2026-10-13 08:03:03.579959+00,,,Other,,,,,,,,25000.0000,,India,25000,

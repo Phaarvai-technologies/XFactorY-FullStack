@@ -1,0 +1,1 @@
+id,user_id,email,password_hash,status,failed_attempts,locked_until,last_login_at,password_changed_at,created_at,updated_at,must_change_password,created_by_user_id

@@ -1,0 +1,2 @@
+id,organization_id,facility_id,machinery_term_id,name,manufacturer,model,year,description,status,publication_status,version,created_at,source_ref
+1be523df-68e2-4f42-adb3-3c97494488b1,86ed7f9a-f560-4128-8300-0bd7ccc92aba,c69ea39c-b170-4b4a-b8e9-1ed8e1637656,12b32a09-cbb2-4cc3-92e0-1f87a796ae70,10,,,,,active,draft,7,2026-10-10 07:11:09.952976+00,

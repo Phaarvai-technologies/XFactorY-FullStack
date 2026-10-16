@@ -1,0 +1,2 @@
+id,user_id,manufacturer_organization_id,machine_name,quantity,required_duration,manufacturing_location,budget_amount,timeline,additional_requirements,created_at,updated_at
+85d000b6-7df6-46cc-a90d-ad7b186219c5,507c6053-9179-4baf-a744-b6c6e877f463,86ed7f9a-f560-4128-8300-0bd7ccc92aba,,2000,,madurai,200000.00,within_1_month,,2026-10-10 07:17:36.324392+00,2026-10-10 07:17:36.324392+00

@@ -1,0 +1,1 @@
+id,agent_run_id,organization_id,provider,model_name,input_tokens,cached_input_tokens,cache_write_tokens,output_tokens,tool_cost,estimated_cost,actual_cost,latency_ms,created_at
