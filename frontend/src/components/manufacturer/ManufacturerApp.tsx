@@ -142,9 +142,9 @@ function applyAccountSubmission(
       phone: submission.phone,
       capacity: submission.capacity,
     },
-    contact: isValidEmail(submission.contact)
-      ? { email: submission.contact, phone: "" }
-      : { email: "", phone: submission.contact },
+    ccontact: isValidEmail(submission.email)
+  ? { email: submission.email, phone: "" }
+  : { email: "", phone: submission.email },
   }));
   setProfileData((current) => ({
     ...current,
@@ -787,12 +787,13 @@ export function ManufacturerApp() {
     onLoadCompany={handleLoadCompany}
     initial={server?.approval?.status === "changes_requested" ? {
       ...state.account,
-      contact: state.contact.email || state.contact.phone || "",
+       email: state.contact.email || "",
+      phone: state.contact.phone || "",
       companyId: server?.approval?.kind === "new_company" ? null : server?.approval?.selectedCompanyId ?? null,
     } : requestToCorrect ? {
       // Correcting an update request: the user's own submitted values for that company.
       ...state.account,
-      contact: String(requestToCorrect.proposed.contactEmail || requestToCorrect.proposed.contactPhone || ""),
+      email: String(requestToCorrect.proposed.contactEmail ?? ""),
       companyName: requestToCorrect.companyName,
       companyType: String(requestToCorrect.proposed.companyType ?? ""),
       country: String(requestToCorrect.proposed.country ?? ""),
