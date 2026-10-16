@@ -79,7 +79,7 @@ async def test_manufacturer_list_detail_edit_history(client, no_clerk):
 
     # XY-ADMIN-04: search + combined filters
     body = (await client.get("/admin/manufacturers", headers=admin,
-                             params={"q": tag, "completeness": "incomplete", "record_type": ["REAL"]})).json()
+                             params={"q": tag, "completeness": "incomplete", "record_type": ["REAL"], "listing": "all"})).json()
     assert body["total"] == 1
     row = body["rows"][0]
     # approval is requested as soon as the basic company details are submitted
@@ -210,9 +210,9 @@ async def test_record_types_archive_and_metrics(client, no_clerk):
     # batch archive skips REAL; archived hidden by default; restore
     r = (await client.post("/admin/manufacturers/archive-batch", headers=admin, json={"ids": [real, demo]})).json()
     assert r["changed"] == [demo] and r["skippedReal"] == [real]
-    listed = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag})).json()
+    listed = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag, "listing": "all"})).json()
     assert [x["id"] for x in listed["rows"]] == [real]
-    archived = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag, "archived": "archived"})).json()
+    archived = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag, "archived": "archived", "listing": "all"})).json()
     assert [x["id"] for x in archived["rows"]] == [demo]
     d = (await client.post(f"/admin/manufacturers/{demo}/restore", headers=admin, json={})).json()
     assert d["manufacturer"]["isArchived"] is False

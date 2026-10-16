@@ -106,6 +106,18 @@ async function fillSignIn(email = "a@example.com", password = "correct-horse") {
   });
 }
 
+/** Password accepted, Clerk asks for the new-device email code. Like Clerk, the hook's signIn
+ * resource then carries the open attempt (id + status). */
+function deviceStepCreate() {
+  return vi.fn(async () => {
+    Object.assign(h.signIn, { id: "sia_1", status: "needs_client_trust" });
+    return {
+      status: "needs_client_trust",
+      supportedSecondFactors: [{ strategy: "email_code", emailAddressId: "ea_1", safeIdentifier: "a***@example.com" }],
+    };
+  });
+}
+
 // ------------------------------------------------------------------------------- Sign-in
 describe("Sign-in", () => {
   it("unknown account → Sign-up with the notice; nothing activated, backend not asked", async () => {
@@ -171,10 +183,7 @@ describe("Sign-in", () => {
 
   it("new-device / MFA code step still works and is followed by the registration check", async () => {
     createdSession("sess_4");
-    h.signIn.create = vi.fn(async () => ({
-      status: "needs_second_factor",
-      supportedSecondFactors: [{ strategy: "email_code", emailAddressId: "ea_1", safeIdentifier: "a***@example.com" }],
-    }));
+    h.signIn.create = deviceStepCreate();
     h.signIn.prepareSecondFactor = vi.fn(async () => undefined);
     h.signIn.attemptSecondFactor = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_4" }));
     registration("registered");
@@ -810,5 +819,53 @@ describe("existing email on Sign-up leaves no Clerk session cookie behind", () =
     expect(h.signOut).not.toHaveBeenCalled();
     expect(h.replaced).toEqual([]);
     expect(h.pushed).toEqual([]);
+  });
+});
+
+
+// ---------------------------------------------- new-device code step after a failed check (live report)
+describe("Sign-in: new-device code step when the X!Y check fails", () => {
+  it("returns to the password step instead of re-sending the used code to Clerk", async () => {
+    createdSession("sess_dev");
+    h.signIn.create = deviceStepCreate();
+    h.signIn.prepareSecondFactor = vi.fn(async () => undefined);
+    h.signIn.attemptSecondFactor = vi.fn(async () => {
+      // Clerk completes the attempt; its client then holds a NEW, empty sign-in
+      for (const k of ["id", "status"]) delete h.signIn[k];
+      return { status: "complete", createdSessionId: "sess_dev" };
+    });
+    registration("500");   // e.g. backend database / CORS failure
+    render(<CustomSignInForm redirectTo="/app" />);
+    await fillSignIn("admin@phaarvai.com");
+    fireEvent.change(screen.getByLabelText("Verification code"), { target: { value: "381064" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" })));
+    expect(h.signIn.attemptSecondFactor).toHaveBeenCalledTimes(1);
+    expect(h.removed).toEqual(["sess_dev"]);                     // no access granted
+    expect(screen.getByText("We couldn't confirm your account right now. Please try again.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Verify and sign in" })).toBeNull();
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("admin@phaarvai.com");
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+    expect(h.pushed).toEqual([]);
+  });
+
+  it("an attempt that no longer exists is never sent to Clerk (no 'identifier is required' error)", async () => {
+    h.signIn.create = deviceStepCreate();
+    h.signIn.prepareSecondFactor = vi.fn(async () => undefined);
+    h.signIn.attemptSecondFactor = vi.fn(async () => ({ status: "complete", createdSessionId: "x" }));
+    render(<CustomSignInForm redirectTo="/app" />);
+    await fillSignIn();
+    for (const k of ["id", "status"]) delete h.signIn[k];          // attempt gone (expired / used elsewhere)
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resend code" })));
+    expect(h.signIn.prepareSecondFactor).toHaveBeenCalledTimes(1);   // only the first send
+    expect(screen.getByText(/verification step has expired/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    // and from the code step itself
+    h.signIn.create = deviceStepCreate();
+    await fillSignIn();
+    for (const k of ["id", "status"]) delete h.signIn[k];
+    fireEvent.change(screen.getByLabelText("Verification code"), { target: { value: "111111" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" })));
+    expect(h.signIn.attemptSecondFactor).not.toHaveBeenCalled();
+    expect(screen.getByText(/verification step has expired/)).toBeInTheDocument();
   });
 });

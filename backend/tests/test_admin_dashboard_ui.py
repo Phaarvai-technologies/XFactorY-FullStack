@@ -49,7 +49,7 @@ async def _manufacturer(c, name=None):
 
 
 async def _find(c, admin, name):
-    r = await c.get("/admin/manufacturers", params={"q": name}, headers=admin)
+    r = await c.get("/admin/manufacturers", params={"q": name, "listing": "all"}, headers=admin)
     assert r.status_code == 200, r.text
     return r.json()["rows"]
 

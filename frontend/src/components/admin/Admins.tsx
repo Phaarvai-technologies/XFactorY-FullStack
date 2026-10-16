@@ -1,8 +1,9 @@
 "use client";
 
-import { Copy, KeyRound, RotateCcw, ShieldCheck, ShieldOff, UserPlus } from "lucide-react";
-import { useState } from "react";
-import { useAdminMe, useToast } from "@/components/admin/AdminShell";
+import { Copy, KeyRound, Pencil, RotateCcw, ShieldCheck, ShieldOff, UserPlus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useAdminMe, useReloadAdminMe, useToast } from "@/components/admin/AdminShell";
+import { EditAdminModal, savedMessage } from "@/components/admin/EditAdminDetails";
 import { ErrorBox, Loading, Modal, PageHeader } from "@/components/admin/ui";
 import { jsonBody, useAdminApi, useResource } from "@/lib/admin/api";
 import { fmtAgo, fmtDate } from "@/lib/admin/format";
@@ -17,6 +18,7 @@ const ROLES: { value: AdminRole; label: string; hint: string }[] = [
 
 type Action =
   | { kind: "add" }
+  | { kind: "edit"; admin: AdminUser }
   | { kind: "revoke" | "restore" | "reset"; admin: AdminUser }
   | { kind: "password"; email: string; password: string; reason: "added" | "reset" };
 
@@ -33,10 +35,20 @@ export function Admins() {
   const call = useAdminApi();
   const toast = useToast();
   const me = useAdminMe();
+  const reloadMe = useReloadAdminMe();
   const canManage = !!me?.roles.includes("platform_administrator");
   const { data, error, loading, reload } = useResource<AdminUser[]>("/admin-users");
   const [action, setAction] = useState<Action | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // edited from the header ("Edit my details"): refresh this list too
+  const meKey = `${me?.name ?? ""}|${me?.email ?? ""}`;
+  const lastMeKey = useRef(meKey);
+  useEffect(() => {
+    if (lastMeKey.current === meKey) return;
+    const wasLoaded = lastMeKey.current !== "|";
+    lastMeKey.current = meKey;
+    if (wasLoaded) reload();
+  }, [meKey, reload]);
 
   async function changeRole(admin: AdminUser, role: AdminRole) {
     setBusyId(admin.id);
@@ -85,13 +97,13 @@ export function Admins() {
                   <th>Status</th>
                   <th>Last sign-in</th>
                   <th>Access granted</th>
-                  {canManage && <th aria-label="Actions" />}
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
                 {data.length === 0 && (
                   <tr>
-                    <td colSpan={canManage ? 7 : 6} className="adm-empty-cell">
+                    <td colSpan={7} className="adm-empty-cell">
                       No admins yet.
                     </td>
                   </tr>
@@ -144,10 +156,19 @@ export function Admins() {
                         {a.grantedAt ? fmtDate(a.grantedAt) : <span className="adm-muted">—</span>}
                         {a.grantedBy && <div className="adm-cell-sub">by {a.grantedBy}</div>}
                       </td>
-                      {canManage && (
-                        <td>
-                          <div className="adm-row-actions">
-                            {a.status === "revoked" ? (
+                      <td>
+                        <div className="adm-row-actions">
+                          {a.canEditDetails && (
+                            <button
+                              type="button"
+                              className="btn-ghost adm-btn-sm"
+                              aria-label={`Edit details of ${a.name || a.email}`}
+                              onClick={() => setAction({ kind: "edit", admin: a })}
+                            >
+                              <Pencil size={14} /> Edit
+                            </button>
+                          )}
+                          {canManage && (a.status === "revoked" ? (
                               <button type="button" className="btn-ghost adm-btn-sm" onClick={() => setAction({ kind: "restore", admin: a })}>
                                 <RotateCcw size={14} /> Restore
                               </button>
@@ -165,10 +186,9 @@ export function Admins() {
                                   </button>
                                 </>
                               )
-                            )}
-                          </div>
-                        </td>
-                      )}
+                            ))}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -176,12 +196,24 @@ export function Admins() {
             </table>
           </div>
           <p className="field-hint adm-table-foot">
-            {active} active admin{active === 1 ? "" : "s"}. The built-in administrator and your own access can only be
-            changed from the terminal.
+            {active} active admin{active === 1 ? "" : "s"}. Use Edit to change a name, phone or sign-in email. The
+            built-in administrator&rsquo;s and your own access (role, revoke) can only be changed from the terminal.
           </p>
         </div>
       )}
 
+      {action?.kind === "edit" && (
+        <EditAdminModal
+          admin={action.admin}
+          onClose={() => setAction(null)}
+          onSaved={(res) => {
+            setAction(null);
+            reload();
+            if (res.admin.isYou) reloadMe();
+            toast(savedMessage(res));
+          }}
+        />
+      )}
       {action?.kind === "add" && (
         <AddAdminModal
           onClose={() => setAction(null)}

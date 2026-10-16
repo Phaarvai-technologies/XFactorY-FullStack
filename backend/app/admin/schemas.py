@@ -90,8 +90,23 @@ class AdminAddIn(_Model):
     role: AdminRole = "platform_administrator"
 
 
+class AdminDetailsIn(_Model):
+    """Admins tab -> Edit details. Only the fields sent are changed. `email` is accepted only for
+    admin-only accounts (no X!Y sign-in) and never for the built-in administrator."""
+    firstName: str | None = Field(default=None, min_length=1, max_length=80)
+    lastName: str | None = Field(default=None, max_length=80)
+    phone: str | None = Field(default=None, max_length=24, pattern=r"^$|^\+?[0-9][0-9 ()\-]{5,22}$")
+    email: str | None = Field(default=None, min_length=3, max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
 class AdminRoleIn(_Model):
     role: AdminRole
+
+
+class RecordTypeIn(_Model):
+    """Mark a person (Visionary) as real / demo / test data."""
+    record_type: RecordType
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class AdminRestoreIn(_Model):

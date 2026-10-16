@@ -1,22 +1,47 @@
 "use client";
 
-import { Factory, UserRound } from "lucide-react";
+import { BadgeCheck, Factory, FlaskConical, UserRound } from "lucide-react";
+import { useToast } from "@/components/admin/AdminShell";
 import { Fragment, useCallback, useState, type ReactNode } from "react";
 import {
   AccountBadge,
   ActionsMenu,
+  DataScopeFilter,
   DetailsRow,
   DetailsToggle,
   ErrorBox,
   Loading,
   PageHeader,
   Pagination,
+  RecordBadge,
   SearchInput,
   Truncate,
+  type DataScope,
 } from "@/components/admin/ui";
-import { toQuery, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
+import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
 import { DURATION_LABELS, TIMELINE_LABELS, fmtAgo, fmtDate, fmtDateTime, fmtMoney } from "@/lib/admin/format";
-import type { VisionaryDetailData, VisionaryList } from "@/lib/admin/types";
+import type { RecordType, VisionaryDetailData, VisionaryList, VisionaryRow } from "@/lib/admin/types";
+
+/** Mark a Visionary as demo / real data (PATCH /admin/visionaries/{id}/record-type). */
+function useSetRecordType(onDone: () => void) {
+  const call = useAdminApi();
+  const toast = useToast();
+  return async (v: VisionaryRow, type: RecordType) => {
+    try {
+      await call(`/visionaries/${v.id}/record-type`, jsonBody("PATCH", { record_type: type }));
+      toast(`${v.name || v.email} marked as ${type === "REAL" ? "real" : "demo"} data`);
+      onDone();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not update");
+    }
+  };
+}
+
+function recordAction(v: VisionaryRow, set: (v: VisionaryRow, t: RecordType) => void) {
+  return (v.recordType ?? "REAL") === "REAL"
+    ? { label: "Mark as demo", icon: <FlaskConical size={15} />, onSelect: () => set(v, "DEMO"), group: true }
+    : { label: "Mark as real", icon: <BadgeCheck size={15} />, onSelect: () => set(v, "REAL"), group: true };
+}
 
 function requestTone(status: string): string {
   if (["accepted", "confirmed", "completed"].includes(status)) return "badge-verified";
@@ -38,10 +63,14 @@ export function Visionaries() {
     q: f.get("q"),
     profile: f.get("profile"),
     account_status: f.get("account_status"),
+    data: (["real", "demo"].includes(f.get("data")) ? f.get("data") : "all") as DataScope,
     page: f.get("page") || "1",
     page_size: "25",
   };
-  const { data, error, loading, reload } = useResource<VisionaryList>(`/visionaries${toQuery(params)}`);
+  const { data, error, loading, reload } = useResource<VisionaryList>(
+    `/visionaries${toQuery({ ...params, data: params.data === "all" ? null : params.data })}`,
+  );
+  const setRecordType = useSetRecordType(reload);
   const setFilters = f.set;
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
   const [open, setOpen] = useState<string | null>(null);
@@ -76,6 +105,10 @@ export function Visionaries() {
             <option value="suspended">Suspended</option>
             <option value="deactivated">Deleted</option>
           </select>
+        </div>
+        <div className="adm-toolbar-row">
+          <DataScopeFilter value={params.data} counts={data?.dataCounts} onChange={(v) => f.set({ data: v === "all" ? null : v })} />
+          <span className="adm-seg-hint">Demo = marked as demo or test data by an admin (Actions → Mark as demo).</span>
         </div>
       </div>
 
@@ -129,9 +162,12 @@ export function Visionaries() {
                           <DetailsToggle open={isOpen} onToggle={() => setOpen(isOpen ? null : v.id)} controls={detailsId} label={label} />
                         </td>
                         <td>
-                          <button type="button" className="adm-link adm-truncate" title={label} onClick={() => go(`/admin/visionaries/${v.id}`)}>
-                            {label}
-                          </button>
+                          <div className="adm-name-line">
+                            <button type="button" className="adm-link adm-truncate" title={label} onClick={() => go(`/admin/visionaries/${v.id}`)}>
+                              {label}
+                            </button>
+                            {v.recordType && <RecordBadge type={v.recordType} hideReal />}
+                          </div>
                           <div className="adm-cell-sub">
                             <Truncate text={v.email} />
                           </div>
@@ -159,6 +195,7 @@ export function Visionaries() {
                             items={[
                               { label: "Open Visionary details", icon: <UserRound size={15} />, onSelect: () => go(`/admin/visionaries/${v.id}`) },
                               { label: "Open user account", icon: <UserRound size={15} />, onSelect: () => go(`/admin/users/${v.id}`) },
+                              recordAction(v, (row, t) => void setRecordType(row, t)),
                             ]}
                           />
                         </td>
@@ -202,6 +239,7 @@ function Item({ label, value }: { label: string; value: ReactNode }) {
 export function VisionaryDetail({ id }: { id: string }) {
   const { go } = useAdminHost();
   const { data, error, loading, reload } = useResource<VisionaryDetailData>(`/visionaries/${id}`);
+  const setRecordType = useSetRecordType(reload);
   if (!data) return loading ? <Loading /> : <ErrorBox message={error?.message ?? "Could not load"} onRetry={reload} />;
   const v = data.visionary;
   const p = data.profile;
@@ -213,9 +251,20 @@ export function VisionaryDetail({ id }: { id: string }) {
         title={v.name || v.email}
         subtitle={`${v.email}${v.phone ? ` · ${v.phone}` : ""} · Registered ${fmtDate(v.registeredAt)}`}
         actions={
-          <button type="button" className="btn-ghost" onClick={() => go(`/admin/users/${v.id}`)}>
-            <UserRound size={15} /> User account
-          </button>
+          <>
+            {(v.recordType ?? "REAL") === "REAL" ? (
+              <button type="button" className="btn-ghost" onClick={() => void setRecordType(v, "DEMO")}>
+                <FlaskConical size={15} /> Mark as demo
+              </button>
+            ) : (
+              <button type="button" className="btn-ghost" onClick={() => void setRecordType(v, "REAL")}>
+                <BadgeCheck size={15} /> Mark as real
+              </button>
+            )}
+            <button type="button" className="btn-ghost" onClick={() => go(`/admin/users/${v.id}`)}>
+              <UserRound size={15} /> User account
+            </button>
+          </>
         }
       />
 
@@ -250,6 +299,7 @@ export function VisionaryDetail({ id }: { id: string }) {
               <Item label="Email" value={v.email} />
               <Item label="Last activity" value={fmtAgo(v.lastActivity)} />
               <Item label="Saved request drafts" value={String(data.draftCount)} />
+              <Item label="Data" value={<RecordBadge type={v.recordType ?? "REAL"} />} />
             </div>
           </section>
         </div>

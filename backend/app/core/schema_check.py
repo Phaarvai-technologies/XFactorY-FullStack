@@ -43,6 +43,7 @@ REQUIRED = [
     ("visionary_request_drafts", None, "012_visionary_portal.sql"),
     ("admin_accounts", "must_change_password", "013_admin_management.sql"),
     ("notifications", "popup_shown_at", "015_manufacturer_notifications.sql"),
+    ("users", "record_type", "023_user_record_type.sql"),
     ("admin_internal_notes", "shared_with_manufacturer", "015_manufacturer_notifications.sql"),
     ("users", "registration_completed_at", "014_user_registration.sql"),
     ("registration_flows", None, "014_user_registration.sql"),

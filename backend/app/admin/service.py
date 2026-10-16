@@ -653,6 +653,8 @@ class AdminService:
                 "manufacturerId": str(u["organization_id"]) if u.get("organization_id") else None,
                 "companyName": u.get("company_name"), "completeness": u.get("completeness"),
                 "recordType": u.get("record_type"),
+                # the person's own Real / Demo / Test mark (e.g. a demo Visionary), separate from the company's
+                "userRecordType": u.get("user_record_type") or "REAL",
                 # every linked manufacturer company with its own onboarding source (None = unknown);
                 # an empty list = not applicable. Approval status is a separate field.
                 # how the person registered (channel) and with which method - not a company source
@@ -661,7 +663,8 @@ class AdminService:
                 "companies": [{"id": str(c["id"]), "name": c["name"], "onboardingSource": c["source"],
                                "sourceNote": c.get("sourceNote") if not c["source"] else None,
                                "stagedSource": c.get("stagedSource") if not c["source"] else None,
-                               "reviewStatus": c["reviewStatus"], "membershipRole": c["membershipRole"],
+                               "reviewStatus": c["reviewStatus"], "recordType": c.get("recordType"),
+                               "membershipRole": c["membershipRole"],
                                "isArchived": c["isArchived"]}
                               for c in (json.loads(u["companies"]) if isinstance(u.get("companies"), str)
                                         else (u.get("companies") or []))],
@@ -673,7 +676,7 @@ class AdminService:
     async def users(self, filters: dict, page: int, page_size: int) -> dict:
         data = await self._run(self.repo.users(filters, page, page_size))
         return {"total": data["total"], "page": page, "pageSize": page_size,
-                "rows": [self._user_row(u) for u in data["rows"]]}
+                "dataCounts": data["data_counts"], "rows": [self._user_row(u) for u in data["rows"]]}
 
     # ------------------------------------------------------------------ Visionaries (read-only)
     @staticmethod
@@ -685,12 +688,22 @@ class AdminService:
                 "profileSaved": v.get("full_name") is not None,
                 "roleTitle": v.get("role_title"), "organizationName": v.get("organization_name"),
                 "location": v.get("location"), "projectCount": int(v.get("project_count") or 0),
-                "requestCount": int(v.get("request_count") or 0), "lastSavedAt": v.get("last_saved_at")}
+                "requestCount": int(v.get("request_count") or 0), "lastSavedAt": v.get("last_saved_at"),
+                "recordType": v.get("record_type") or "REAL"}
 
     async def visionaries(self, filters: dict, page: int, page_size: int) -> dict:
         data = await self._run(self.repo.visionaries(filters, page, page_size))
-        return {"total": data["total"], "page": page, "pageSize": page_size,
+        return {"total": data["total"], "page": page, "pageSize": page_size, "dataCounts": data["data_counts"],
                 "rows": [self._visionary_row(v) for v in data["rows"]]}
+
+    async def set_visionary_record_type(self, admin: AdminContext, user_id: str, record_type: str,
+                                        reason: str | None) -> dict:
+        """Mark a Visionary as real / demo / test data. Recorded in the person's activity log."""
+        if not await self._run(self.repo.visionary(user_id)):
+            raise HTTPException(404, "Visionary not found")
+        await self.repo.set_user_record_type(user_id, record_type, admin.user_id, reason)
+        await self.db.commit()
+        return await self.visionary_detail(user_id)
 
     async def visionary_detail(self, user_id: str) -> dict:
         v = await self._run(self.repo.visionary(user_id))

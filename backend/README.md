@@ -116,7 +116,15 @@ Other roles can view the list but not change it. Guard rails: nobody can revoke,
 reset themselves from the portal, the built-in administrator cannot be revoked or demoted,
 and the last active administrator cannot be removed. Every change is written to the
 activity log. API: `GET/POST /admin/admin-users`, `POST /admin/admin-users/{id}/revoke|restore|reset-password`,
-`PATCH /admin/admin-users/{id}/role`.
+`PATCH /admin/admin-users/{id}/role`, `PATCH /admin/admin-users/{id}` (Edit details).
+
+**Edit details** (Admins tab → Edit, or your name at the top right → Edit my details): first name,
+last name and phone. Administrators can edit any admin; every admin can edit their own details. The
+sign-in email can be changed only for admin-only accounts (not for an admin who signs in with an X!Y
+account — that email belongs to the X!Y account — and never for the built-in administrator); a new
+email must not be used by another account. For an admin with an X!Y account the name is also updated
+in Clerk so the next X!Y sign-in keeps it (`clerkSync: failed` is reported if Clerk is unavailable).
+Changes are recorded in the activity log. No migration needed.
 
 Managing admin accounts from the terminal (the password is typed at a hidden prompt, never on
 the command line; add `--password-stdin` for scripts):

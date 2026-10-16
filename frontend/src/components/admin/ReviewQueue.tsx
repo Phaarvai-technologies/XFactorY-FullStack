@@ -36,9 +36,12 @@ export function ReviewQueue() {
     q: f.get("q"),
     review_status: f.getAll("review_status"),
     assigned: f.get("assigned"),
-    include_test: f.get("include_test") === "1",
+    // Real data (default), Demo data only, or Real + demo. include_test=1 is the older link form of "all".
+    data: (f.get("data") || (f.get("include_test") === "1" ? "all" : "real")) as "real" | "demo" | "all",
   };
-  const { data, error, loading, reload } = useResource<Queue>(`/review-queue${toQuery(params)}`);
+  const { data, error, loading, reload } = useResource<Queue>(
+    `/review-queue${toQuery({ ...params, data: params.data === "real" ? null : params.data })}`,
+  );
   const setFilters = f.set;
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -112,10 +115,16 @@ export function ReviewQueue() {
             <option value="me">Assigned to me</option>
             <option value="unassigned">Unassigned</option>
           </select>
-          <label className="adm-toggle">
-            <input type="checkbox" checked={params.include_test} onChange={(e) => f.set({ include_test: e.target.checked ? "1" : null })} />
-            Include demo/test
-          </label>
+          <select
+            className="adm-select-sm"
+            value={params.data}
+            onChange={(e) => f.set({ data: e.target.value === "real" ? null : e.target.value, include_test: null })}
+            aria-label="Real or demo data"
+          >
+            <option value="real">Real data</option>
+            <option value="demo">Demo data only</option>
+            <option value="all">Real + demo data</option>
+          </select>
         </div>
         <div className="adm-toolbar-row">
           <PillFilter<ReviewStatus>

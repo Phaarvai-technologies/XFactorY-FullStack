@@ -140,10 +140,10 @@ either a Clerk session token (X!Y account) or an admin session token `xya_...` f
 | --- | --- | --- |
 | Access (01) | `GET /admin/me` | 200 `{id,name,email,roles,authMethod}` or 401/403 |
 | Overview (02) | `GET /admin/overview` | cards (real records only) + recent / updated / needs-attention lists |
-| Users (03) | `GET /admin/users?q=&account_status=&onboarding_status=&page=` | onboarding_status also `NO_PROFILE` |
+| Users (03) | `GET /admin/users?q=&account_status=&onboarding_status=&role=&data=&page=` | onboarding_status also `NO_PROFILE`; `data` = `real` / `demo` / `all` (default): demo = the user's company has record type DEMO or TEST; response `dataCounts {real, demo, all}` under the other filters |
 | User detail + troubleshooting (03/10) | `GET /admin/users/{id}` | last login, last save, last section, recent failed operations with error reference |
 | Suspend / reactivate (03) | `POST /admin/users/{id}/suspend` · `/reactivate` `{reason}` | blocks the API + bans in Clerk |
-| Manufacturer list (04) | `GET /admin/manufacturers?q=&industry=&process=&location=&completeness=&review_status=&record_type=&entry_source=&archived=&assigned=&sort=&page=` | list filters repeat (`record_type=DEMO&record_type=TEST`); archived hidden by default |
+| Manufacturer list (04) | `GET /admin/manufacturers?q=&industry=&process=&location=&completeness=&review_status=&record_type=&entry_source=&archived=&assigned=&sort=&page=` | list filters repeat (`record_type=DEMO&record_type=TEST`); archived hidden by default; `listing=listed` (default: approved + imported / admin-added) / `awaiting` (submitted by users, not approved) / `all` |
 | Detail (05) | `GET /admin/manufacturers/{id}` | profile, contacts, linked users, notes, history, timeline, required fields |
 | Edit a response (06) | `PATCH /admin/manufacturers/{id}/fields` `{field, value, reason}` | same validation as onboarding; history keeps old/new value, admin, time, reason |
 | Review / classification (07/08) | `PATCH /admin/manufacturers/{id}/admin-fields` `{review_status?, assigned_admin_id?, unassign?, record_type?, entry_source?, referral_source?, reason?}` | NEEDS_CORRECTION requires `reason` (also saved as a note) |
@@ -156,3 +156,5 @@ either a Clerk session token (X!Y account) or an admin session token `xya_...` f
 Editable `field` keys: `company.*`, `location.*`, `infra.*`, `certifications`, `faqs`,
 `account.companyType`, `account.country`, `account.capacity`, `contact.email`,
 `contact.phone`, `machinery.{listingId}.{key}`.
+
+| Visionaries Data filter / demo mark | `GET /admin/visionaries?data=real\|demo\|all` (response `dataCounts`); `PATCH /admin/visionaries/{id}/record-type` `{record_type: REAL\|DEMO\|TEST, reason?}` | recorded in the person's activity log; migration 023 |

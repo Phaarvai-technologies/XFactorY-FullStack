@@ -35,6 +35,13 @@ export type AdminUser = {
   lastSignIn: string | null;
   isDefault: boolean;
   isYou: boolean;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  /** Edit details allowed for the signed-in admin (administrators: anyone; others: themselves). */
+  canEditDetails?: boolean;
+  /** Sign-in email can be changed (admin-only account, not the built-in administrator). */
+  emailEditable?: boolean;
 };
 export type AdminUserRef = { id: string; name: string | null; email: string };
 
@@ -231,6 +238,8 @@ export type LinkedCompany = {
   sourceNote?: string | null;
   stagedSource?: StagedSource | null;
   reviewStatus: ReviewStatus;
+  /** The company's record type (Real / Demo / Test). */
+  recordType?: RecordType | null;
   membershipRole: string;
   isArchived: boolean;
 };
@@ -275,9 +284,17 @@ export type VisionaryRow = {
   projectCount: number;
   requestCount: number;
   lastSavedAt: string | null;
+  /** Real / Demo / Test, set by an admin (Mark as demo). */
+  recordType?: RecordType;
 };
 
-export type VisionaryList = { total: number; page: number; pageSize: number; rows: VisionaryRow[] };
+export type VisionaryList = {
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: VisionaryRow[];
+  dataCounts?: { real: number; demo: number; all: number };
+};
 
 export type VisionaryDetailData = {
   visionary: VisionaryRow;
@@ -346,6 +363,8 @@ export type UserRow = {
   companyName: string | null;
   completeness: number | null;
   recordType: RecordType | null;
+  /** The person's own Real / Demo / Test mark (e.g. a demo Visionary), separate from the company's. */
+  userRecordType?: RecordType;
   /** How the person registered (channel) and the sign-up method / legacy evidence. */
   registrationChannel?: RegistrationChannel | null;
   registrationMethod?: string | null;
@@ -361,7 +380,14 @@ export type UserRow = {
   adminLogin: "active" | "disabled" | null;
 };
 
-export type UserList = { total: number; page: number; pageSize: number; rows: UserRow[] };
+export type UserList = {
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: UserRow[];
+  /** Users matching the other filters, split by the Data filter (real + demo = all). */
+  dataCounts?: { real: number; demo: number; all: number };
+};
 
 export type ActivityEvent = {
   kind: "error" | "account_status" | "admin_login" | "admin_login_failed";

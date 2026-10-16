@@ -102,12 +102,11 @@ def _like_escape(value: str) -> str:
 # set) that is not an approved company yet: the empty per-user placeholder, or one whose
 # details are still awaiting admin approval. Visionary visibility is a different rule
 # (app/core/eligibility.py).
-LISTED_COMPANY_SQL = """
-    o.organization_type = 'manufacturer'
-    AND o.status IN ('active', 'claim_pending')
-    AND NOT o.is_archived
-    AND o.record_type <> 'TEST'
-    AND NOT (o.created_by_user_id IS NOT NULL
+# A company the app created for a user (sign-up -> manufacturer onboarding) that an admin has not
+# approved yet: the per-user placeholder, or details awaiting review / corrections / rejected.
+# Imported and admin-added companies (no created_by_user_id) are never "awaiting approval".
+# Also used by the admin Manufacturers list (app/admin/repository.py).
+AWAITING_APPROVAL_SQL = """(o.created_by_user_id IS NOT NULL
              AND o.entry_source = 'MANUFACTURER'
              AND NOT EXISTS (SELECT 1 FROM manufacturer_onboarding mo
                              WHERE mo.organization_id = o.id
@@ -116,7 +115,14 @@ LISTED_COMPANY_SQL = """
                                     OR (mo.personal_information_completed
                                         AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
                                                         WHERE s.organization_id = o.id
-                                                          AND s.kind <> 'update_request')))))
+                                                          AND s.kind <> 'update_request')))))"""
+
+LISTED_COMPANY_SQL = f"""
+    o.organization_type = 'manufacturer'
+    AND o.status IN ('active', 'claim_pending')
+    AND NOT o.is_archived
+    AND o.record_type <> 'TEST'
+    AND NOT {AWAITING_APPROVAL_SQL}
 """
 
 # Who may update an organization through the onboarding form: its active owner / admin.

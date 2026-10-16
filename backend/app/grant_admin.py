@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from app.admin.auth import grant
 from app.core.database import SessionFactory
+from app.core.cli import run as run_cli
 
 
 async def main(email: str, revoke: bool) -> int:
@@ -37,4 +38,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(2)
-    sys.exit(asyncio.run(main(sys.argv[1], "--revoke" in sys.argv[2:])))
+    sys.exit(run_cli(main(sys.argv[1], "--revoke" in sys.argv[2:])))

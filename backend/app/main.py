@@ -15,6 +15,7 @@ from app.core import activity
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.gateway_guard import GatewayGuard
+from app.core.json_errors import JsonServerErrors
 from app.core.schema_check import MIGRATION_HINT, log_schema_status, missing_schema
 from app.identity.registration import SIGN_UP_REQUIRED_MESSAGE, RegistrationRequired
 
@@ -35,17 +36,31 @@ app = FastAPI(title="XY Factory API", version="1.2.0", lifespan=lifespan,
               docs_url="/docs" if _docs else None, redoc_url="/redoc" if _docs else None,
               openapi_url="/openapi.json" if _docs else None)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def install_middleware(target: FastAPI, cfg) -> None:
+    """Middleware order (the last added runs first): CORS is the OUTERMOST layer, so every response
+    the browser receives - including a gateway refusal or an unexpected server error - carries the
+    CORS headers, and preflight (OPTIONS) requests are answered before anything else. Otherwise the
+    browser hides the real status behind "No 'Access-Control-Allow-Origin' header"."""
+    target.add_middleware(JsonServerErrors)  # unexpected errors -> JSON 500 (inside CORS)
+    if cfg.gateway_shared_secret:
+        # requests that did not come through the API gateway stop here (still with CORS headers)
+        target.add_middleware(GatewayGuard, secret=cfg.gateway_shared_secret)
+    target.add_middleware(
+        CORSMiddleware,
+        allow_origins=cfg.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    cors_log = logging.getLogger("xy.cors")
+    cors_log.info("CORS allowed origins: %s", ", ".join(cfg.cors_origins) or "(none)")
+    if cfg.environment.lower() == "production" and all("localhost" in o for o in cfg.cors_origins):
+        cors_log.error("CORS_ORIGINS allows only localhost in production: browsers on the real site will be "
+                       "blocked. Set CORS_ORIGINS to the site origin(s), e.g. "
+                       "https://www.phaarvai.com,https://phaarvai.com")
 
-if settings.gateway_shared_secret:
-    # Outermost layer: requests that did not come through the API gateway stop here.
-    app.add_middleware(GatewayGuard, secret=settings.gateway_shared_secret)
+
+install_middleware(app, settings)
 
 @app.exception_handler(RegistrationRequired)
 async def registration_required(_request, _exc):

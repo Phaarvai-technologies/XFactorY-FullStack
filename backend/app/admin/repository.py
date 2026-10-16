@@ -21,6 +21,12 @@ REVIEW_TO_DB = {
 REVIEW_STATUSES = tuple(REVIEW_TO_DB)
 RECORD_TYPES = ("REAL", "DEMO", "TEST")
 ENTRY_SOURCES = ("MANUFACTURER", "ADMIN_ASSISTED", "IMPORTED")
+# Users / Visionaries "Data" filter. A user is demo data when the person is marked DEMO or TEST
+# (users.record_type, migration 023, e.g. a demo Visionary) or the manufacturer company shown for
+# them is (organizations.record_type); everyone else is real. Both set by an admin. real + demo = all.
+DATA_SCOPES = ("real", "demo", "all")
+USER_DATA_SQL = {"real": "coalesce(mf.record_type, 'REAL') = 'REAL' AND u.record_type = 'REAL'",
+                 "demo": "(mf.record_type IN ('DEMO', 'TEST') OR u.record_type IN ('DEMO', 'TEST'))"}
 ACCOUNT_STATUSES = ("active", "suspended", "deactivated")
 
 # (column in the view, label, onboarding section) - the 14 required items, in form order.
@@ -228,6 +234,15 @@ class AdminRepository:
 
     async def manufacturers(self, f: dict, page: int, page_size: int, sort: str) -> dict:
         where, p = self._filters(f)
+        # Manufacturers tab: only approved companies and companies an admin brought in (import /
+        # Add company). A company a user submitted appears once an admin approves it; until then it
+        # is in Onboarding & review (listing=awaiting shows those, listing=all shows both).
+        listing = f.get("listing") or "listed"
+        if listing in ("listed", "awaiting"):
+            from app.repositories.manufacturer import AWAITING_APPROVAL_SQL
+            awaiting = (f"EXISTS (SELECT 1 FROM organizations o WHERE o.id = admin_manufacturer_overview.organization_id "
+                        f"AND {AWAITING_APPROVAL_SQL})")
+            where.append(awaiting if listing == "awaiting" else f"NOT {awaiting}")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         total = await self.db.scalar(text(f"SELECT count(*) FROM admin_manufacturer_overview {clause}"), p)
         rows = await self.rows(f"""
@@ -416,7 +431,7 @@ class AdminRepository:
           ORDER BY user_id, is_archived, registered_at
         )
         SELECT u.id, u.clerk_user_id, u.first_name, u.last_name, u.display_name, u.email::text AS email, u.phone,
-               u.status AS account_status, u.created_at, u.last_seen_at,
+               u.status AS account_status, u.created_at, u.last_seen_at, u.record_type AS user_record_type,
                u.registration_channel, u.registration_method, u.registration_completed_at,
                coalesce((SELECT array_agg(role_selected ORDER BY selected_at) FROM marketplace_role_selections r
                          WHERE r.user_id=u.id AND r.status='active'), '{}') AS roles,
@@ -434,7 +449,8 @@ class AdminRepository:
                            'sourceNote', (SELECT bl.evidence->>'why' FROM onboarding_source_backfill_log bl
                                           WHERE bl.record_type = 'company' AND bl.record_id = lo.id
                                             AND bl.field = 'onboarding_source' AND bl.outcome <> 'applied'),
-                           'reviewStatus', lc.review_status, 'membershipRole', lmm.membership_role,
+                           'reviewStatus', lc.review_status, 'recordType', lc.record_type,
+                           'membershipRole', lmm.membership_role,
                            'isArchived', lc.is_archived)
                          ORDER BY lc.is_archived, lc.registered_at)
                          FROM memberships lmm
@@ -469,11 +485,23 @@ class AdminRepository:
         elif f.get("onboarding_status") in REVIEW_STATUSES:
             where.append("mf.review_status = :onb")
             p["onb"] = f["onboarding_status"]
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
-        total = await self.db.scalar(text(f"SELECT count(*) FROM ({self.USER_SELECT} {clause}) t"), p)
+        # Real / demo counts under the other filters, so the Data filter can show both numbers.
+        base = ("WHERE " + " AND ".join(where)) if where else ""
+        counts = (await self.db.execute(text(f"""
+            SELECT count(*) FILTER (WHERE coalesce(t.record_type, 'REAL') = 'REAL'
+                                      AND t.user_record_type = 'REAL') AS n_real,
+                   count(*) FILTER (WHERE t.record_type IN ('DEMO', 'TEST')
+                                       OR t.user_record_type IN ('DEMO', 'TEST')) AS n_demo,
+                   count(*) AS n_all
+            FROM ({self.USER_SELECT} {base}) t"""), p)).mappings().one()
+        counts = {k: int(counts[f"n_{k}"]) for k in DATA_SCOPES}
+        data = f.get("data") if f.get("data") in DATA_SCOPES else "all"
+        if data in USER_DATA_SQL:
+            where.append(USER_DATA_SQL[data])
+        clause = "WHERE " + " AND ".join(where)
         rows = await self.rows(f"{self.USER_SELECT} {clause} ORDER BY u.created_at DESC LIMIT :limit OFFSET :offset",
                                {**p, "limit": page_size, "offset": (page - 1) * page_size})
-        return {"total": total, "rows": rows}
+        return {"total": counts[data], "rows": rows, "data_counts": counts}
 
     async def user(self, user_id: str) -> dict | None:
         return await self.row(f"{self.USER_SELECT} WHERE u.id=CAST(:u AS uuid)", {"u": user_id})
@@ -528,7 +556,7 @@ class AdminRepository:
         OR EXISTS (SELECT 1 FROM visionary_profiles vp0 WHERE vp0.user_id = u.id))"""
     VISIONARY_SELECT = """
         SELECT u.id, u.first_name, u.last_name, u.display_name, u.email::text AS email, u.phone,
-               u.status AS account_status, u.created_at, u.last_seen_at,
+               u.status AS account_status, u.created_at, u.last_seen_at, u.record_type,
                vp.full_name, vp.role_title, vp.organization_name, vp.location, vp.introduction,
                vp.organization_id AS buyer_organization_id, vp.created_at AS profile_created_at,
                vp.updated_at AS profile_updated_at,
@@ -557,12 +585,36 @@ class AdminRepository:
             where.append("vp.user_id IS NOT NULL")
         elif f.get("profile") == "missing":
             where.append("vp.user_id IS NULL")
+        base = "WHERE " + " AND ".join(where)
+        counts = (await self.db.execute(text(f"""
+            SELECT count(*) FILTER (WHERE u.record_type = 'REAL') AS n_real,
+                   count(*) FILTER (WHERE u.record_type IN ('DEMO', 'TEST')) AS n_demo, count(*) AS n_all
+            FROM users u LEFT JOIN visionary_profiles vp ON vp.user_id = u.id {base}"""), p)).mappings().one()
+        counts = {k: int(counts[f"n_{k}"]) for k in DATA_SCOPES}
+        data = f.get("data") if f.get("data") in DATA_SCOPES else "all"
+        if data == "real":
+            where.append("u.record_type = 'REAL'")
+        elif data == "demo":
+            where.append("u.record_type IN ('DEMO', 'TEST')")
         clause = "WHERE " + " AND ".join(where)
-        total = await self.db.scalar(text(
-            f"SELECT count(*) FROM users u LEFT JOIN visionary_profiles vp ON vp.user_id = u.id {clause}"), p)
         rows = await self.rows(f"{self.VISIONARY_SELECT} {clause} ORDER BY u.created_at DESC, u.id "
                                "LIMIT :limit OFFSET :offset", {**p, "limit": page_size, "offset": (page - 1) * page_size})
-        return {"total": total, "rows": rows}
+        return {"total": counts[data], "rows": rows, "data_counts": counts}
+
+    async def set_user_record_type(self, user_id: str, record_type: str, admin_id, reason: str | None) -> str | None:
+        """Marks a person as REAL / DEMO / TEST. Returns the previous value (None = not found)."""
+        old = await self.db.scalar(text("SELECT record_type FROM users WHERE id = CAST(:u AS uuid) FOR UPDATE"),
+                                   {"u": user_id})
+        if old is None or old == record_type:
+            return old
+        await self.db.execute(text("UPDATE users SET record_type = :t, updated_at = now() WHERE id = CAST(:u AS uuid)"),
+                              {"u": user_id, "t": record_type})
+        await self.db.execute(text("""
+            INSERT INTO user_activity_events (user_id, clerk_user_id, kind, detail, actor_user_id)
+            SELECT id, clerk_user_id, 'account_status', :d, :a FROM users WHERE id = CAST(:u AS uuid)
+        """), {"u": user_id, "a": admin_id,
+               "d": f"Data type changed from {old} to {record_type}" + (f": {reason.strip()}" if reason and reason.strip() else "")})
+        return old
 
     async def visionary(self, user_id: str) -> dict | None:
         return await self.row(f"{self.VISIONARY_SELECT} WHERE u.id = CAST(:u AS uuid) AND {self.VISIONARY_WHERE}",
