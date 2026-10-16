@@ -259,7 +259,7 @@ if (!phone.trim()) {
         companyName: companyName.trim(),
         companyType,
         country,
-        phone: phone.trim(),
+        phone: `+91${phone.trim()}`,
         capacity: capacity.trim(),
         companyId: selectedCompany?.id ?? null,
       })).catch(() => setSubmitting(false));
@@ -411,34 +411,7 @@ if (!phone.trim()) {
   ) : null}
 </div>
 
-{/* Indian Mobile Number */}
-<div>
-  <label htmlFor="acc-phone">
-    Mobile number <span className="required">*</span>
-  </label>
 
-  <div className="account-input-wrap">
-    <span className="country-code">+91</span>
-
-    <input
-      type="tel"
-      id="acc-phone"
-      placeholder="9876543210"
-      autoComplete="tel-national"
-      inputMode="numeric"
-      maxLength={10}
-      className={errors.phone ? "error" : ""}
-      value={phone}
-      onChange={(e) =>
-        setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
-      }
-    />
-  </div>
-
-  {errors.phone ? (
-    <p className="field-error">{errors.phone}</p>
-  ) : null}
-</div>
 
                 <div>
                   <label htmlFor="acc-dob">Date of birth</label>
@@ -656,24 +629,44 @@ if (!phone.trim()) {
                   ) : null}
                 </div>
                 <div>
-                  <label htmlFor="acc-phone">
-                    Phone number <span className="optional">(optional)</span>
-                  </label>
-                  <div className="account-input-wrap">
-                    <span className="input-icon">
-                      <PhoneIcon size={16} />
-                    </span>
-                    <input
-                      type="tel"
-                      id="acc-phone"
-                      placeholder="+1 555 000 1234"
-                      className={errors.phone ? "error" : ""}
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                  </div>
-                  {errors.phone ? <p className="field-error">{errors.phone}</p> : null}
-                </div>
+  <label htmlFor="acc-phone">
+    Phone number <span className="required">*</span>
+  </label>
+
+  <div className="account-input-wrap">
+    <span className="country-code">+91</span>
+
+    <input
+      type="tel"
+      id="acc-phone"
+      placeholder="9876543210"
+      autoComplete="tel-national"
+      inputMode="numeric"
+      maxLength={10}
+      required
+      className={errors.phone ? "error" : ""}
+      value={phone}
+      onChange={(e) => {
+  const value = e.target.value.replace(/\D/g, "").slice(0, 10);
+
+  // Reject numbers that don't start with 6, 7, 8, or 9
+  if (value.length > 0 && !/^[6-9]/.test(value)) {
+    return;
+  }
+
+  setPhone(value);
+
+  if (errors.phone) {
+    setErrors((prev) => ({ ...prev, phone: "" }));
+  }
+}}
+    />
+  </div>
+
+  {errors.phone ? (
+    <p className="field-error">{errors.phone}</p>
+  ) : null}
+</div>
                 <div>
                   <label htmlFor="acc-capacity">
                     Production capacity <span className="optional">(optional)</span>
