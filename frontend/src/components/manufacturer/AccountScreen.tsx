@@ -16,12 +16,12 @@ import {
   StarIcon,
   UserIcon,
 } from "@/components/manufacturer/icons";
-import { isValidEmail, isValidPhone } from "@/lib/manufacturer/types";
+import { isValidEmail } from "@/lib/manufacturer/types";
 
 export type AccountSubmission = {
   firstName: string;
   lastName: string;
-  contact: string;
+  email: string;
   dob: string;
   companyName: string;
   companyType: string;
@@ -55,7 +55,7 @@ type FieldErrors = Partial<
   Record<
     | "firstName"
     | "lastName"
-    | "contact"
+    | "email"
     | "dob"
     | "companyName"
     | "companyType"
@@ -64,6 +64,7 @@ type FieldErrors = Partial<
     | "agree",
     string
   >
+
 >;
 
 const COMPANY_TYPES = [
@@ -93,7 +94,7 @@ const COUNTRIES = [
 export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onLoadCompany, initial }: AccountScreenProps) {
   const [firstName, setFirstName] = useState(initial?.firstName ?? "");
   const [lastName, setLastName] = useState(initial?.lastName ?? "");
-  const [contact, setContact] = useState(initial?.contact ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
   const [dob, setDob] = useState(initial?.dob ?? "");
   const [companyName, setCompanyName] = useState(initial?.companyName ?? "");
   const [companySuggestions, setCompanySuggestions] = useState<CompanySearchResult[]>([]);
@@ -216,19 +217,28 @@ return () => {
     const nextErrors: FieldErrors = {};
     if (!firstName.trim()) nextErrors.firstName = "First name is required.";
     if (!lastName.trim()) nextErrors.lastName = "Last name is required.";
-    if (!contact.trim()) {
-      nextErrors.contact = "Enter your email or phone number.";
-    } else if (!isValidEmail(contact.trim()) && !isValidPhone(contact.replace(/\D/g, ""))) {
-      nextErrors.contact = "Enter a valid email address or 10-digit phone number.";
-    }
+    // Email validation
+if (!email.trim()) {
+  nextErrors.email = "Email address is required.";
+} else if (!isValidEmail(email.trim())) {
+  nextErrors.email = "Please enter a valid email address.";
+}
+
+// Indian mobile number validation
+const indianMobileRegex = /^[6-9]\d{9}$/;
+
+if (!phone.trim()) {
+  nextErrors.phone = "Mobile number is required.";
+} else if (!indianMobileRegex.test(phone.trim())) {
+  nextErrors.phone =
+    "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.";
+}
     if (!dob) nextErrors.dob = "Enter your date of birth.";
     if (!companyName.trim()) nextErrors.companyName = "Enter your company name.";
     else if (companyDetailsStatus === "loading") nextErrors.companyName = "Loading the selected company's details…";
     if (!companyType) nextErrors.companyType = "Select a company category.";
     if (!country) nextErrors.country = "Select your country.";
-    if (phone.trim() && !/^[0-9+\-\s()]{7,15}$/.test(phone.trim())) {
-      nextErrors.phone = "Enter a valid phone number.";
-    }
+    
     if (!agree) nextErrors.agree = "You must agree to continue.";
 
     setErrors(nextErrors);
@@ -244,7 +254,7 @@ return () => {
       Promise.resolve(onAccountCreated({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        contact: contact.trim(),
+        email: email.trim(),
         dob,
         companyName: companyName.trim(),
         companyType,
@@ -376,26 +386,60 @@ return () => {
                     <p className="field-error">{errors.lastName}</p>
                   ) : null}
                 </div>
-                <div>
-                  <label htmlFor="acc-contact">Email or phone number</label>
-                  <div className="account-input-wrap">
-                    <span className="input-icon">
-                      <MailIcon size={16} />
-                    </span>
-                    <input
-                      type="text"
-                      id="acc-contact"
-                      placeholder="you@company.com or 10-digit phone"
-                      autoComplete="email"
-                      className={errors.contact ? "error" : ""}
-                      value={contact}
-                      onChange={(e) => setContact(e.target.value)}
-                    />
-                  </div>
-                  {errors.contact ? (
-                    <p className="field-error">{errors.contact}</p>
-                  ) : null}
-                </div>
+                
+{/* Email Address */}
+<div>
+  <label htmlFor="acc-email">
+  Email address <span className="required">*</span>
+</label>
+  <div className="account-input-wrap">
+    <span className="input-icon">
+      <MailIcon size={16} />
+    </span>
+    <input
+      type="email"
+      id="acc-email"
+      placeholder="you@company.com"
+      autoComplete="email"
+      className={errors.email ? "error" : ""}
+      value={email}
+      onChange={(e) => setEmail(e.target.value)}
+    />
+  </div>
+  {errors.email ? (
+    <p className="field-error">{errors.email}</p>
+  ) : null}
+</div>
+
+{/* Indian Mobile Number */}
+<div>
+  <label htmlFor="acc-phone">
+    Mobile number <span className="required">*</span>
+  </label>
+
+  <div className="account-input-wrap">
+    <span className="country-code">+91</span>
+
+    <input
+      type="tel"
+      id="acc-phone"
+      placeholder="9876543210"
+      autoComplete="tel-national"
+      inputMode="numeric"
+      maxLength={10}
+      className={errors.phone ? "error" : ""}
+      value={phone}
+      onChange={(e) =>
+        setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+      }
+    />
+  </div>
+
+  {errors.phone ? (
+    <p className="field-error">{errors.phone}</p>
+  ) : null}
+</div>
+
                 <div>
                   <label htmlFor="acc-dob">Date of birth</label>
                   <div className="account-input-wrap">
