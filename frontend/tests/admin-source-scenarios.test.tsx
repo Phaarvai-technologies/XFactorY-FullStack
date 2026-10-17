@@ -331,16 +331,17 @@ describe("Visionary detail", () => {
 describe("Admin navigation", () => {
   const ME = { id: "a1", name: "Admin", email: "a@example.com", roles: ["platform_administrator"], authMethod: "clerk" };
 
-  it("lists Visionaries after Machinery and routes /admin/visionaries/{id} to the detail", async () => {
+  it("lists Visionaries right after Manufacturers and routes /admin/visionaries/{id} to the detail", async () => {
     serve([["/admin/me", ME], ["/admin/visionaries/v1", { visionary: { ...VROW, name: "Routed" }, profile: null,
                                                           projects: [], requests: [], draftCount: 0 }]]);
     render(withHost(host("/admin/visionaries/v1"), <AdminShell />));
     expect(await screen.findByRole("heading", { name: "Routed" })).toBeInTheDocument();
     const labels = Array.from(document.querySelectorAll(".adm-nav a, .adm-nav button, nav a, nav button"))
       .map((n) => n.textContent?.trim()).filter(Boolean);
-    const i = labels.indexOf("Machinery");
+    const i = labels.indexOf("Manufacturers");
     expect(i).toBeGreaterThan(-1);
     expect(labels[i + 1]).toBe("Visionaries");
+    expect(labels[i + 2]).toBe("Machinery");
   });
 
   it("non-admins are refused by the API and see no Visionary data", async () => {

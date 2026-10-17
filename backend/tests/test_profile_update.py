@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from test_e2e_local import ACCOUNT, PNG, PNG2, approve_company, client  # noqa: F401  (shared fixture)
+from test_e2e_local import ACCOUNT, PNG, PNG2, approve_company, approve_user, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
 
@@ -43,6 +43,7 @@ async def patch(client, body, expect=200):
 
 async def test_profile_update_flow(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
 
     # First edits in the wizard: only these fields are sent.
     body = await patch(client, {"company": {"name": "Raman Precision", "about": "Old about text"},
@@ -158,6 +159,7 @@ async def test_profile_update_flow(client):
 
 async def test_old_put_still_works_and_does_not_clear_images(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     full = {"company": {"name": "Acme", "logo": PNG, "about": "a"}, "location": {"city": "Chennai"}}
     assert (await client.put("/manufacturer/profile", json=full)).status_code == 200
     full["company"]["logo"] = None                     # PUT: null logo = unchanged (legacy behaviour)
@@ -176,6 +178,7 @@ async def test_concurrent_first_requests_create_one_organization(client):
 
 async def test_update_only_touches_the_signed_in_users_record(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     marker = f"About text of {client.user}"
     await patch(client, {"company": {"about": marker}})
     rows = await client.sql(f"""SELECT organization_id = {ORG} FROM organization_profiles

@@ -74,12 +74,15 @@ async def test_manufacturer_list_detail_edit_history(client, no_clerk):
     admin = await make_admin(client, f"admin_{uuid.uuid4().hex[:8]}")
     tag = uuid.uuid4().hex[:6]
     sub, mh, org = await new_manufacturer(client, f"Chnnai Tools {tag}")
-    await client.patch("/manufacturer/profile", headers=mh, json={
-        "company": {"about": "Precision parts"}, "location": {"address": "Plot 1", "city": "Chnnai", "country": "India"}})
+    profile = {"company": {"about": "Precision parts"},
+               "location": {"address": "Plot 1", "city": "Chnnai", "country": "India"}}
+    # approval first: the remaining profile stays locked until X!Y approves the application
+    r = await client.patch("/manufacturer/profile", headers=mh, json=profile)
+    assert r.status_code == 403 and "awaiting admin approval" in r.text
 
     # XY-ADMIN-04: search + combined filters
     body = (await client.get("/admin/manufacturers", headers=admin,
-                             params={"q": tag, "completeness": "incomplete", "record_type": ["REAL"]})).json()
+                             params={"q": tag, "completeness": "incomplete", "record_type": ["REAL"], "listing": "all"})).json()
     assert body["total"] == 1
     row = body["rows"][0]
     # approval is requested as soon as the basic company details are submitted
@@ -88,6 +91,11 @@ async def test_manufacturer_list_detail_edit_history(client, no_clerk):
     assert row["recordType"] == "REAL" and row["entrySource"] == "MANUFACTURER"
     assert (await client.get("/admin/manufacturers", headers=admin,
                              params={"q": tag, "completeness": "complete"})).json()["total"] == 0
+
+    # approved -> the profile opens
+    assert (await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
+                               json={"review_status": "REVIEWED"})).status_code == 200
+    assert (await client.patch("/manufacturer/profile", headers=mh, json=profile)).status_code == 200
 
     # XY-ADMIN-05: one workspace
     d = (await client.get(f"/admin/manufacturers/{org}", headers=admin)).json()
@@ -154,19 +162,30 @@ async def test_review_flow_notes_assignment(client, no_clerk):
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
                            json={"review_status": "NEEDS_CORRECTION"})
     assert r.status_code == 422
+    # ... and the exact fields to correct
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
                            json={"review_status": "NEEDS_CORRECTION", "reason": "Add your ISO certificate"})
+    assert r.status_code == 422 and "Choose the fields" in r.text
+    r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
+                           json={"review_status": "NEEDS_CORRECTION", "reason": "Add your ISO certificate",
+                                 "correction_fields": ["companyName", "capacity"]})
     d = r.json()
+    assert d["pendingSubmission"]["correctionFields"] == ["companyName", "capacity"]
     assert d["manufacturer"]["reviewStatus"] == "NEEDS_CORRECTION"
     assert d["notes"][0]["note"].startswith("Correction requested")
 
-    # completing the profile never resubmits or approves anything
-    await client.patch("/manufacturer/profile", headers=mh, json={
+    # the profile stays locked while corrections are requested; it never resubmits / approves
+    r = await client.patch("/manufacturer/profile", headers=mh, json={
         "company": {"about": "Parts"}, "location": {"address": "Plot 1", "city": "Pune", "country": "India"},
         "certifications": [{"name": "ISO 9001", "body": "BSI", "fileName": "", "status": "Pending"}],
         "infra": {"water": "Borewell"}, "faqs": [{"q": "MOQ?", "a": "100"}]})
+    assert r.status_code == 403
     d = (await client.get(f"/admin/manufacturers/{org}", headers=admin)).json()
     assert d["manufacturer"]["reviewStatus"] == "NEEDS_CORRECTION"
+    # only the listed fields may change
+    r = await client.post("/manufacturer/account", headers=mh,
+                          json={**ACCOUNT, "companyName": f"Review Co {tag}", "companyType": "Textile & Apparel"})
+    assert r.status_code == 422 and "Not open for correction: Company category" in r.text
     # the manufacturer resubmits the corrected details -> SUBMITTED again, same submission
     r = await client.post("/manufacturer/account", headers=mh, json={**ACCOUNT, "companyName": f"Review Co {tag}"})
     assert r.status_code == 201, r.text
@@ -177,7 +196,13 @@ async def test_review_flow_notes_assignment(client, no_clerk):
 
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"review_status": "REVIEWED"})
     assert r.json()["manufacturer"]["reviewStatus"] == "REVIEWED"
-    assert r.json()["manufacturer"]["completeness"] == 100  # approved details are now in the main record
+    # approved -> the remaining profile opens; completed, it reaches 100% (date of birth is optional)
+    assert (await client.patch("/manufacturer/profile", headers=mh, json={
+        "company": {"about": "Parts"}, "location": {"address": "Plot 1", "city": "Pune", "country": "India"},
+        "certifications": [{"name": "ISO 9001", "body": "BSI", "fileName": "", "status": "Pending"}],
+        "infra": {"water": "Borewell"}, "faqs": [{"q": "MOQ?", "a": "100"}]})).status_code == 200
+    r = await client.get(f"/admin/manufacturers/{org}", headers=admin)
+    assert r.json()["manufacturer"]["completeness"] == 100 and r.json()["manufacturer"]["requiredTotal"] == 13
     fields = [h["field_changed"] for h in r.json()["history"]]
     assert fields.count("Review status") == 2 and "Assigned admin" in fields
 
@@ -210,9 +235,9 @@ async def test_record_types_archive_and_metrics(client, no_clerk):
     # batch archive skips REAL; archived hidden by default; restore
     r = (await client.post("/admin/manufacturers/archive-batch", headers=admin, json={"ids": [real, demo]})).json()
     assert r["changed"] == [demo] and r["skippedReal"] == [real]
-    listed = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag})).json()
+    listed = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag, "listing": "all"})).json()
     assert [x["id"] for x in listed["rows"]] == [real]
-    archived = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag, "archived": "archived"})).json()
+    archived = (await client.get("/admin/manufacturers", headers=admin, params={"q": tag, "archived": "archived", "listing": "all"})).json()
     assert [x["id"] for x in archived["rows"]] == [demo]
     d = (await client.post(f"/admin/manufacturers/{demo}/restore", headers=admin, json={})).json()
     assert d["manufacturer"]["isArchived"] is False

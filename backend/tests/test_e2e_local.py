@@ -132,7 +132,20 @@ async def client(monkeypatch):
     await engine.dispose()
 
 
-async def approve_company(client, org_id, decision="REVIEWED", reason=None):
+async def approve_user(client, sub=None):
+    """Approval-first: an X!Y admin approves this user's manufacturer application (their own
+    company) so the remaining sections unlock. Returns the company id."""
+    sub = sub or client.user
+    org = (await client.sql("""SELECT s.target_organization_id FROM manufacturer_submissions s
+                               JOIN users u ON u.id = s.submitted_by_user_id
+                               WHERE u.clerk_user_id = :s AND s.status IN ('pending', 'changes_requested')
+                               ORDER BY s.updated_at DESC LIMIT 1""", s=sub))[0][0]
+    r = await approve_company(client, str(org))
+    assert r.status_code == 200, r.text
+    return str(org)
+
+
+async def approve_company(client, org_id, decision="REVIEWED", reason=None, correction_fields=None):
     """An X!Y admin decides through the real admin endpoint (review-status control)."""
     admin = f"admin_{uuid.uuid4().hex[:8]}"
     hdr = {"Authorization": f"Bearer {client.token_for(admin)}"}
@@ -140,7 +153,8 @@ async def approve_company(client, org_id, decision="REVIEWED", reason=None):
     await client.sql("""INSERT INTO platform_role_assignments (user_id, platform_role)
                         SELECT id, 'platform_administrator' FROM users WHERE clerk_user_id=:s""", s=admin)
     r = await client.patch(f"/admin/manufacturers/{org_id}/admin-fields", headers=hdr,
-                           json={"review_status": decision, "reason": reason})
+                           json={"review_status": decision, "reason": reason,
+                                 **({"correction_fields": correction_fields} if correction_fields else {})})
     return r
 
 
@@ -163,7 +177,7 @@ async def test_full_frontend_flow(client):
 
     # --- AccountScreen submit (exact AccountSubmission)
     r = await client.post("/manufacturer/account", json={
-        "firstName": "Jordan", "lastName": "Ellis", "contact": "9876543210", "dob": "1992-06-20",
+        "firstName": "Jordan", "lastName": "Ellis", "email": "jordan.ellis@gmail.com", "dob": "1992-06-20",
         "companyName": "Ellis Manufacturing", "companyType": "Automotive & Machinery",
         "country": "Other", "phone": "+91 98765 43210", "capacity": "12,500 units/month"})
     assert r.status_code == 201, r.text
@@ -172,9 +186,15 @@ async def test_full_frontend_flow(client):
     acc = body["state"]["account"]
     assert acc == {"firstName": "Jordan", "lastName": "Ellis", "companyName": "Ellis Manufacturing",
                    "companyType": "Automotive & Machinery", "country": "Other", "dob": "1992-06-20",
-                   "phone": "+91 98765 43210", "capacity": "12,500 units/month"}
-    assert body["state"]["contact"] == {"email": "", "phone": "+91 98765 43210"}
+                   "phone": "", "capacity": "12,500 units/month", "personalEmail": "jordan.ellis@gmail.com"}
+    # the phone is the COMPANY's (normalized with +91); the personal email stays on the user
+    assert body["state"]["contact"] == {"email": "", "phone": "+919876543210"}
     assert body["state"]["bookings"] == []
+    # approval first: pending until an X!Y admin approves; then the remaining sections open
+    assert body["approval"]["access"]["unlocked"] is False
+    assert body["approval"]["access"]["message"] == "Your manufacturer application is awaiting admin approval."
+    assert (await client.put("/manufacturer/profile", json={"company": {}, "location": {}})).status_code == 403
+    await approve_user(client)
 
     # --- ProfileWizard saves (same logo sent repeatedly -> uploaded once)
     profile = {
@@ -309,7 +329,7 @@ async def test_token_with_clerk_organization(client, monkeypatch):
 
 ACCOUNT = {"firstName": "Priya", "lastName": "Raman", "contact": "priya@factory.in", "dob": "1990-04-02",
            "companyName": "Raman Precision", "companyType": "Automotive & Machinery", "country": "India",
-           "phone": "", "capacity": "5000 units/month"}
+           "phone": "9876543210", "capacity": "5000 units/month"}
 
 
 async def test_returning_manufacturer_keeps_roles_and_saved_details(client):
@@ -344,7 +364,9 @@ async def test_returning_manufacturer_keeps_roles_and_saved_details(client):
     assert body["accountExists"] is True
     assert body["state"]["account"]["companyName"] == "Raman Precision"
     assert body["state"]["account"]["capacity"] == "5000 units/month"
-    assert body["state"]["contact"]["email"] == "priya@factory.in"
+    # personal email on the user; never the company's contact email
+    assert body["state"]["account"]["personalEmail"] == "priya@factory.in"
+    assert body["state"]["contact"]["email"] == ""
 
     # Deselecting a role is saved too.
     r = await client.put("/identity/me/roles", json={"roles": ["manufacturer"]})

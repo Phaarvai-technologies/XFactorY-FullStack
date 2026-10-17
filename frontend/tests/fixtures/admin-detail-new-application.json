@@ -1,0 +1,552 @@
+{
+ "manufacturer": {
+  "id": "f9de2ba1-58d9-4e21-920c-ffd565b6dadf",
+  "companyName": "Fresh Fixture Works 989814",
+  "contactName": null,
+  "contactEmail": null,
+  "contactPhone": null,
+  "primaryUser": {
+   "id": "cd625ada-824c-499b-b170-d37dc05bb50c",
+   "name": "Asha Rao",
+   "email": "user_fxn_455ae2@example.com"
+  },
+  "industry": null,
+  "country": null,
+  "city": null,
+  "location": null,
+  "majorProcess": null,
+  "listingCount": 0,
+  "completeness": 29,
+  "requiredDone": 4,
+  "requiredTotal": 14,
+  "reviewStatus": "SUBMITTED",
+  "recordType": "REAL",
+  "entrySource": "MANUFACTURER",
+  "onboardingSource": null,
+  "onboardingSourceNote": null,
+  "stagedSource": {
+   "source": "web_dashboard",
+   "status": "pending"
+  },
+  "referralSource": null,
+  "assignedAdminId": null,
+  "isArchived": false,
+  "archivedAt": null,
+  "registeredAt": "2026-10-16T17:13:13.603335+00:00",
+  "lastUpdated": "2026-10-16T17:13:13.614967+00:00",
+  "lastSeenAt": "2026-10-16T17:13:13.612278+00:00",
+  "ownerUserId": "cd625ada-824c-499b-b170-d37dc05bb50c",
+  "attentionReason": null,
+  "linkedUsers": 1,
+  "request": null,
+  "missingFields": [
+   "Email or phone",
+   "Company category",
+   "Country",
+   "About the company",
+   "Facility address",
+   "City",
+   "Facility country",
+   "At least one certification",
+   "Infrastructure details",
+   "At least one FAQ"
+  ],
+  "sections": [
+   {
+    "name": "Personal info",
+    "complete": false
+   },
+   {
+    "name": "Company info",
+    "complete": false
+   },
+   {
+    "name": "Company details",
+    "complete": false
+   },
+   {
+    "name": "Location",
+    "complete": false
+   },
+   {
+    "name": "Certifications",
+    "complete": false
+   },
+   {
+    "name": "Infrastructure",
+    "complete": false
+   },
+   {
+    "name": "FAQ",
+    "complete": false
+   }
+  ],
+  "stoppedAt": "Personal info",
+  "lastCompletedSection": null,
+  "assignedAdminName": null
+ },
+ "profile": {
+  "profileData": {
+   "company": {
+    "name": "Jordan Lee",
+    "logo": null,
+    "cover": null,
+    "about": "",
+    "vision": "",
+    "estYear": "",
+    "employees": "",
+    "businessType": "",
+    "orgSize": ""
+   },
+   "location": {
+    "address": "",
+    "city": "",
+    "state": "",
+    "country": "",
+    "zip": "",
+    "pin": null,
+    "sez": "Not in SEZ",
+    "serviceableAreas": []
+   },
+   "certifications": [],
+   "infra": {
+    "electricity": "",
+    "water": "",
+    "storage": "",
+    "packaging": "",
+    "waste": "",
+    "qa": ""
+   },
+   "faqs": []
+  },
+  "state": {
+   "account": {
+    "firstName": "Asha",
+    "lastName": "Rao",
+    "companyName": "Jordan Lee",
+    "companyType": "",
+    "country": "",
+    "dob": "1990-02-02",
+    "phone": "",
+    "capacity": ""
+   },
+   "contact": {
+    "email": "",
+    "phone": ""
+   },
+   "epic2": {
+    "companyDetailsDone": false,
+    "locationDone": false,
+    "certifications": [],
+    "infraDone": false,
+    "faqs": []
+   },
+   "serviceableAreas": [],
+   "machinery": [],
+   "calendar": {},
+   "recurring": null,
+   "capacity": null,
+   "bookings": []
+  },
+  "profileProgress": {
+   "status": "draft",
+   "currentStep": 1,
+   "completedSteps": [],
+   "resumeStep": 1,
+   "percentage": 15,
+   "checklist": {
+    "companyDetailsDone": false,
+    "locationDone": false,
+    "certsDone": false,
+    "infraDone": false,
+    "faqDone": false
+   }
+  },
+  "machineryDraft": null
+ },
+ "contacts": {
+  "email": "",
+  "phone": ""
+ },
+ "linkedUsers": [
+  {
+   "id": "cd625ada-824c-499b-b170-d37dc05bb50c",
+   "first_name": "Asha",
+   "last_name": "Rao",
+   "email": "user_fxn_455ae2@example.com",
+   "phone": null,
+   "status": "active",
+   "membership_role": "owner",
+   "created_at": "2026-10-16T17:13:13.594306+00:00",
+   "last_seen_at": "2026-10-16T17:13:13.612278+00:00"
+  }
+ ],
+ "members": [
+  {
+   "id": "cd625ada-824c-499b-b170-d37dc05bb50c",
+   "name": "Asha Rao",
+   "email": "user_fxn_455ae2@example.com",
+   "accountStatus": "active",
+   "membershipRole": "owner",
+   "membershipStatus": "active",
+   "roles": [
+    "manufacturer"
+   ],
+   "linkedAt": "2026-10-16T17:13:13.603335+00:00",
+   "lastSeenAt": "2026-10-16T17:13:13.612278+00:00"
+  }
+ ],
+ "notes": [],
+ "history": [],
+ "timeline": [
+  {
+   "at": "2026-10-16T17:13:13.614967+00:00",
+   "event": "Onboarding form submitted (account created)"
+  },
+  {
+   "at": "2026-10-16T17:13:13.614967+00:00",
+   "event": "Profile completed and submitted for review"
+  },
+  {
+   "at": "2026-10-16T17:13:13.614967+00:00",
+   "event": "Company details submitted for approval"
+  },
+  {
+   "at": "2026-10-16T17:13:13.614967+00:00",
+   "event": "Last profile update"
+  },
+  {
+   "at": "2026-10-16T17:13:13.603335+00:00",
+   "event": "Manufacturer record created"
+  }
+ ],
+ "pendingSubmission": null,
+ "onboarding": {
+  "source": null,
+  "sourceLabel": "Unknown",
+  "note": null,
+  "staged": {
+   "source": "web_dashboard",
+   "status": "pending"
+  },
+  "backfill": null,
+  "importBatch": null,
+  "history": [
+   {
+    "id": "97bf99d0-8c65-4148-a69f-fd1ae0c06fb9",
+    "event": "submitted",
+    "label": "Submitted for review",
+    "source": "web_dashboard",
+    "sourceLabel": "Web Dashboard",
+    "actor": "Asha Rao",
+    "actorRole": "requester",
+    "at": "2026-10-16T17:13:13.628932+00:00",
+    "submissionKind": "new_company",
+    "decision": null
+   }
+  ]
+ },
+ "updateRequests": [],
+ "applications": [
+  {
+   "id": "a34a64a4-6c63-4569-8859-8895c38394c3",
+   "kind": "new_company",
+   "kindLabel": "New company",
+   "status": "pending",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:13.614967+00:00",
+   "createdAt": "2026-10-16T17:13:13.614967+00:00",
+   "updatedAt": "2026-10-16T17:13:13.614967+00:00",
+   "reviewedAt": null,
+   "reviewedBy": null,
+   "feedback": null,
+   "internalNotes": "",
+   "correctionFields": [],
+   "correctable": [
+    {
+     "key": "firstName",
+     "label": "First name"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth"
+    },
+    {
+     "key": "companyName",
+     "label": "Company name"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category"
+    },
+    {
+     "key": "country",
+     "label": "Company location"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity"
+    }
+   ],
+   "applicant": {
+    "id": "cd625ada-824c-499b-b170-d37dc05bb50c",
+    "name": "Asha Rao",
+    "personalEmail": "asha.rao@gmail.com",
+    "signInEmail": "user_fxn_455ae2@example.com",
+    "accountStatus": "active",
+    "isMember": true
+   },
+   "personal": [
+    {
+     "key": "firstName",
+     "label": "First name",
+     "value": "Asha"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name",
+     "value": "Rao"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email",
+     "value": "asha.rao@gmail.com"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth",
+     "value": "1990-02-02"
+    }
+   ],
+   "company": [
+    {
+     "key": "companyName",
+     "label": "Company name",
+     "submitted": "Fresh Fixture Works 989814",
+     "current": "Jordan Lee"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category",
+     "submitted": "Automotive & Machinery",
+     "current": ""
+    },
+    {
+     "key": "country",
+     "label": "Company location",
+     "submitted": "India",
+     "current": ""
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number",
+     "submitted": "+914423456789",
+     "current": ""
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity",
+     "submitted": "500 units/month",
+     "current": ""
+    }
+   ],
+   "changedOnResubmit": [],
+   "companyHasOwner": true,
+   "canMakePrimary": false,
+   "seen": "2026-10-16T17:13:13.614967+00:00",
+   "events": [
+    {
+     "event": "submitted",
+     "by": "Asha Rao",
+     "role": "requester",
+     "at": "2026-10-16T17:13:13.628932+00:00",
+     "details": {}
+    }
+   ]
+  }
+ ],
+ "admins": [
+  {
+   "id": "0519a84e-eeb3-4eb2-ae3e-b7c5dc5b7b5e",
+   "name": "Asha Verma",
+   "email": "idle_18e3df@xy.test"
+  },
+  {
+   "id": "067838d9-1801-4d0d-87ce-95ad8c2572e0",
+   "name": "Asha Verma",
+   "email": "lock_15c005@xy.test"
+  },
+  {
+   "id": "230918aa-0946-47fe-a2d6-9097e2742974",
+   "name": "Asha Verma",
+   "email": "idle_cd20d3@xy.test"
+  }
+ ],
+ "requiredFields": [
+  {
+   "key": "r_first_name",
+   "label": "First name",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_last_name",
+   "label": "Last name",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_contact",
+   "label": "Email or phone",
+   "section": "Personal info",
+   "done": false
+  },
+  {
+   "key": "r_dob",
+   "label": "Date of birth",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_company_name",
+   "label": "Company name",
+   "section": "Company info",
+   "done": true
+  },
+  {
+   "key": "r_industry",
+   "label": "Company category",
+   "section": "Company info",
+   "done": false
+  },
+  {
+   "key": "r_account_country",
+   "label": "Country",
+   "section": "Company info",
+   "done": false
+  },
+  {
+   "key": "r_about",
+   "label": "About the company",
+   "section": "Company details",
+   "done": false
+  },
+  {
+   "key": "r_address",
+   "label": "Facility address",
+   "section": "Location",
+   "done": false
+  },
+  {
+   "key": "r_city",
+   "label": "City",
+   "section": "Location",
+   "done": false
+  },
+  {
+   "key": "r_location_country",
+   "label": "Facility country",
+   "section": "Location",
+   "done": false
+  },
+  {
+   "key": "r_certification",
+   "label": "At least one certification",
+   "section": "Certifications",
+   "done": false
+  },
+  {
+   "key": "r_infrastructure",
+   "label": "Infrastructure details",
+   "section": "Infrastructure",
+   "done": false
+  },
+  {
+   "key": "r_faq",
+   "label": "At least one FAQ",
+   "section": "FAQ",
+   "done": false
+  }
+ ],
+ "sectionsOrder": [
+  "Personal info",
+  "Company info",
+  "Company details",
+  "Location",
+  "Certifications",
+  "Infrastructure",
+  "FAQ"
+ ],
+ "editable": {
+  "profile": {
+   "company.name": "Company name",
+   "company.about": "About the company",
+   "company.vision": "Vision & mission",
+   "company.estYear": "Year established",
+   "company.employees": "Number of employees",
+   "company.businessType": "Business type",
+   "company.orgSize": "Organization size",
+   "location.address": "Facility address",
+   "location.city": "City",
+   "location.state": "State / province",
+   "location.country": "Facility country",
+   "location.zip": "ZIP / postal code",
+   "location.sez": "SEZ status",
+   "location.serviceableAreas": "Serviceable areas",
+   "infra.electricity": "Electricity",
+   "infra.water": "Water",
+   "infra.storage": "Storage",
+   "infra.packaging": "Packaging",
+   "infra.waste": "Waste disposal",
+   "infra.qa": "Quality assurance",
+   "certifications": "Certifications",
+   "faqs": "FAQs"
+  },
+  "account": {
+   "account.companyType": "Company category",
+   "account.country": "Country",
+   "account.capacity": "Production capacity",
+   "contact.email": "Contact email",
+   "contact.phone": "Contact phone"
+  },
+  "machinery": {
+   "industry": "Industry",
+   "subcategory": "Subcategory",
+   "type": "Machinery type",
+   "capacity": "Capacity",
+   "age": "Age",
+   "condition": "Condition",
+   "technical": "Technical details",
+   "rawMatStatus": "Raw materials",
+   "materialDetails": "Material details",
+   "laborType": "Labour type",
+   "workerCount": "Workers",
+   "workerRoles": "Worker roles",
+   "logistics": "Logistics",
+   "logisticsPartner": "Logistics partner",
+   "pricing": "Pricing",
+   "insurance": "Insurance"
+  },
+  "required": [
+   "account.companyType",
+   "account.country",
+   "company.about",
+   "company.name",
+   "location.address",
+   "location.city",
+   "location.country"
+  ]
+ }
+}

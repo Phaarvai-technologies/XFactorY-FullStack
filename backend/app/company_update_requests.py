@@ -12,9 +12,12 @@ and submits company details. Instead of being refused, the details are staged as
   * the platform admin reviews it on the company's admin page: existing and proposed values side
     by side, verification / contact notes (internal), edits to the proposed values, then
     approve (choosing the fields), request corrections, or decline (feedback recorded).
-  * approval merges ONLY the chosen fields into the existing record in one transaction, once.
-    The company keeps its id, entry / onboarding source, approval status, owners and members and
-    all other data. Approval never creates a membership or transfers ownership.
+  * approval merges ONLY the chosen fields into the existing record in one transaction, once
+    (none may be chosen: the request is then the applicant's registration only). The company keeps
+    its id, entry / onboarding source, approval status, owners and members and all other data.
+  * the request is also the requester's manufacturer APPLICATION to join the company
+    (app/manufacturer_access.py): approval links them to it as a member - never as owner, and
+    never with ownership of the shared company details. Corrections name the exact fields.
   * the decision must be made on what the admin actually saw: `fingerprint` covers the company's
     current values, the request's values and its status. If the company or the request changed
     meanwhile (another approval, the owner's own edit, a resubmission), the decision is refused
@@ -132,9 +135,9 @@ async def submit(db: AsyncSession, *, user_id: UUID, workspace_id: UUID, company
     """Stage (or refresh) the requester's update request for `company_id`. The caller holds the
     company row lock and has checked that the requester does not manage the company."""
     current = await current_values(db, company_id)
-    if not proposed_changes(current, payload):
-        raise RequestError("The details you entered are the same as this company's saved details, "
-                           "so there is nothing to send for review.", 422)
+    # A user registering under an existing company sees its saved details read-only, so the
+    # request may propose no change at all: it is still recorded (pending onboarding request for
+    # X!Y review) - it never changes the company and never grants access by itself.
     previous = (await db.execute(text("""
         SELECT id, payload, original_payload, status FROM manufacturer_submissions
         WHERE submitted_by_user_id = :u AND target_organization_id = :t AND kind = 'update_request'
@@ -169,7 +172,7 @@ async def for_target(db: AsyncSession, org_id: str) -> list[dict]:
     rows = (await db.execute(text("""
         SELECT s.id, s.status, s.source, s.payload, s.original_payload, s.base_snapshot, s.admin_notes,
                s.review_feedback, s.applied_changes, s.created_at, s.updated_at, s.reviewed_at, s.applied_at,
-               s.submitted_by_user_id, ru.first_name AS r_first, ru.last_name AS r_last, ru.email::text AS r_email,
+               s.submitted_by_user_id, s.correction_fields, ru.first_name AS r_first, ru.last_name AS r_last, ru.email::text AS r_email,
                coalesce(nullif(btrim(concat_ws(' ', au.first_name, au.last_name)), ''), au.display_name) AS reviewer
         FROM manufacturer_submissions s
         JOIN users ru ON ru.id = s.submitted_by_user_id
@@ -203,6 +206,9 @@ async def for_target(db: AsyncSession, org_id: str) -> list[dict]:
             "reviewedAt": r["reviewed_at"], "reviewedBy": r["reviewer"], "appliedAt": r["applied_at"],
             "feedback": r["review_feedback"], "adminNotes": r["admin_notes"] or "",
             "appliedChanges": _json(r["applied_changes"]) or None,
+            # the applicant's own personal details from their application (admins only)
+            "applicant": payload.get("applicant") or None,
+            "correctionFields": list(r["correction_fields"] or []),
             "fields": [{
                 "key": k, "label": label,
                 "current": current.get(k, ""),
@@ -267,8 +273,10 @@ async def edit(db: AsyncSession, org_id: str, request_id: str, admin_id: UUID,
 
 # ------------------------------------------------------------------ admin: decide
 async def decide(db: AsyncSession, org_id: str, request_id: str, admin_id: UUID, decision: str,
-                 fields: list[str] | None, feedback: str | None, seen: str | None) -> dict:
+                 fields: list[str] | None, feedback: str | None, seen: str | None,
+                 correction_fields: list[str] | None = None) -> dict:
     """Approve / request changes / decline. Caller commits. Returns what happened."""
+    from app import manufacturer_access as access  # avoid an import cycle
     status = DECISIONS.get(decision)
     if status is None:
         raise RequestError("Unsupported decision", 422)
@@ -293,20 +301,32 @@ async def decide(db: AsyncSession, org_id: str, request_id: str, admin_id: UUID,
         not_changed = [LABELS[k] for k in chosen if k not in changes]
         if not_changed:
             raise RequestError("Nothing to apply for: " + ", ".join(not_changed), 422)
-        if not chosen:
-            raise RequestError("Choose at least one change to apply, or decline the request.", 422)
         values = {k: validate(k, changes[k]) for k in chosen}
-        await _apply(db, org_id, current, values)
+        if values:
+            await _apply(db, org_id, current, values)
         applied = {k: {"from": current.get(k, ""), "to": v} for k, v in values.items()}
+        # The requester's application to join the company is approved: membership (not ownership).
+        await access.grant_membership(db, company_id=org_id, user_id=sub["submitted_by_user_id"],
+                                      workspace_id=sub["organization_id"])
+    try:
+        fix = access.correction_fields(correction_fields) if status == "changes_requested" else []
+    except ValueError as exc:
+        raise RequestError(str(exc), 422) from exc
+    if status == "changes_requested" and not fix:
+        raise RequestError("Choose the fields the requester needs to correct.", 422)
     await db.execute(text("""
         UPDATE manufacturer_submissions
         SET status = :s, reviewed_by_user_id = :a, reviewed_at = now(), review_feedback = :f,
+            correction_fields = CASE WHEN :s = 'changes_requested' THEN CAST(:cf AS text[]) ELSE correction_fields END,
             applied_at = CASE WHEN :s = 'approved' THEN now() END,
             applied_changes = CASE WHEN :s = 'approved' THEN CAST(:ap AS jsonb) END, updated_at = now()
         WHERE id = :id
-    """), {"s": status, "a": admin_id, "f": feedback, "ap": json.dumps(applied), "id": sub["id"]})
+    """), {"s": status, "a": admin_id, "f": feedback, "cf": fix or None, "ap": json.dumps(applied),
+           "id": sub["id"]})
     await _event(db, sub["id"], "decision", admin_id, "admin",
-                 {"decision": status, "feedback": feedback, "applied": applied})
+                 {"decision": status, "feedback": feedback, "applied": applied,
+                  **({"membership": "member"} if status == "approved" else {}),
+                  **({"correctionFields": fix} if fix else {})})
     return {"submission": sub, "status": status, "applied": applied, "feedback": feedback}
 
 

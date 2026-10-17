@@ -112,30 +112,39 @@ async def test_submitting_details_creates_one_pending_submission_and_stages_it(c
     assert d["pendingSubmission"]["submittedBy"]["email"]
 
 
-# ---------------------------------------------------------------- 2-4. pending -> complete -> approve
-async def test_profile_can_be_completed_while_pending_and_both_conditions_are_needed(client):  # noqa: F811
+# ---------------------------------------------------------------- 2-4. pending -> approve -> complete
+async def test_sections_locked_while_pending_and_both_conditions_are_needed(client):  # noqa: F811
     t, sub = _tag(), f"user_ap2_{_tag()}"
     h = hdr(client, sub)
     assert (await client.post("/manufacturer/account", headers=h, json=account(f"Beta Forge {t}"))).status_code == 201
     org = await own_org(client, sub)
 
-    # completing every remaining section while pending works, and approves nothing
-    await complete_profile(client, h)
+    # approval first: every remaining section is locked while pending (also through the API)
+    blocked = [await client.patch("/manufacturer/profile", headers=h, json=PROFILE),
+               await client.post("/manufacturer/machinery", headers=h, json=MACHINE),
+               await client.patch("/manufacturer/availability", headers=h, json={"calendar": {"2026-11-01": "blocked"}})]
+    assert [r.status_code for r in blocked] == [403, 403, 403]
+    assert all("awaiting admin approval" in r.text for r in blocked)
     e = await eligibility(client, h)
     assert e["status"] == "pending" and e["eligibility"]["approved"] is False
+    assert e["access"]["unlocked"] is False and e["access"]["message"] == \
+        "Your manufacturer application is awaiting admin approval."
     assert e["eligibility"]["visibleToVisionaries"] is False and e["eligibility"]["bookingAvailable"] is False
     assert not await visible(client, org) and await booking_status(client, org) == 404
 
     # approval merges the reviewed details into the main record, once
     r = await approve_company(client, org, reason="Looks good")
     assert r.status_code == 200, r.text
+    assert (await eligibility(client, h))["access"]["unlocked"] is True
+    await complete_profile(client, h)  # the remaining sections are open now
     row = (await client.sql("""SELECT o.display_name, op.company_category, op.country_name, op.production_capacity_label,
                                       op.contact_email, mo.status, mo.reviewed_by_user_id IS NOT NULL
                                FROM organizations o JOIN organization_profiles op ON op.organization_id=o.id
                                JOIN manufacturer_onboarding mo ON mo.organization_id=o.id
                                WHERE o.id=CAST(:o AS uuid)""", o=org))[0]
+    # the applicant's personal email never becomes the company's contact email
     assert tuple(row) == (f"Beta Forge {t}", "Automotive & Machinery", "India", "500 units/month",
-                          "asha@factory.in", "approved", True)
+                          None, "approved", True)
     assert [tuple(x) for x in await submissions(client, org)] == [("new_company", "approved", True, True, "Looks good", True)]
     # approved AND 100% complete -> visible, searchable, bookable
     e = await eligibility(client, h)
@@ -168,8 +177,8 @@ async def test_complete_profile_without_approval_is_not_enough(client):  # noqa:
     h = hdr(client, sub)
     assert (await client.post("/manufacturer/account", headers=h, json=account(f"Delta Press {t}"))).status_code == 201
     org = await own_org(client, sub)
-    await complete_profile(client, h)
     assert (await approve_company(client, org)).status_code == 200
+    await complete_profile(client, h)
     assert await visible(client, org)
     r = await approve_company(client, org, decision="NEEDS_CORRECTION", reason="Re-check certificates")
     assert r.status_code == 200, r.text
@@ -188,14 +197,23 @@ async def test_rejection_and_corrections_never_overwrite_or_duplicate(client):  
 
     r = await approve_company(client, org, decision="NEEDS_CORRECTION")
     assert r.status_code == 422  # feedback is required
-    r = await approve_company(client, org, decision="NEEDS_CORRECTION", reason="Use the registered company name")
+    r = await approve_company(client, org, decision="NEEDS_CORRECTION", reason="Use the registered company name",
+                              correction_fields=["companyName"])
     assert r.status_code == 200 and r.json()["manufacturer"]["reviewStatus"] == "NEEDS_CORRECTION"
-    assert (await eligibility(client, h))["feedback"] == "Use the registered company name"
+    e = await eligibility(client, h)
+    assert e["feedback"] == "Use the registered company name"
+    assert e["access"]["status"] == "changes_requested" and e["access"]["unlocked"] is False
+    assert e["access"]["application"]["correctionFields"] == ["companyName"]
+    # only the listed field may change
+    r = await client.post("/manufacturer/account", headers=h, json=account(f"Eps Tools Pvt Ltd {t}", capacity="9 t"))
+    assert r.status_code == 422 and "Production capacity" in r.text
     # corrected resubmission updates the same submission (no duplicate)
     assert (await client.post("/manufacturer/account", headers=h,
                               json=account(f"Eps Tools Pvt Ltd {t}"))).status_code == 201
     subs = await submissions(client, org)
     assert [(x[0], x[1]) for x in subs] == [("new_company", "pending")]
+    # resubmission alone never unlocks
+    assert (await client.patch("/manufacturer/profile", headers=h, json=PROFILE)).status_code == 403
 
     r = await approve_company(client, org, decision="REJECTED")
     assert r.status_code == 422  # a reason is required
@@ -204,9 +222,20 @@ async def test_rejection_and_corrections_never_overwrite_or_duplicate(client):  
     assert (await client.sql("SELECT display_name FROM organizations WHERE id=CAST(:o AS uuid)", o=org))[0][0] == before
     subs = await submissions(client, org)
     assert [tuple(x) for x in subs] == [("new_company", "rejected", True, True, "Not a manufacturer", False)]
-    await complete_profile(client, h)
+    # rejected: everything stays locked; the applicant sees the reason and when to apply again
+    assert (await client.patch("/manufacturer/profile", headers=h, json=PROFILE)).status_code == 403
     assert not await visible(client, org)
-    # a new attempt after rejection is a new submission (the rejected one is kept as history)
+    e = await eligibility(client, h)
+    assert e["access"]["status"] == "rejected" and e["access"]["application"]["feedback"] == "Not a manufacturer"
+    assert e["access"]["reapplyAt"] and e["access"]["canReapply"] is False
+    # a fresh application only 24 hours after the rejection (enforced by the backend)
+    r = await client.post("/manufacturer/account", headers=h, json=account(f"Eps Tools {t}"))
+    assert r.status_code == 409 and "apply again from" in r.json()["detail"]
+    assert len(await submissions(client, org)) == 1
+    await client.sql("""UPDATE manufacturer_submissions SET reviewed_at = now() - interval '25 hours'
+                        WHERE target_organization_id = CAST(:o AS uuid)""", o=org)
+    assert (await eligibility(client, h))["access"]["canReapply"] is True
+    # the new attempt is a new submission (the rejected one is kept as history)
     assert (await client.post("/manufacturer/account", headers=h, json=account(f"Eps Tools {t}"))).status_code == 201
     assert [x[1] for x in await submissions(client, org)] == ["rejected", "pending"]
 
@@ -237,22 +266,23 @@ async def test_claim_of_seeded_company_rejected_or_approved(client, tmp_path):  
     r = await client.post("/manufacturer/account", headers=ha, json=account(f"Seeded Cast {t}", companyId=seeded,
                                                                           capacity="1 t", companyType="Other"))
     assert r.status_code == 201, r.text
-    await complete_profile(client, ha)  # builds the profile in the claimant's own workspace meanwhile
+    # approval first: the claimant cannot build a profile while the claim is pending
+    assert (await client.patch("/manufacturer/profile", headers=ha, json=PROFILE)).status_code == 403
     assert await snap() == original  # nothing written to the seeded company before approval
     assert (await approve_company(client, seeded, decision="REJECTED", reason="Could not verify")).status_code == 200
     assert await snap() == original  # rejected claim: untouched
     assert not await visible(client, seeded)
 
-    # another user claims it and is approved: saved values kept, missing ones filled, the
-    # workspace profile merged where the company had nothing, ownership granted, eligible
+    # another user claims it and is approved: saved values kept, missing ones filled, ownership
+    # granted (the company had none); the profile is completed after approval -> eligible
     b = f"user_cl2_{_tag()}"
     hb = hdr(client, b)
     assert (await client.post("/manufacturer/account", headers=hb, json=account(
         f"Seeded Cast {t}", companyId=seeded, capacity="1 t", companyType="Other"))).status_code == 201
-    await complete_profile(client, hb)
     workspace = await own_org(client, b)
     assert workspace != seeded
     assert (await approve_company(client, seeded)).status_code == 200
+    await complete_profile(client, hb)
     row = (await snap())[0]
     assert tuple(row) == (f"Seeded Cast {t}", "active", "Automotive & Machinery", "700 t", 1)
     merged = (await client.sql("""SELECT op.about_company, f.city,

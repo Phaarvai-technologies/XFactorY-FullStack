@@ -48,6 +48,7 @@ from sqlalchemy import text
 
 from app.core import onboarding_source
 from app.repositories.manufacturer import COUNTRY_CODES, LISTED_COMPANY_SQL, normalize_company_name
+from app.core.cli import run as run_cli
 
 SOURCE = "database_import"
 
@@ -241,4 +242,4 @@ async def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(run_cli(main()))

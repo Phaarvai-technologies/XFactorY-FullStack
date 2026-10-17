@@ -155,7 +155,24 @@ export function CustomSignInForm({
       goToSignUp();
       return;
     }
-    setStatus({ tone: "error", message: check.message });
+    // The check could not be completed (server / network problem). The sign-in attempt was used
+    // up and its session ended, so the code step cannot be retried: start again from the password.
+    restartSignIn(check.message);
+  }
+
+  /** Back to the email + password step (email kept). Used when the current Clerk sign-in attempt
+   * no longer exists, so a code would be sent to Clerk without an attempt (Clerk then answers
+   * "`identifier` is required when `strategy` is `email_code`"). */
+  function restartSignIn(message: string) {
+    setDeviceStep(null);
+    setDeviceCode("");
+    setPassword("");
+    setStatus({ tone: "error", message });
+  }
+
+  /** The sign-in attempt the code step belongs to is still open with Clerk. */
+  function attemptStillOpen(): boolean {
+    return !!signIn?.id && (signIn.status === "needs_second_factor" || signIn.status === "needs_client_trust");
   }
 
   /** Clerk says this browser already has a session: same registration rule. */
@@ -464,6 +481,10 @@ async function handleDeviceCode() {
   if (!isLoaded || !signIn || !setActive || !deviceStep) {
     return;
   }
+  if (!attemptStillOpen()) {
+    restartSignIn("This verification step has expired. Enter your password again to get a new code.");
+    return;
+  }
 
   try {
     setIsSubmitting(true);
@@ -503,6 +524,10 @@ async function handleResendDeviceCode() {
   setStatus(null);
 
   if (!isLoaded || !signIn || !deviceStep) {
+    return;
+  }
+  if (!attemptStillOpen()) {
+    restartSignIn("This verification step has expired. Enter your password again to get a new code.");
     return;
   }
 

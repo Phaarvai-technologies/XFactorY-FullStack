@@ -3,15 +3,19 @@ import logging
 import time
 
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import manufacturer_access as access
 from app import manufacturer_approval as approval
 from app import notifications
+from app.core import email_templates as tpl
 from app.core import eligibility
 from app.core.auth import Actor
 from app.core.clerk import ClerkManagement
 from app.core.config import Settings
+from app.core.email import Mailer
 from app.core.schema_check import MIGRATION_HINT
 from app.repositories.manufacturer import ManufacturerRepository, profile_flags
 from app.storage.supabase import SupabaseStorage, decode_data_url
@@ -197,7 +201,16 @@ class ManufacturerService:
                 log.info("Could not read the name from Clerk: %s", exc)
         # Reuse the context just read (one database trip less), unless the names were just filled in.
         raw = await self._run(self.repo.snapshot(actor, ctx=None if names_filled else ctx))
-        return self._with_approval(raw["profile"], self.view(raw))
+        snapshot = self._with_approval(raw["profile"], self.view(raw))
+        # Approval-first: what this user may use now (remaining sections stay locked until approval).
+        row = _json_or_none(raw["profile"].get("access_row")) or None
+        snapshot["approval"]["access"] = await self._run(access.state(self.repo.db, raw["context"], self.settings, row))
+        return snapshot
+
+    async def _require_access(self, ctx: dict, profile: bool = False) -> None:
+        """Every manufacturer write below the basic details form: refused (403) until X!Y approves
+        the user's application; the shared company profile needs the company's owner / admin."""
+        await self._run(access.require(self.repo.db, ctx, self.settings, profile=profile))
 
     @staticmethod
     def _with_approval(p: dict, snapshot: dict) -> dict:
@@ -322,6 +335,8 @@ class ManufacturerService:
                 "companyName": p.get("display_name") or "", "companyType": p.get("company_category") or "",
                 "country": p.get("account_country") or "", "dob": str(ctx.get("date_of_birth") or ""),
                 "phone": ctx.get("phone") or "", "capacity": capacity,
+                # the registering user's personal email (never the company's contact email)
+                "personalEmail": ctx.get("personal_email") or "",
             },
             "contact": {"email": contact_email, "phone": "" if contact_email else (p.get("contact_phone") or "")},
             "epic2": {
@@ -358,14 +373,15 @@ class ManufacturerService:
         return {"accountExists": bool(p.get("personal_information_completed")),
                 # Saved user record (from Clerk sign-up) used to prefill onboarding.
                 "user": {"firstName": ctx.get("first_name") or "", "lastName": ctx.get("last_name") or "",
-                         "email": ctx.get("email") or ""},
+                         "email": ctx.get("email") or "", "personalEmail": ctx.get("personal_email") or ""},
                 "state": state, "profileData": profile_data,
                 "profileProgress": profile_progress, "machineryDraft": machinery_draft}
 
     # ---------------------------------------------------------------- mutations
     async def create_account(self, actor: Actor, data: dict) -> dict:
         await self.ensure_actor(actor)
-        result = await self._run(self.repo.create_account(actor, data))
+        result = await self._run(self.repo.create_account(actor, data, self.settings))
+        await self._notify_admins(result.get("submitted") or {})
         if result["names_changed"]:
             try:
                 await self.clerk.update_user_name(actor.clerk_user_id, data["firstName"].strip(),
@@ -378,10 +394,36 @@ class ManufacturerService:
         snapshot["submitted"] = result.get("submitted")
         return snapshot
 
+    async def _notify_admins(self, submitted: dict) -> None:
+        """Email every active X!Y admin that an application (or its corrections) awaits review.
+        Best effort: delivery is logged (email_deliveries) and never fails the submission."""
+        if not submitted or submitted.get("kind") == "update":
+            return
+        try:
+            admins = (await self.repo.db.execute(text("""
+                SELECT DISTINCT u.id, u.email::text AS email FROM platform_role_assignments p
+                JOIN users u ON u.id = p.user_id
+                WHERE p.status = 'active' AND p.revoked_at IS NULL AND u.status = 'active'
+            """))).mappings().all()
+            labels = {"new_company": "new company", "claim": "existing company without an owner",
+                      "update_request": "registration under an existing company"}
+            url = f"{self.settings.app_base_url.rstrip('/')}/admin/manufacturers/{submitted.get('companyId')}"
+            subject, text_body, html = tpl.application_submitted(
+                submitted.get("applicant") or "An applicant", submitted.get("companyName") or "",
+                labels.get(submitted.get("kind"), "application"), bool(submitted.get("resubmitted")), url)
+            mailer = Mailer(self.settings, self.repo.db)
+            for a in admins:
+                await mailer.send(a["email"], "admin_application_submitted", subject, text_body, html,
+                                  user_id=a["id"], organization_id=submitted.get("companyId"))
+        except Exception as exc:  # noqa: BLE001 - a notice must never undo the saved application
+            await self.repo.db.rollback()
+            log.warning("Could not notify admins about an application: %s", exc)
+
     async def update_profile(self, actor: Actor, changes: dict, progress: dict | None = None) -> dict:
         """PATCH /manufacturer/profile: apply only the changed fields, then return
         the record freshly read back from the database."""
         ctx = await self.ensure_actor(actor)
+        await self._require_access(ctx, profile=True)
         company = changes.get("company") or {}
         assets: dict = {}
         for key in ("logo", "cover"):
@@ -422,6 +464,7 @@ class ManufacturerService:
 
     async def create_machinery(self, actor: Actor, data: dict) -> dict:
         ctx = await self.ensure_actor(actor)
+        await self._require_access(ctx)
         images = []
         for item in data.get("images", []):
             file_id = await self._run(self._image_file(ctx, item.get("src", ""), "machine_image", "machines"))
@@ -451,6 +494,7 @@ class ManufacturerService:
 
     async def create_machinery_draft(self, actor: Actor, client_key, changes: dict, progress: dict | None) -> dict:
         ctx = await self.ensure_actor(actor)
+        await self._require_access(ctx)
         images = await self._run(self._machinery_images(ctx, changes.get("images")))
         await self._run(self.repo.create_machinery_draft(actor, client_key, changes, images, progress))
         return await self.bootstrap(actor)
@@ -458,22 +502,23 @@ class ManufacturerService:
     async def update_machinery_draft(self, actor: Actor, machine_id: str, changes: dict,
                                      progress: dict | None, finish: str | None) -> dict:
         ctx = await self.ensure_actor(actor)
+        await self._require_access(ctx)
         images = await self._run(self._machinery_images(ctx, changes.get("images")))
         await self._run(self.repo.update_machinery_draft(actor, machine_id, changes, images, progress, finish))
         return await self.bootstrap(actor)
 
     async def patch_availability(self, actor: Actor, changes: dict) -> dict:
-        await self.ensure_actor(actor)
+        await self._require_access(await self.ensure_actor(actor))
         await self._run(self.repo.patch_availability(actor, changes))
         return await self.bootstrap(actor)
 
     async def set_machinery_status(self, actor: Actor, machine_id: str, status: str) -> dict:
-        await self.ensure_actor(actor)
+        await self._require_access(await self.ensure_actor(actor))
         await self._run(self.repo.set_machinery_status(actor, machine_id, status))
         return await self.bootstrap(actor)
 
     async def save_availability(self, actor: Actor, data: dict) -> dict:
-        await self.ensure_actor(actor)
+        await self._require_access(await self.ensure_actor(actor))
         await self._run(self.repo.save_availability(actor, data))
         return await self.bootstrap(actor)
 
@@ -493,6 +538,6 @@ class ManufacturerService:
         return await notifications.for_user(self.repo.db, ctx["user_id"], ctx["organization_id"])
 
     async def decide_booking(self, actor: Actor, booking_id: str, status: str) -> dict:
-        await self.ensure_actor(actor)
+        await self._require_access(await self.ensure_actor(actor))
         await self._run(self.repo.update_booking(actor, booking_id, status))
         return await self.bootstrap(actor)

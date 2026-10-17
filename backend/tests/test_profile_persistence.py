@@ -3,13 +3,13 @@ saved and come back exactly as entered (save -> database -> reload), against a r
 Postgres. Skipped when E2E_DATABASE_URL is not set."""
 import pytest
 
-from test_e2e_local import DB, client  # noqa: F401  (shared fixture)
+from test_e2e_local import DB, approve_user, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not DB, reason="E2E_DATABASE_URL not set")
 
-ACCOUNT = {"firstName": "Ravi", "lastName": "Kumar", "contact": "9876501234", "dob": "1988-03-12",
+ACCOUNT = {"firstName": "Ravi", "lastName": "Kumar", "contact": "ravi.kumar@gmail.com", "dob": "1988-03-12",
            "companyName": "Ravi Precision", "companyType": "Automotive & Machinery",
-           "country": "India", "phone": "", "capacity": "800 units/month"}
+           "country": "India", "phone": "9876501234", "capacity": "800 units/month"}
 
 
 async def bootstrap(client):
@@ -20,6 +20,7 @@ async def bootstrap(client):
 
 async def test_serviceable_areas_and_certifications_round_trip(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
 
     # Location step: serviceable areas sent together with the address (as the wizard does)
     r = await client.patch("/manufacturer/profile", json={
@@ -59,6 +60,7 @@ async def test_serviceable_areas_and_certifications_round_trip(client):
 
 async def test_capacity_plan_uses_own_machinery(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     machine = {"industry": "Automotive", "subcategory": "Machining", "type": "VMC 850", "capacity": "",
                "age": "", "condition": "", "technical": "", "images": [], "rawMatStatus": "",
                "materialDetails": "", "laborType": "", "workerCount": "", "workerRoles": "", "logistics": [],

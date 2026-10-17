@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from test_e2e_local import ACCOUNT, PNG, PNG2, client  # noqa: F401  (shared fixture)
+from test_e2e_local import ACCOUNT, PNG, PNG2, approve_user, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
 
@@ -27,6 +27,7 @@ async def step(client, body, expect=200):
 
 async def test_company_profile_saves_every_step(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     p = (await client.get("/manufacturer/bootstrap")).json()["profileProgress"]
     assert p["completedSteps"] == [] and p["resumeStep"] == 1 and p["status"] == "draft" and p["percentage"] == 15
 
@@ -81,6 +82,7 @@ async def test_company_profile_saves_every_step(client):
 
 async def test_machinery_wizard_saves_every_step(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     key = str(uuid.uuid4())
     step1 = {"clientKey": key, "industry": "Automotive & Machinery", "type": "5-axis CNC mill",
              "capacity": "100", "condition": "Good", "progress": {"step": 1, "completed": True}}
@@ -145,6 +147,7 @@ async def test_machinery_wizard_saves_every_step(client):
 
 async def test_availability_patch_only_changes_what_was_sent(client):
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     rec = {"days": ["Mon", "Tue"], "start": "09:00", "end": "17:00"}
     cap = {"machine": "Lathe", "count": "2", "start": "2026-10-01", "end": "2026-10-31"}
     await client.patch("/manufacturer/availability", json={"calendar": {"2026-10-1": "available"}})

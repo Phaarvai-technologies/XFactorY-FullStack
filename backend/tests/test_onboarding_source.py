@@ -146,11 +146,12 @@ async def test_new_company_from_dashboard_and_eligibility_needs_approval_and_com
     staged = (await client.sql("SELECT kind, source, status FROM manufacturer_submissions WHERE target_organization_id="
                                "CAST(:o AS uuid)", o=org))[0]
     assert tuple(staged) == ("new_company", "web_dashboard", "pending")
-    # complete but not approved -> not visible, no booking
-    await complete_profile(client, h)
+    # not approved -> the profile cannot be completed (locked), not visible, no booking
+    assert (await client.patch("/manufacturer/profile", headers=h, json={"company": {"about": "x"}})).status_code == 403
     assert not await visible(client, org) and await booking_status(client, org) == 404
     assert (await approve_company(client, org)).status_code == 200
     assert await _org(client, org) == ("web_dashboard", None, "MANUFACTURER")
+    await complete_profile(client, h)  # approved AND complete -> visible
     assert await visible(client, org) and await booking_status(client, org) == 201
 
     # approved but incomplete -> not visible, no booking
@@ -224,9 +225,9 @@ async def test_admin_users_show_each_company_source_and_visionary_views(client, 
     m = f"user_vm_{t}"
     hm = hdr(client, m)
     assert (await client.post("/manufacturer/account", headers=hm, json=account(f"Vis Supplier {t}"))).status_code == 201
-    await complete_profile(client, hm)
     morg = await own_org(client, m)
     assert (await approve_company(client, morg)).status_code == 200
+    await complete_profile(client, hm)
     v = f"user_vis_{t}"
     hv = hdr(client, v)
     profile = {"name": f"Priya {t}", "role": "Founder", "org": f"Brew {t}", "location": "Chennai", "intro": "Cups."}

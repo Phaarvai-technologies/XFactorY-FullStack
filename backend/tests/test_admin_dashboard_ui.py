@@ -13,7 +13,7 @@ from test_e2e_local import approve_company, client  # noqa: F401  (shared fixtur
 pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
 
 ACCOUNT = {"firstName": "Asha", "lastName": "Rao", "contact": "asha@example.com", "dob": "1990-01-01",
-           "companyType": "Automotive & Machinery", "country": "India", "phone": "", "capacity": "10 units"}
+           "companyType": "Automotive & Machinery", "country": "India", "phone": "9876543210", "capacity": "10 units"}
 MACHINE = {"industry": "Automotive", "subcategory": "Machining", "type": "5-axis CNC mill", "capacity": "100",
            "age": "5", "condition": "Good", "technical": "Haas", "images": [], "rawMatStatus": "Provided",
            "materialDetails": "", "laborType": "Skilled", "workerCount": "3", "workerRoles": "", "logistics": [],
@@ -49,7 +49,7 @@ async def _manufacturer(c, name=None):
 
 
 async def _find(c, admin, name):
-    r = await c.get("/admin/manufacturers", params={"q": name}, headers=admin)
+    r = await c.get("/admin/manufacturers", params={"q": name, "listing": "all"}, headers=admin)
     assert r.status_code == 200, r.text
     return r.json()["rows"]
 
@@ -123,6 +123,10 @@ async def test_machinery_tab_lists_company_machines(client):  # noqa: F811
     admin = await _admin(client)
     sub, org, name = await _manufacturer(client)
     hdr = _hdr(client, sub)
+    # approval first: machinery stays locked until X!Y approves the application
+    assert (await client.post("/manufacturer/machinery", headers=hdr, json=MACHINE)).status_code == 403
+    assert (await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
+                               json={"review_status": "REVIEWED"})).status_code == 200
     assert (await client.post("/manufacturer/machinery", headers=hdr, json={**MACHINE, "status": "Published"})).status_code == 201
     assert (await client.post("/manufacturer/machinery", headers=hdr,
                               json={**MACHINE, "type": "Lathe", "status": "Draft"})).status_code == 201

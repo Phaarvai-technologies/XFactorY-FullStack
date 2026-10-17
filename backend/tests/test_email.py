@@ -80,7 +80,8 @@ async def test_review_and_account_emails_are_sent(client, no_clerk, outbox):  # 
     owner = (await client.sql("SELECT email::text, id FROM users WHERE clerk_user_id=:s", s=sub))[0]
 
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
-                           json={"review_status": "NEEDS_CORRECTION", "reason": "Please add at least one FAQ."})
+                           json={"review_status": "NEEDS_CORRECTION", "reason": "Please add at least one FAQ.",
+                                 "correction_fields": ["capacity"]})
     assert r.status_code == 200 and r.json()["email"]["status"] == "sent"
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
                            json={"review_status": "REVIEWED"})

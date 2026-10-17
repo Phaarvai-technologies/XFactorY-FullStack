@@ -16,13 +16,14 @@ import {
   StarIcon,
   UserIcon,
 } from "@/components/manufacturer/icons";
-import { isValidEmail, isValidPhone } from "@/lib/manufacturer/types";
+import { isValidEmail } from "@/lib/manufacturer/types";
 
 export type AccountSubmission = {
   firstName: string;
   lastName: string;
-  contact: string;
-  dob: string;
+  email: string;
+  /** Optional: null when left empty. */
+  dob: string | null;
   companyName: string;
   companyType: string;
   country: string;
@@ -41,11 +42,46 @@ type AccountScreenProps = {
   onLoadCompany?: (companyId: string) => Promise<CompanyDetails>;
   /** Prefill when correcting details already submitted for approval. */
   initial?: Partial<AccountSubmission>;
+  /** Corrections requested by X!Y: only these fields may be edited (the others stay as sent). */
+  correctionFields?: string[];
+};
+
+/** Labels of the fields X!Y may ask to correct (keys as sent by the backend). */
+const CORRECTION_LABELS: Record<string, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  personalEmail: "Email address",
+  dob: "Date of birth",
+  company: "Company name",
+  companyName: "Company name",
+  companyType: "Company category",
+  country: "Country",
+  companyPhone: "Phone number",
+  capacity: "Production capacity",
 };
 
 type PrefillKey = "companyType" | "country" | "phone" | "capacity";
 
 const MUTED = { padding: 12, color: "#64748b" } as const;
+
+/** null / undefined, "" and whitespace-only are missing values (0 is a value). */
+function isPresent(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  return typeof value === "string" ? value.trim() !== "" : true;
+}
+
+/** "+919876543210" / "098765 43210" -> "9876543210" (the number typed after the fixed +91). */
+function nationalNumber(value: string | null | undefined): string {
+  const digits = (value ?? "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
+  return digits;
+}
+
+/** A select's options plus a saved value that is not one of them (so it can be shown). */
+function withSaved(options: string[], value: string) {
+  return value && !options.includes(value) ? [value, ...options] : options;
+}
 
 function companyLocation(company: { city?: string | null; state?: string | null; country?: string | null }) {
   return [company.city, company.state, company.country].filter((part) => part && part.trim()).join(", ");
@@ -55,7 +91,7 @@ type FieldErrors = Partial<
   Record<
     | "firstName"
     | "lastName"
-    | "contact"
+    | "email"
     | "dob"
     | "companyName"
     | "companyType"
@@ -64,6 +100,7 @@ type FieldErrors = Partial<
     | "agree",
     string
   >
+
 >;
 
 const COMPANY_TYPES = [
@@ -90,10 +127,20 @@ const COUNTRIES = [
   "Other",
 ];
 
-export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onLoadCompany, initial }: AccountScreenProps) {
+export function AccountScreen({
+  onBack,
+  onAccountCreated,
+  onSearchCompanies,
+  onLoadCompany,
+  initial,
+  correctionFields,
+}: AccountScreenProps) {
+  /** Corrections requested: fields X!Y did not list are read-only. */
+  const fixOnly = correctionFields && correctionFields.length > 0 ? new Set(correctionFields) : null;
+  const closed = (...keys: string[]) => fixOnly !== null && !keys.some((key) => fixOnly.has(key));
   const [firstName, setFirstName] = useState(initial?.firstName ?? "");
   const [lastName, setLastName] = useState(initial?.lastName ?? "");
-  const [contact, setContact] = useState(initial?.contact ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
   const [dob, setDob] = useState(initial?.dob ?? "");
   const [companyName, setCompanyName] = useState(initial?.companyName ?? "");
   const [companySuggestions, setCompanySuggestions] = useState<CompanySearchResult[]>([]);
@@ -102,9 +149,9 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
   
   const companySearchRef = useRef<HTMLDivElement>(null);
   const [companyType, setCompanyType] = useState(
-    initial?.companyType && COMPANY_TYPES.includes(initial.companyType) ? initial.companyType : "");
-  const [country, setCountry] = useState(initial?.country && COUNTRIES.includes(initial.country) ? initial.country : "");
-  const [phone, setPhone] = useState(initial?.phone ?? "");
+    initial?.companyType ?? "");
+  const [country, setCountry] = useState(initial?.country ?? "");
+  const [phone, setPhone] = useState(nationalNumber(initial?.phone));
   const [capacity, setCapacity] = useState(initial?.capacity ?? "");
   const [agree, setAgree] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -121,6 +168,10 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
   const [managedElsewhere, setManagedElsewhere] = useState(false);
   /** Values copied from the selected record, so they can be removed again when it changes. */
   const prefilled = useRef<Partial<Record<PrefillKey, string>>>({});
+  /** Saved company values of the selected existing company: shown read-only (disabled). */
+  const [locked, setLocked] = useState<Partial<Record<PrefillKey, true>>>({});
+  /** The saved phone exactly as stored (sent unchanged when it is read-only). */
+  const savedPhone = useRef("");
   /** Ignores a details response that arrives after the selection changed. */
   const detailsRequest = useRef(0);
 
@@ -139,6 +190,8 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
       if (currentValues[key] === value) fieldSetters[key]("");
     }
     prefilled.current = {};
+    setLocked({});
+    savedPhone.current = "";
     setSelectedCompany(null);
     setManagedElsewhere(false);
     setCompanyDetailsStatus("idle");
@@ -155,13 +208,7 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
     try {
       const details = await onLoadCompany(company.id);
       if (requestId !== detailsRequest.current) return; // selection changed meanwhile
-      const next: Partial<Record<PrefillKey, string>> = {};
-      if (COMPANY_TYPES.includes(details.companyType)) next.companyType = details.companyType;
-      if (COUNTRIES.includes(details.country)) next.country = details.country;
-      if (details.phone) next.phone = details.phone;
-      if (details.capacity) next.capacity = details.capacity;
-      for (const [key, value] of Object.entries(next) as [PrefillKey, string][]) fieldSetters[key](value);
-      prefilled.current = next;
+      applyCompanyDetails(details);
       setManagedElsewhere(details.access === "claimed");
       setCompanyDetailsStatus("idle");
     } catch {
@@ -171,6 +218,35 @@ export function AccountScreen({ onBack, onAccountCreated, onSearchCompanies, onL
       setCompanyDetailsStatus("error");
     }
   }
+
+  /** Fill the selected company's saved details and make them read-only; fields the company
+   * does not have yet stay empty and editable. */
+  function applyCompanyDetails(details: CompanyDetails) {
+    const next: Partial<Record<PrefillKey, string>> = {};
+    if (isPresent(details.companyType)) next.companyType = details.companyType.trim();
+    if (isPresent(details.country)) next.country = details.country.trim();
+    if (isPresent(details.phone)) next.phone = nationalNumber(details.phone);
+    if (isPresent(details.capacity)) next.capacity = String(details.capacity).trim();
+    for (const key of Object.keys(fieldSetters) as PrefillKey[]) fieldSetters[key](next[key] ?? "");
+    prefilled.current = next;
+    savedPhone.current = isPresent(details.phone) ? details.phone.trim() : "";
+    setLocked(Object.fromEntries(Object.keys(next).map((k) => [k, true])) as Partial<Record<PrefillKey, true>>);
+  }
+
+  // A company selected earlier (corrections): read its saved details again so they are read-only.
+  useEffect(() => {
+    if (!initial?.companyId || !onLoadCompany) return;
+    const requestId = ++detailsRequest.current;
+    onLoadCompany(initial.companyId)
+      .then((details) => {
+        if (requestId !== detailsRequest.current) return;
+        applyCompanyDetails(details);
+        setManagedElsewhere(details.access === "claimed");
+      })
+      .catch(() => undefined);
+    // only once, for the initial selection
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
   const query = companyName.trim();
@@ -216,19 +292,29 @@ return () => {
     const nextErrors: FieldErrors = {};
     if (!firstName.trim()) nextErrors.firstName = "First name is required.";
     if (!lastName.trim()) nextErrors.lastName = "Last name is required.";
-    if (!contact.trim()) {
-      nextErrors.contact = "Enter your email or phone number.";
-    } else if (!isValidEmail(contact.trim()) && !isValidPhone(contact.replace(/\D/g, ""))) {
-      nextErrors.contact = "Enter a valid email address or 10-digit phone number.";
-    }
-    if (!dob) nextErrors.dob = "Enter your date of birth.";
+    // Email validation
+if (!email.trim()) {
+  nextErrors.email = "Email address is required.";
+} else if (!isValidEmail(email.trim())) {
+  nextErrors.email = "Please enter a valid email address.";
+}
+
+// Indian mobile number validation
+const indianMobileRegex = /^[6-9]\d{9}$/;
+
+if (locked.phone) {
+  // the selected company's saved phone: read-only, sent unchanged
+} else if (!phone.trim()) {
+  nextErrors.phone = "Mobile number is required.";
+} else if (!indianMobileRegex.test(phone.trim())) {
+  nextErrors.phone =
+    "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.";
+}
     if (!companyName.trim()) nextErrors.companyName = "Enter your company name.";
     else if (companyDetailsStatus === "loading") nextErrors.companyName = "Loading the selected company's details…";
     if (!companyType) nextErrors.companyType = "Select a company category.";
     if (!country) nextErrors.country = "Select your country.";
-    if (phone.trim() && !/^[0-9+\-\s()]{7,15}$/.test(phone.trim())) {
-      nextErrors.phone = "Enter a valid phone number.";
-    }
+    
     if (!agree) nextErrors.agree = "You must agree to continue.";
 
     setErrors(nextErrors);
@@ -244,12 +330,12 @@ return () => {
       Promise.resolve(onAccountCreated({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        contact: contact.trim(),
-        dob,
+        email: email.trim(),
+        dob: dob || null,
         companyName: companyName.trim(),
         companyType,
         country,
-        phone: phone.trim(),
+        phone: locked.phone ? savedPhone.current : `+91${phone.trim()}`,
         capacity: capacity.trim(),
         companyId: selectedCompany?.id ?? null,
       })).catch(() => setSubmitting(false));
@@ -329,6 +415,13 @@ return () => {
               Only the fields marked as required are needed to continue — everything
               else can be added later.
             </p>
+            {fixOnly ? (
+              <p className="account-required-note">
+                X!Y asked you to correct:{" "}
+                {[...new Set(Object.keys(CORRECTION_LABELS).filter((key) => fixOnly.has(key)).map((key) => CORRECTION_LABELS[key]))].join(", ")}. The other
+                details stay as you sent them.
+              </p>
+            ) : null}
           </div>
 
           <form className="account-card" noValidate onSubmit={handleSubmit}>
@@ -350,6 +443,7 @@ return () => {
                       placeholder="Jordan"
                       className={errors.firstName ? "error" : ""}
                       value={firstName}
+                      disabled={closed("firstName")}
                       onChange={(e) => setFirstName(e.target.value)}
                     />
                   </div>
@@ -369,6 +463,7 @@ return () => {
                       placeholder="Lee"
                       className={errors.lastName ? "error" : ""}
                       value={lastName}
+                      disabled={closed("lastName")}
                       onChange={(e) => setLastName(e.target.value)}
                     />
                   </div>
@@ -376,26 +471,34 @@ return () => {
                     <p className="field-error">{errors.lastName}</p>
                   ) : null}
                 </div>
-                <div>
-                  <label htmlFor="acc-contact">Email or phone number</label>
-                  <div className="account-input-wrap">
-                    <span className="input-icon">
-                      <MailIcon size={16} />
-                    </span>
-                    <input
-                      type="text"
-                      id="acc-contact"
-                      placeholder="you@company.com or 10-digit phone"
-                      autoComplete="email"
-                      className={errors.contact ? "error" : ""}
-                      value={contact}
-                      onChange={(e) => setContact(e.target.value)}
-                    />
-                  </div>
-                  {errors.contact ? (
-                    <p className="field-error">{errors.contact}</p>
-                  ) : null}
-                </div>
+                
+{/* Email Address */}
+<div>
+  <label htmlFor="acc-email">
+  Email address <span className="required">*</span>
+</label>
+  <div className="account-input-wrap">
+    <span className="input-icon">
+      <MailIcon size={16} />
+    </span>
+    <input
+      type="email"
+      id="acc-email"
+      placeholder="you@company.com"
+      autoComplete="email"
+      className={errors.email ? "error" : ""}
+      value={email}
+      disabled={closed("personalEmail")}
+      onChange={(e) => setEmail(e.target.value)}
+    />
+  </div>
+  {errors.email ? (
+    <p className="field-error">{errors.email}</p>
+  ) : null}
+</div>
+
+
+
                 <div>
                   <label htmlFor="acc-dob">Date of birth</label>
                   <div className="account-input-wrap">
@@ -407,6 +510,7 @@ return () => {
                       id="acc-dob"
                       className={errors.dob ? "error" : ""}
                       value={dob}
+                      disabled={closed("dob")}
                       onChange={(e) => setDob(e.target.value)}
                     />
                   </div>
@@ -442,6 +546,7 @@ return () => {
         placeholder="Acme Manufacturing Co."
         className={errors.companyName ? "error" : ""}
         value={companyName}
+        disabled={closed("company", "companyName")}
         autoComplete="off"
         onFocus={() => setCompanyDropdownOpen(true)}
         onChange={(e) => {
@@ -573,12 +678,13 @@ return () => {
                       id="acc-company-type"
                       className={`${companyType ? "" : "placeholder-shown"}${errors.companyType ? " error" : ""}`}
                       value={companyType}
+                      disabled={Boolean(locked.companyType) || closed("companyType")}
                       onChange={(e) => setCompanyType(e.target.value)}
                     >
                       <option value="" disabled>
                         Select a category
                       </option>
-                      {COMPANY_TYPES.map((type) => (
+                      {withSaved(COMPANY_TYPES, companyType).map((type) => (
                         <option key={type}>{type}</option>
                       ))}
                     </select>
@@ -597,12 +703,13 @@ return () => {
                       id="acc-country"
                       className={`${country ? "" : "placeholder-shown"}${errors.country ? " error" : ""}`}
                       value={country}
+                      disabled={Boolean(locked.country) || closed("country")}
                       onChange={(e) => setCountry(e.target.value)}
                     >
                       <option value="" disabled>
                         Select your country
                       </option>
-                      {COUNTRIES.map((option) => (
+                      {withSaved(COUNTRIES, country).map((option) => (
                         <option key={option}>{option}</option>
                       ))}
                     </select>
@@ -612,24 +719,45 @@ return () => {
                   ) : null}
                 </div>
                 <div>
-                  <label htmlFor="acc-phone">
-                    Phone number <span className="optional">(optional)</span>
-                  </label>
-                  <div className="account-input-wrap">
-                    <span className="input-icon">
-                      <PhoneIcon size={16} />
-                    </span>
-                    <input
-                      type="tel"
-                      id="acc-phone"
-                      placeholder="+1 555 000 1234"
-                      className={errors.phone ? "error" : ""}
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                  </div>
-                  {errors.phone ? <p className="field-error">{errors.phone}</p> : null}
-                </div>
+  <label htmlFor="acc-phone">
+    Phone number <span className="required">*</span>
+  </label>
+
+  <div className="account-input-wrap">
+    <span className="country-code">+91</span>
+
+    <input
+      type="tel"
+      id="acc-phone"
+      placeholder="9876543210"
+      autoComplete="tel-national"
+      inputMode="numeric"
+      maxLength={10}
+      required
+      className={errors.phone ? "error" : ""}
+      value={phone}
+      disabled={Boolean(locked.phone) || closed("companyPhone")}
+      onChange={(e) => {
+  const value = e.target.value.replace(/\D/g, "").slice(0, 10);
+
+  // Reject numbers that don't start with 6, 7, 8, or 9
+  if (value.length > 0 && !/^[6-9]/.test(value)) {
+    return;
+  }
+
+  setPhone(value);
+
+  if (errors.phone) {
+    setErrors((prev) => ({ ...prev, phone: "" }));
+  }
+}}
+    />
+  </div>
+
+  {errors.phone ? (
+    <p className="field-error">{errors.phone}</p>
+  ) : null}
+</div>
                 <div>
                   <label htmlFor="acc-capacity">
                     Production capacity <span className="optional">(optional)</span>
@@ -643,6 +771,7 @@ return () => {
                       id="acc-capacity"
                       placeholder="e.g. 5,000 units / month"
                       value={capacity}
+                      disabled={Boolean(locked.capacity) || closed("capacity")}
                       onChange={(e) => setCapacity(e.target.value)}
                     />
                   </div>

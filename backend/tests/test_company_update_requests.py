@@ -122,7 +122,8 @@ async def test_second_user_submits_update_request_and_company_stays_unchanged(cl
     assert events == ["submitted", "resubmitted"]
     _, same = await _request(client, org, name, contact="owner@example.com", phone="9800000000",
                              capacity="10 units")
-    assert same.status_code == 422 and "nothing to send" in same.json()["detail"]
+    # registering under the company with its saved (read-only) details is still recorded for review
+    assert same.status_code == 201, same.text
 
     # shown in the admin dashboard review queue
     admin = await _admin(client)
@@ -159,21 +160,26 @@ async def test_admin_edits_notes_and_approves_only_chosen_fields(client):  # noq
     assert r.status_code == 200, r.text
     after = await _record(client, org)
     # only the chosen fields; same id, name, source, category, email and approval status
-    assert after[5] == "7,800 units/month" and float(after[6]) == 7800 and after[8] == "9741235478"
+    assert after[5] == "7,800 units/month" and float(after[6]) == 7800 and after[8] == "+919741235478"
     assert (after[0], after[1], after[2], after[3], after[4], after[7], after[9]) == \
            (before[0], before[1], before[2], before[3], before[4], before[7], "approved")
-    assert await _members(client, org) == [owner]  # approval granted no ownership / membership
+    # the approved applicant is now a MEMBER of the company - never its owner
+    assert await _members(client, org) == sorted([owner, sub])
+    roles = dict(await client.sql("""SELECT u.clerk_user_id, m.membership_role FROM memberships m
+                                     JOIN users u ON u.id = m.user_id
+                                     WHERE m.organization_id = CAST(:o AS uuid) AND m.status = 'active'""", o=org))
+    assert roles == {owner: "owner", sub: "member"}
 
     stored = (await client.sql("""SELECT status, applied_changes, reviewed_by_user_id IS NOT NULL, reviewed_at IS NOT NULL,
                                          applied_at IS NOT NULL, review_feedback
                                   FROM manufacturer_submissions WHERE id=CAST(:i AS uuid)""", i=request_id))[0]
     assert stored[0] == "approved" and stored[1] == {
-        "capacity": {"from": "10 units", "to": "7,800 units/month"},
-        "contactPhone": {"from": "9800000000", "to": "9741235478"}} and all(stored[2:5]) and stored[5] == "Thanks"
+        "capacity": {"from": "10 units", "to": "7,800 units/month"},  # phones are stored as +91XXXXXXXXXX
+        "contactPhone": {"from": "+919800000000", "to": "+919741235478"}} and all(stored[2:5]) and stored[5] == "Thanks"
     history = await client.sql("""SELECT field_changed, old_value, new_value, reason FROM admin_change_history
                                   WHERE manufacturer_id=CAST(:o AS uuid) AND reason LIKE 'Approved update request%'
                                   ORDER BY field_changed""", o=org)
-    assert [(h[0], h[1], h[2]) for h in history] == [("Contact phone", "9800000000", "9741235478"),
+    assert [(h[0], h[1], h[2]) for h in history] == [("Contact phone", "+919800000000", "+919741235478"),
                                                      ("Production capacity", "10 units", "7,800 units/month")]
     assert "Ravi Kumar" in history[0][3]
     d, req = await _detail_request(client, admin, org, request_id)
@@ -185,14 +191,20 @@ async def test_admin_edits_notes_and_approves_only_chosen_fields(client):  # noq
                               json={"decision": "approve", "fingerprint": "0" * 32})
     assert again.status_code == 409 and "already decided" in again.json()["detail"]
 
-    # requester: status + feedback, a notification, still no access to the company
+    # requester: status + feedback and a notification; approved membership opens the company to them
+    # (as a member: machinery / availability / bookings, not the owner's shared company profile)
     boot = (await client.get("/manufacturer/bootstrap", headers=_hdr(client, sub))).json()
     assert boot["approval"]["updateRequests"][0]["status"] == "approved"
+    acc = boot["approval"]["access"]
+    assert acc["unlocked"] and acc["role"] == "member" and not acc["canEditProfile"]
     notes = (await client.get("/manufacturer/notifications", headers=_hdr(client, sub))).json()
-    assert any("was approved" in n["title"] for n in notes["items"])
+    assert any("has been approved" in n["title"] for n in notes["items"])
+    r = await client.patch("/manufacturer/profile", headers=_hdr(client, sub), json={"company": {"about": "x"}})
+    assert r.status_code == 403 and "primary user" in r.text
     seen = (await client.get(f"/manufacturer/companies/{org}", headers=_hdr(client, sub))).json()
-    assert seen["access"] == "claimed" and seen["canUpdate"] is False and seen["phone"] == ""
-    assert boot["state"]["account"]["companyName"] != name  # their dashboard is not this company
+    # the company's own phone (business information) is shown read-only
+    assert seen["access"] == "claimed" and seen["canUpdate"] is False and seen["phone"] == "+919741235478"
+    assert boot["state"]["account"]["companyName"] == name  # their dashboard is now this company
 
 
 async def test_decline_and_corrections_keep_record_unchanged(client):  # noqa: F811
@@ -220,6 +232,10 @@ async def test_decline_and_corrections_keep_record_unchanged(client):  # noqa: F
     r = await client.post(f"/admin/manufacturers/{org}/update-requests/{id2}/decision", headers=admin,
                           json={"decision": "request_changes", "fingerprint": req2["fingerprint"],
                                 "feedback": "Please give the capacity with units."})
+    assert r.status_code == 422 and "Choose the fields" in r.text  # the exact fields are required
+    r = await client.post(f"/admin/manufacturers/{org}/update-requests/{id2}/decision", headers=admin,
+                          json={"decision": "request_changes", "fingerprint": req2["fingerprint"],
+                                "feedback": "Please give the capacity with units.", "correction_fields": ["capacity"]})
     assert r.status_code == 200, r.text
     assert await _record(client, org) == before
     # the company itself is not marked "Needs correction" (the requester has to act)

@@ -650,6 +650,59 @@ function Media({ label, src, wide }: { label: string; src: string | null | undef
 }
 
 /* ---------------------------------------------------------------- tab 4 */
+/** Fields an admin may ask an applicant to correct (same keys as the backend). */
+const CORRECTABLE_FIELDS: Record<string, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  personalEmail: "Personal email",
+  dob: "Date of birth",
+  companyName: "Company name",
+  companyType: "Company category",
+  country: "Country",
+  companyPhone: "Company phone number",
+  capacity: "Production capacity",
+};
+
+/** Checkboxes: the exact fields the applicant must correct (only these become editable for them). */
+function CorrectionFieldPicker({
+  idPrefix,
+  fields,
+  chosen,
+  disabled,
+  onChange,
+}: {
+  idPrefix: string;
+  fields: Record<string, string>;
+  chosen: Set<string>;
+  disabled: boolean;
+  onChange: (next: Set<string>) => void;
+}) {
+  return (
+    <>
+      <label style={{ marginTop: 12 }}>
+        Fields to correct <span className="adm-req">*</span>
+      </label>
+      {Object.entries(fields).map(([key, label]) => (
+        <label key={key} className="adm-toggle adm-share-toggle" htmlFor={`${idPrefix}-${key}`}>
+          <input
+            id={`${idPrefix}-${key}`}
+            type="checkbox"
+            checked={chosen.has(key)}
+            disabled={disabled}
+            onChange={(e) => {
+              const next = new Set(chosen);
+              if (e.target.checked) next.add(key);
+              else next.delete(key);
+              onChange(next);
+            }}
+          />
+          {label}
+        </label>
+      ))}
+    </>
+  );
+}
+
 function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => void }) {
   const call = useAdminApi();
   const toast = useToast();
@@ -657,6 +710,9 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
   const m = d.manufacturer;
   const [status, setStatus] = useState<ReviewStatus>(m.reviewStatus);
   const [statusReason, setStatusReason] = useState("");
+  /** Needs correction: the exact fields the applicant must correct. */
+  const [fix, setFix] = useState<Set<string>>(() => new Set(d.pendingSubmission?.correctionFields ?? []));
+  const askFields = status === "NEEDS_CORRECTION" && d.pendingSubmission !== null;
   const [recordType, setRecordType] = useState<RecordType>(m.recordType);
   const [entrySource, setEntrySource] = useState<EntrySource>(m.entrySource);
   const [referral, setReferral] = useState(m.referralSource ?? "");
@@ -824,16 +880,39 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
                   {d.pendingSubmission.fields.map((f) => (
                     <tr key={f.key}>
                       <td>{f.label}</td>
-                      <td>{f.submitted || "—"}</td>
+                      <td>
+                        {f.submitted || "—"}
+                        {f.changed && (
+                          <span className="badge badge-pending adm-inline-badge">changed (was {f.previous || "—"})</span>
+                        )}
+                      </td>
                       <td>{f.current || "—"}</td>
+                    </tr>
+                  ))}
+                  {(d.pendingSubmission.applicant ?? []).map((f) => (
+                    <tr key={`applicant-${f.key}`}>
+                      <td>{f.label} (applicant)</td>
+                      <td>
+                        {f.submitted || "—"}
+                        {f.changed && (
+                          <span className="badge badge-pending adm-inline-badge">changed (was {f.previous || "—"})</span>
+                        )}
+                      </td>
+                      <td>—</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {d.pendingSubmission.status === "changes_requested" && (d.pendingSubmission.correctionFields ?? []).length > 0 && (
+              <p className="field-hint">
+                Asked to correct:{" "}
+                {(d.pendingSubmission.correctionFields ?? []).map((k) => CORRECTABLE_FIELDS[k] ?? k).join(", ")}
+              </p>
+            )}
             <p className="field-hint">
-              Use the review status below: Approved applies these details to the record; Needs correction
-              or Rejected leave the record unchanged.
+              Use the review status below: Approved applies these details to the record and unlocks the
+              applicant&apos;s remaining sections; Needs correction or Rejected leave the record unchanged.
             </p>
           </Section>
         ) : null}
@@ -863,6 +942,20 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             )}
           </label>
           <textarea id="rv-reason" rows={2} value={statusReason} onChange={(e) => setStatusReason(e.target.value)} />
+          {askFields && status !== m.reviewStatus && (
+            <CorrectionFieldPicker
+              idPrefix="rv-fix"
+              fields={d.pendingSubmission?.correctable ?? CORRECTABLE_FIELDS}
+              chosen={fix}
+              disabled={busy !== null}
+              onChange={setFix}
+            />
+          )}
+          {status === "REJECTED" && status !== m.reviewStatus && (
+            <p className="field-hint">
+              The applicant sees this reason (internal notes stay private) and can apply again after 24 hours.
+            </p>
+          )}
           {!d.pendingSubmission && (d.updateRequests ?? []).some((r) => r.status === "pending") && (
             <p className="field-hint">
               Update requests from other users are decided in their own section above. This status is the company&apos;s
@@ -877,10 +970,14 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             <button
               type="button"
               className="btn-primary adm-btn-sm"
-              disabled={busy !== null || status === m.reviewStatus}
+              disabled={busy !== null || status === m.reviewStatus || (askFields && fix.size === 0)}
               onClick={async () => {
-                if (await patch("status", { review_status: status, reason: statusReason || null }, `Status set to ${REVIEW_LABELS[status]}`))
-                  setStatusReason("");
+                const body = {
+                  review_status: status,
+                  reason: statusReason || null,
+                  ...(askFields ? { correction_fields: [...fix] } : {}),
+                };
+                if (await patch("status", body, `Status set to ${REVIEW_LABELS[status]}`)) setStatusReason("");
               }}
             >
               Save status
@@ -1045,6 +1142,8 @@ function UpdateRequestReview({ orgId, req, onChange }: { orgId: string; req: Com
   const [apply, setApply] = useState<Set<string>>(() => new Set(req.fields.filter((f) => f.differs).map((f) => f.key)));
   const [notes, setNotes] = useState(req.adminNotes);
   const [feedback, setFeedback] = useState("");
+  /** Request corrections: the exact fields the applicant must correct. */
+  const [fix, setFix] = useState<Set<string>>(() => new Set(req.correctionFields ?? []));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [badge, label] = UPDATE_REQUEST_STATUS[req.status];
@@ -1088,8 +1187,9 @@ function UpdateRequestReview({ orgId, req, onChange }: { orgId: string; req: Com
         fingerprint,
         feedback: feedback.trim() || null,
         ...(decision === "approve" ? { fields: [...apply] } : {}),
+        ...(decision === "request_changes" ? { correction_fields: [...fix] } : {}),
       }));
-    }, decision === "approve" ? "Approved changes applied to the company" : decision === "decline" ? "Request declined" : "Corrections requested");
+    }, decision === "approve" ? "Application approved" : decision === "decline" ? "Request declined" : "Corrections requested");
   }
 
   return (
@@ -1100,9 +1200,20 @@ function UpdateRequestReview({ orgId, req, onChange }: { orgId: string; req: Com
         {req.reviewedAt ? ` · decided ${fmtDateTime(req.reviewedAt)}${req.reviewedBy ? ` by ${req.reviewedBy}` : ""}` : ""}
       </p>
       <p className="field-hint">
-        This user does not manage the company. Approving updates only the chosen fields; it does not give them access
-        to the company.
+        This user registered under this existing company. Approving makes them a member of the company (never its
+        owner) and updates only the chosen fields; nothing changes before approval.
       </p>
+      {req.applicant && (
+        <p className="field-hint">
+          Applicant: {[req.applicant.firstName, req.applicant.lastName].filter(Boolean).join(" ") || "—"} ·{" "}
+          {req.applicant.personalEmail || "—"} · Date of birth: {req.applicant.dob || "—"}
+        </p>
+      )}
+      {(req.correctionFields ?? []).length > 0 && req.status !== "approved" && (
+        <p className="field-hint">
+          Asked to correct: {(req.correctionFields ?? []).map((k) => CORRECTABLE_FIELDS[k] ?? k).join(", ")}
+        </p>
+      )}
       {open && companyChanged && (
         <div className="adm-missing-banner" role="note">
           <AlertTriangle size={18} />
@@ -1179,12 +1290,13 @@ function UpdateRequestReview({ orgId, req, onChange }: { orgId: string; req: Com
             Feedback to the requester <span className="optional">(required to request corrections or decline)</span>
           </label>
           <textarea id={`ur-feedback-${req.id}`} rows={2} value={feedback} disabled={busy} onChange={(e) => setFeedback(e.target.value)} />
+          <CorrectionFieldPicker idPrefix={`ur-fix-${req.id}`} fields={CORRECTABLE_FIELDS} chosen={fix} disabled={busy} onChange={setFix} />
           {err && <p className="field-error">{err}</p>}
           <div className="adm-btn-row">
-            <button type="button" className="btn-primary adm-btn-sm" disabled={busy || apply.size === 0} onClick={() => void decide("approve")}>
-              Approve selected changes
+            <button type="button" className="btn-primary adm-btn-sm" disabled={busy} onClick={() => void decide("approve")}>
+              {apply.size > 0 ? "Approve with selected changes" : "Approve (no changes)"}
             </button>
-            <button type="button" className="btn-ghost" disabled={busy || !feedback.trim()} onClick={() => void decide("request_changes")}>
+            <button type="button" className="btn-ghost" disabled={busy || !feedback.trim() || fix.size === 0} onClick={() => void decide("request_changes")}>
               Request corrections
             </button>
             <button type="button" className="btn-danger-ghost" disabled={busy || !feedback.trim()} onClick={() => void decide("decline")}>

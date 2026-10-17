@@ -18,6 +18,24 @@ Browser ── Next.js (Vercel) ── Clerk (sign-in)
                                                      └──> Supabase Storage (images)
 ```
 
+## Contents
+
+1. [Repository layout](#repository-layout)
+2. [Requirements](#requirements)
+3. [Set up and run locally](#set-up-and-run-locally)
+4. [Environment variables](#environment-variables)
+5. [Database and migrations](#database-and-migrations)
+6. [Admin access](#admin-access)
+7. [Admin portal features](#admin-portal-features)
+8. [Manufacturer onboarding (approval first)](#manufacturer-onboarding-approval-first)
+9. [Company onboarding source](#company-onboarding-source)
+10. [Notifications to manufacturers](#notifications-to-manufacturers)
+11. [Command-line tools](#command-line-tools)
+12. [Tests](#tests)
+13. [Deployment](#deployment)
+14. [Troubleshooting](#troubleshooting)
+15. [Security notes](#security-notes)
+
 ## Repository layout
 
 ```
@@ -107,6 +125,11 @@ dashboards in production. **Never commit them.** Both `.gitignore` files exclude
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET` | backend | Image storage (service key is secret) |
 | `ADMIN_EMAILS`, `ADMIN_*` | backend | Admin access and admin session rules |
 | `SMTP_*`, `EMAIL_FROM`, `APP_BASE_URL` | backend | Outgoing email (off when `SMTP_HOST` is empty) |
+| `ADMIN_EMAILS` | backend | X!Y users who get admin access automatically |
+| `MANUFACTURER_REAPPLY_AFTER_DAYS` | backend | Days after a rejection before a manufacturer may apply again. **Not decided yet: leave unset** (applying again is then not available; `0` = immediately) |
+| `ADMIN_DEFAULT_EMAIL` | backend | The built-in administrator (default `admin@phaarvai.com`) |
+| `ADMIN_SESSION_HOURS`, `ADMIN_IDLE_MINUTES`, `ADMIN_MAX_FAILED_LOGINS`, `ADMIN_LOCKOUT_MINUTES` | backend | Admin session and lockout rules |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SECURITY`, `SMTP_TIMEOUT_SECONDS`, `EMAIL_FROM`, `APP_BASE_URL` | backend | Outgoing email (off when `SMTP_HOST` is empty) |
 | `GATEWAY_SHARED_SECRET` | backend | Only when an API gateway sits in front; leave empty otherwise |
 
 ## Database
@@ -122,6 +145,17 @@ On Supabase you can instead run the same files, in order, in the SQL editor.
 | 012 | Visionaries portal: profiles, projects, request details, request drafts |
 | 013 | Admins tab: temporary passwords (must be changed at first sign-in), who added each admin |
 | 015 | Notifications to manufacturers; admin notes can be shared with the manufacturer |
+| 016 | Terms and Conditions acceptance recorded at registration |
+| 017 | Admin approval of submitted company details (staging in `manufacturer_submissions`) |
+| 018 | Compatibility for accounts that existed before explicit registration |
+| 019 | Admin-reviewed update requests for a company managed by someone else |
+| 020 | Company onboarding source, import batches, onboarding history |
+| 021 | Backfill audit log + `users.registration_channel`; then run the onboarding-source backfill for existing records (see below) |
+| 022 | Admin Entry: **Add company** in the admin portal records `onboarding_source = admin_entry` |
+| 023 | `users.record_type` (Real / Demo / Test) so an admin can mark a person, e.g. a Visionary, as demo data |
+| 024 | Approval-first onboarding: `users.personal_email`, application kind `join_company`, `correction_fields`, event `membership_granted`, `manufacturer_application_drafts` |
+
+Run the migrations before deploying a backend that needs them.
 
 ## Admin access
 
@@ -160,7 +194,107 @@ Roles: `platform_administrator` (manages admins), `platform_operator`, `support_
 cannot be revoked or demoted from the portal. The built-in email comes from
 `ADMIN_DEFAULT_EMAIL` (default `admin@phaarvai.com`).
 
-See `backend/README.md` → *Admin Dashboard* for the full details.
+- **401 on `/admin/auth/login`**: wrong email / password, or the account does not exist in *this*
+  database. Run `python -m app.admin_account list` against the same `DATABASE_URL`.
+- **403 on `/admin/me`**: signed in with an X!Y account that has no admin role. Use
+  `python -m app.grant_admin <email>` or add the email to `ADMIN_EMAILS`.
+
+## Admin portal features
+
+| Tab | What it does |
+|---|---|
+| **Overview** | Key numbers (real records only), needs attention, recent registrations and updates |
+| **Users** | Everyone who registered: roles, linked companies with each company's onboarding source, account and onboarding status, registration channel. Filters: search, role, account status, onboarding status and **Data: Real / Demo / Real + demo** (with counts). Suspend / reactivate, troubleshooting details |
+| **Admins** | Add admin (temporary password shown once), change role, revoke / restore, reset password, and **Edit** details (see below) |
+| **Manufacturers** | **Approved companies and companies added by admins** (imported or *Add company*). A company a user submits in manufacturer onboarding waits in *Onboarding & review* and appears here once an admin approves it (the manufacturer is notified). Filters: search, industry, process, location, completeness, review status, record type, entry source, archive, assignment, **Listing** (approved and admin-added / awaiting approval / all) and the **Data: Real / Demo / Real + demo** shortcut. Row **Actions → Mark as demo / Mark as real**; **Add company** (administrators / operators); batch-archive demo/test records |
+| Company detail | Company & contacts, capabilities, documents, onboarding & review (approve / request corrections / decline, update requests, record classification, assignment, notes), onboarding source panel and history, **Registered Users** and **Onboarding requests** (kept separate; refresh without reloading) |
+| **Machinery** | All machines with their company |
+| **Visionaries** | Demand-side users with their profile, projects and manufacturing requests. **Data: Real / Demo / Real + demo** filter with counts; **Actions → Mark as demo / Mark as real** (also on the Visionary's page) |
+| **Onboarding & review** | Review queue (demo/test excluded unless included) |
+| **Analytics** | Registrations, completion, data quality (demo/test excluded unless included) |
+| **Support** | Users with failed actions |
+
+**Who appears where.** Someone who only signs up is a registered user and appears only in **Users**.
+When they apply as a manufacturer, the application goes to **Onboarding & review** (and the header bell);
+after an admin approves it, the applicant is notified and a new company appears in **Manufacturers**. Imported and admin-added companies are listed in Manufacturers straight away.
+
+**Real vs demo data.** Admins mark data as demo with **Mark as demo** (Manufacturers or Visionaries →
+Actions), or under *Record classification* on a company's *Onboarding & Review* tab (which also offers
+*Test*). A company's mark is `organizations.record_type`; a person's (e.g. a Visionary) is
+`users.record_type`. In **Users**, a person counts as *Demo* when they or the company shown for them are
+marked Demo or Test; everyone else counts as *Real*. Real + demo = all. Every change is recorded
+(company history / the person's activity log). Filters are kept in the URL (`/admin/users?data=demo`,
+`/admin/visionaries?data=demo`, `/admin/manufacturers?record_type=DEMO&record_type=TEST`,
+`/admin/manufacturers?listing=awaiting`).
+
+**Edit admin details.** Admins tab → **Edit**, or click your name at the top right (Edit my details;
+admins signed in with an admin account also find **Change password** there). The sidebar footer shows
+your name and email with **Log out**.
+
+- First name, last name and phone. Administrators can edit any admin; every admin can edit their own.
+- The **sign-in email** can be changed only for admin-only accounts. It is locked for an admin who
+  signs in with an X!Y account (that email belongs to the X!Y account) and for the built-in
+  administrator. An email already used by another account is refused.
+- For an admin with an X!Y account the new name is also saved in Clerk, so the next X!Y sign-in keeps
+  it. If Clerk cannot be reached, the name is still saved and the portal says so.
+- Every change is recorded in the activity log. API: `PATCH /api/v1/admin/admin-users/{id}`.
+
+**Company contact vs users.** A company's contact email / phone come only from the company profile;
+the sign-in emails of its users are listed separately under *Registered Users* and never overwrite
+the company contact.
+
+## Manufacturer onboarding (approval first)
+
+Code: `backend/app/manufacturer_applications.py`, `frontend/src/components/manufacturer/AccountScreen.tsx`,
+`ApplicationStatusScreen.tsx`, `frontend/src/components/admin/ApplicationReview.tsx`.
+
+1. **Basic details.** Company information (name, category, location, company phone, production
+   capacity) and personal information (first / last name, personal email, date of birth). The company
+   phone must be an Indian number and is stored as `+91XXXXXXXXXX`; the personal email is saved on the
+   user (`users.personal_email`) and never becomes the company's contact email. The unsent form is kept
+   as a draft.
+2. **Existing company.** Picked from the search by database id; its saved details are shown read-only
+   (the backend re-reads them and refuses changed values). Missing or wrong details can only be
+   *suggested* — a staged update request reviewed by X!Y. **New company:** the fields are editable and
+   no previous company id is kept.
+3. **Pending.** Sending creates one application per user (retries add nothing), notifies the admins
+   who can decide (administrators, operators, verification analysts) and shows the applicant a pending
+   page. Company profile, machinery, availability and bookings stay locked in the UI **and** the API
+   (`403 onboarding_pending`).
+4. **Decision** (Onboarding & review → Application):
+   * *Approve* — a new company gets its details and the applicant is its primary user; an applicant for an
+     existing company becomes a **member** (never the owner, unless the admin ticks “make primary user”,
+     offered only when the company has no owner). Applied once; the company's own approval, owner and
+     other members are not changed.
+   * *Request corrections* — the admin picks the fields; only those can change on resubmission, which
+     goes back to the queue and notifies the admins.
+   * *Reject* — a reason shown to the applicant, plus an optional internal note that stays in the admin
+     portal. The applicant sees the reason and a link back to the main dashboard; their account and other
+     roles are unaffected. Reapplying follows `MANUFACTURER_REAPPLY_AFTER_DAYS` (**not decided yet**).
+5. **Visible to Visionaries** only when the company is approved **and** its profile is 100% complete
+   (`app/core/eligibility.py`); another person's application never changes that.
+
+## Company onboarding source
+
+How a manufacturer company first came onto X!Y is stored once in `organizations.onboarding_source`
+(a database trigger refuses later changes) and shown in Users, Manufacturers and the company detail.
+
+| Source | Set automatically by |
+|---|---|
+| `database_import` | `python -m app.import_manufacturers file.csv [--actor NAME]` (with an import batch: file, SHA-256, operator, time) |
+| `web_dashboard` | A new company submitted in the manufacturer dashboard; copied to the company when an admin approves it |
+| `admin_entry` | Admin portal → Manufacturers → **Add company** |
+| `ai_voice_call`, `ground_sales` | Reserved for future channels (refused until built) |
+
+Clients can never send a source; the backend sets it. Records that existed before migration 020
+show *Unknown* until the evidence backfill is run:
+
+```powershell
+python -m app.backfill_onboarding_source --report source_report.csv   # dry run: review the CSV
+python -m app.backfill_onboarding_source --apply                       # write (never overwrites a known source)
+```
+
+Full rules: `backend/ONBOARDING_SOURCES.md`.
 
 ## Notifications to manufacturers
 

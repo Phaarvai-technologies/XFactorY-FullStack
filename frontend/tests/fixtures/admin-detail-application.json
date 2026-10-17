@@ -1,0 +1,1108 @@
+{
+ "manufacturer": {
+  "id": "a107db0e-a722-42d9-b84d-773dc51e03e4",
+  "companyName": "Fixture Castings abf16f",
+  "contactName": null,
+  "contactEmail": "sales@fixture.example",
+  "contactPhone": "+919876543210",
+  "primaryUser": {
+   "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+   "name": "Owner Rao",
+   "email": "user_own_9d5751@example.com"
+  },
+  "industry": "Automotive & Machinery",
+  "country": "India",
+  "city": null,
+  "location": "India",
+  "majorProcess": null,
+  "listingCount": 0,
+  "completeness": 50,
+  "requiredDone": 7,
+  "requiredTotal": 14,
+  "reviewStatus": "SUBMITTED",
+  "recordType": "REAL",
+  "entrySource": "MANUFACTURER",
+  "onboardingSource": "web_dashboard",
+  "onboardingSourceNote": null,
+  "stagedSource": null,
+  "referralSource": null,
+  "assignedAdminId": null,
+  "isArchived": false,
+  "archivedAt": null,
+  "registeredAt": "2026-10-16T17:13:11.251276+00:00",
+  "lastUpdated": "2026-10-16T17:13:13.218226+00:00",
+  "lastSeenAt": "2026-10-16T17:13:11.265397+00:00",
+  "ownerUserId": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+  "attentionReason": null,
+  "linkedUsers": 2,
+  "request": null,
+  "missingFields": [
+   "About the company",
+   "Facility address",
+   "City",
+   "Facility country",
+   "At least one certification",
+   "Infrastructure details",
+   "At least one FAQ"
+  ],
+  "sections": [
+   {
+    "name": "Personal info",
+    "complete": true
+   },
+   {
+    "name": "Company info",
+    "complete": true
+   },
+   {
+    "name": "Company details",
+    "complete": false
+   },
+   {
+    "name": "Location",
+    "complete": false
+   },
+   {
+    "name": "Certifications",
+    "complete": false
+   },
+   {
+    "name": "Infrastructure",
+    "complete": false
+   },
+   {
+    "name": "FAQ",
+    "complete": false
+   }
+  ],
+  "stoppedAt": "Company details",
+  "lastCompletedSection": "Company info",
+  "assignedAdminName": null
+ },
+ "profile": {
+  "profileData": {
+   "company": {
+    "name": "Fixture Castings abf16f",
+    "logo": null,
+    "cover": null,
+    "about": "",
+    "vision": "",
+    "estYear": "",
+    "employees": "",
+    "businessType": "",
+    "orgSize": ""
+   },
+   "location": {
+    "address": "",
+    "city": "",
+    "state": "",
+    "country": "",
+    "zip": "",
+    "pin": null,
+    "sez": "Not in SEZ",
+    "serviceableAreas": []
+   },
+   "certifications": [],
+   "infra": {
+    "electricity": "",
+    "water": "",
+    "storage": "",
+    "packaging": "",
+    "waste": "",
+    "qa": ""
+   },
+   "faqs": []
+  },
+  "state": {
+   "account": {
+    "firstName": "Owner",
+    "lastName": "Rao",
+    "companyName": "Fixture Castings abf16f",
+    "companyType": "Automotive & Machinery",
+    "country": "India",
+    "dob": "1990-02-02",
+    "phone": "",
+    "capacity": "500 units/month"
+   },
+   "contact": {
+    "email": "sales@fixture.example",
+    "phone": ""
+   },
+   "epic2": {
+    "companyDetailsDone": false,
+    "locationDone": false,
+    "certifications": [],
+    "infraDone": false,
+    "faqs": []
+   },
+   "serviceableAreas": [],
+   "machinery": [],
+   "calendar": {},
+   "recurring": null,
+   "capacity": null,
+   "bookings": []
+  },
+  "profileProgress": {
+   "status": "draft",
+   "currentStep": 1,
+   "completedSteps": [],
+   "resumeStep": 1,
+   "percentage": 15,
+   "checklist": {
+    "companyDetailsDone": false,
+    "locationDone": false,
+    "certsDone": false,
+    "infraDone": false,
+    "faqDone": false
+   }
+  },
+  "machineryDraft": null
+ },
+ "contacts": {
+  "email": "sales@fixture.example",
+  "phone": "+919876543210"
+ },
+ "linkedUsers": [
+  {
+   "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+   "first_name": "Owner",
+   "last_name": "Rao",
+   "email": "user_own_9d5751@example.com",
+   "phone": null,
+   "status": "active",
+   "membership_role": "owner",
+   "created_at": "2026-10-16T17:13:11.242231+00:00",
+   "last_seen_at": "2026-10-16T17:13:11.265397+00:00"
+  },
+  {
+   "id": "e3d2fd3c-3707-441c-a51f-ac155e1b44f9",
+   "first_name": "Meena",
+   "last_name": "S",
+   "email": "user_fxm_d9b865@example.com",
+   "phone": null,
+   "status": "active",
+   "membership_role": "member",
+   "created_at": "2026-10-16T17:13:12.774599+00:00",
+   "last_seen_at": "2026-10-16T17:13:12.795126+00:00"
+  }
+ ],
+ "members": [
+  {
+   "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+   "name": "Owner Rao",
+   "email": "user_own_9d5751@example.com",
+   "accountStatus": "active",
+   "membershipRole": "owner",
+   "membershipStatus": "active",
+   "roles": [
+    "manufacturer"
+   ],
+   "linkedAt": "2026-10-16T17:13:11.251276+00:00",
+   "lastSeenAt": "2026-10-16T17:13:11.265397+00:00"
+  },
+  {
+   "id": "e3d2fd3c-3707-441c-a51f-ac155e1b44f9",
+   "name": "Meena S",
+   "email": "user_fxm_d9b865@example.com",
+   "accountStatus": "active",
+   "membershipRole": "member",
+   "membershipStatus": "active",
+   "roles": [
+    "manufacturer"
+   ],
+   "linkedAt": "2026-10-16T17:13:13.218226+00:00",
+   "lastSeenAt": "2026-10-16T17:13:12.795126+00:00"
+  }
+ ],
+ "notes": [],
+ "history": [
+  {
+   "id": "6414b10c-77f4-4cfa-be72-caf436e55cc3",
+   "field_changed": "Application (join an existing company) - Meena S",
+   "old_value": "Awaiting review",
+   "new_value": "Approved",
+   "reason": null,
+   "created_at": "2026-10-16T17:13:13.294195+00:00",
+   "changed_by": "Jordan Lee"
+  },
+  {
+   "id": "b527eae2-90ab-4ae6-9091-756cd59dfec8",
+   "field_changed": "Application (new company) - Owner Rao",
+   "old_value": "Awaiting review",
+   "new_value": "Approved",
+   "reason": null,
+   "created_at": "2026-10-16T17:13:12.172787+00:00",
+   "changed_by": "Jordan Lee"
+  }
+ ],
+ "timeline": [
+  {
+   "at": "2026-10-16T17:13:13.218226+00:00",
+   "event": "Application to join this company approved by X!Y"
+  },
+  {
+   "at": "2026-10-16T17:13:13.218226+00:00",
+   "event": "Last profile update"
+  },
+  {
+   "at": "2026-10-16T17:13:12.798155+00:00",
+   "event": "Application to join this company submitted for approval"
+  },
+  {
+   "at": "2026-10-16T17:13:12.324909+00:00",
+   "event": "Application to join this company submitted for approval"
+  },
+  {
+   "at": "2026-10-16T17:13:12.324909+00:00",
+   "event": "Update request from another user submitted for approval"
+  },
+  {
+   "at": "2026-10-16T17:13:12.086807+00:00",
+   "event": "Approved by X!Y"
+  },
+  {
+   "at": "2026-10-16T17:13:12.086807+00:00",
+   "event": "Company details approved by X!Y"
+  },
+  {
+   "at": "2026-10-16T17:13:11.270089+00:00",
+   "event": "Onboarding form submitted (account created)"
+  },
+  {
+   "at": "2026-10-16T17:13:11.270089+00:00",
+   "event": "Profile completed and submitted for review"
+  },
+  {
+   "at": "2026-10-16T17:13:11.270089+00:00",
+   "event": "Company details submitted for approval"
+  },
+  {
+   "at": "2026-10-16T17:13:11.251276+00:00",
+   "event": "Manufacturer record created"
+  }
+ ],
+ "pendingSubmission": null,
+ "onboarding": {
+  "source": "web_dashboard",
+  "sourceLabel": "Web Dashboard",
+  "note": null,
+  "staged": null,
+  "backfill": null,
+  "importBatch": null,
+  "history": [
+   {
+    "id": "78f0acb6-0926-4277-9680-938b50c1b099",
+    "event": "membership_granted",
+    "label": "membership_granted",
+    "source": "admin_review",
+    "sourceLabel": "Admin review",
+    "actor": "Jordan Lee",
+    "actorRole": "admin",
+    "at": "2026-10-16T17:13:13.262327+00:00",
+    "submissionKind": "join_company",
+    "decision": null
+   },
+   {
+    "id": "5485469c-a9b8-4ee7-882f-b0aedd909320",
+    "event": "decision",
+    "label": "Review decision",
+    "source": "admin_review",
+    "sourceLabel": "Admin review",
+    "actor": "Jordan Lee",
+    "actorRole": "admin",
+    "at": "2026-10-16T17:13:13.261371+00:00",
+    "submissionKind": "join_company",
+    "decision": "approved"
+   },
+   {
+    "id": "374feb19-01fb-4f20-a8cc-048a4ef97c47",
+    "event": "submitted",
+    "label": "Submitted for review",
+    "source": "web_dashboard",
+    "sourceLabel": "Web Dashboard",
+    "actor": "Meena S",
+    "actorRole": "requester",
+    "at": "2026-10-16T17:13:12.809014+00:00",
+    "submissionKind": "join_company",
+    "decision": null
+   },
+   {
+    "id": "3f26e523-677f-4819-aa94-7e659e136555",
+    "event": "submitted",
+    "label": "Submitted for review",
+    "source": "web_dashboard",
+    "sourceLabel": "Web Dashboard",
+    "actor": "Ravi Kumar",
+    "actorRole": "requester",
+    "at": "2026-10-16T17:13:12.340793+00:00",
+    "submissionKind": "update_request",
+    "decision": null
+   },
+   {
+    "id": "61d3839b-d5fb-435b-9168-6c852e0036bc",
+    "event": "submitted",
+    "label": "Submitted for review",
+    "source": "web_dashboard",
+    "sourceLabel": "Web Dashboard",
+    "actor": "Ravi Kumar",
+    "actorRole": "requester",
+    "at": "2026-10-16T17:13:12.335578+00:00",
+    "submissionKind": "join_company",
+    "decision": null
+   },
+   {
+    "id": "be684d68-a6f0-489c-9ec3-dd7252dc9471",
+    "event": "merged",
+    "label": "Approved details merged into the company",
+    "source": "admin_review",
+    "sourceLabel": "Admin review",
+    "actor": "Jordan Lee",
+    "actorRole": "admin",
+    "at": "2026-10-16T17:13:12.108017+00:00",
+    "submissionKind": "new_company",
+    "decision": null
+   },
+   {
+    "id": "70054fe3-e795-41b8-8e71-a3e7da82516d",
+    "event": "decision",
+    "label": "Review decision",
+    "source": "admin_review",
+    "sourceLabel": "Admin review",
+    "actor": "Jordan Lee",
+    "actorRole": "admin",
+    "at": "2026-10-16T17:13:12.102112+00:00",
+    "submissionKind": "new_company",
+    "decision": "approved"
+   },
+   {
+    "id": "cc942659-a6ba-46de-a94f-98b43b7881dc",
+    "event": "submitted",
+    "label": "Submitted for review",
+    "source": "web_dashboard",
+    "sourceLabel": "Web Dashboard",
+    "actor": "Owner Rao",
+    "actorRole": "requester",
+    "at": "2026-10-16T17:13:11.295673+00:00",
+    "submissionKind": "new_company",
+    "decision": null
+   }
+  ]
+ },
+ "updateRequests": [
+  {
+   "id": "6756f4dc-242b-44b2-9eaf-450c4c1d1392",
+   "status": "pending",
+   "source": "web_dashboard",
+   "requestType": "existing_company_update",
+   "requester": {
+    "id": "cc67b66b-bbdd-4c0e-84e2-d40c3a2b710e",
+    "name": "Ravi Kumar",
+    "email": "user_fx_d3c043@example.com"
+   },
+   "submittedAt": "2026-10-16T17:13:12.324909+00:00",
+   "updatedAt": "2026-10-16T17:13:12.324909+00:00",
+   "reviewedAt": null,
+   "reviewedBy": null,
+   "appliedAt": null,
+   "feedback": null,
+   "adminNotes": "",
+   "appliedChanges": null,
+   "fields": [
+    {
+     "key": "companyName",
+     "label": "Company name",
+     "current": "Fixture Castings abf16f",
+     "proposed": "",
+     "submitted": "",
+     "atSubmission": "Fixture Castings abf16f",
+     "companyChanged": false,
+     "differs": false,
+     "edited": false
+    },
+    {
+     "key": "companyType",
+     "label": "Category",
+     "current": "Automotive & Machinery",
+     "proposed": "",
+     "submitted": "",
+     "atSubmission": "Automotive & Machinery",
+     "companyChanged": false,
+     "differs": false,
+     "edited": false
+    },
+    {
+     "key": "country",
+     "label": "Country",
+     "current": "India",
+     "proposed": "",
+     "submitted": "",
+     "atSubmission": "India",
+     "companyChanged": false,
+     "differs": false,
+     "edited": false
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity",
+     "current": "500 units/month",
+     "proposed": "900 units/month",
+     "submitted": "900 units/month",
+     "atSubmission": "500 units/month",
+     "companyChanged": false,
+     "differs": true,
+     "edited": false
+    },
+    {
+     "key": "contactEmail",
+     "label": "Contact email",
+     "current": "sales@fixture.example",
+     "proposed": "",
+     "submitted": "",
+     "atSubmission": "sales@fixture.example",
+     "companyChanged": false,
+     "differs": false,
+     "edited": false
+    },
+    {
+     "key": "contactPhone",
+     "label": "Contact phone",
+     "current": "+919876543210",
+     "proposed": "",
+     "submitted": "",
+     "atSubmission": "+919876543210",
+     "companyChanged": false,
+     "differs": false,
+     "edited": false
+    }
+   ],
+   "fingerprint": "f2481cfc4d049478aa72c2affe8a1bb3",
+   "events": [
+    {
+     "event": "submitted",
+     "by": "Ravi Kumar",
+     "role": "requester",
+     "at": "2026-10-16T17:13:12.340793+00:00",
+     "details": {
+      "source": "web_dashboard",
+      "proposed": {
+       "country": "",
+       "capacity": "900 units/month",
+       "companyName": "",
+       "companyType": "",
+       "contactEmail": "",
+       "contactPhone": ""
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "applications": [
+  {
+   "id": "9b05c678-e64c-4aca-aa5e-8d11e495cf9a",
+   "kind": "join_company",
+   "kindLabel": "Join an existing company",
+   "status": "pending",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:12.324909+00:00",
+   "createdAt": "2026-10-16T17:13:12.324909+00:00",
+   "updatedAt": "2026-10-16T17:13:12.324909+00:00",
+   "reviewedAt": null,
+   "reviewedBy": null,
+   "feedback": null,
+   "internalNotes": "",
+   "correctionFields": [],
+   "correctable": [
+    {
+     "key": "firstName",
+     "label": "First name"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth"
+    },
+    {
+     "key": "company",
+     "label": "Selected company"
+    },
+    {
+     "key": "companyName",
+     "label": "Company name"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category"
+    },
+    {
+     "key": "country",
+     "label": "Company location"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity"
+    }
+   ],
+   "applicant": {
+    "id": "cc67b66b-bbdd-4c0e-84e2-d40c3a2b710e",
+    "name": "Ravi Kumar",
+    "personalEmail": "ravi.kumar@gmail.com",
+    "signInEmail": "user_fx_d3c043@example.com",
+    "accountStatus": "active",
+    "isMember": false
+   },
+   "personal": [
+    {
+     "key": "firstName",
+     "label": "First name",
+     "value": "Ravi"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name",
+     "value": "Kumar"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email",
+     "value": "ravi.kumar@gmail.com"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth",
+     "value": "1991-03-03"
+    }
+   ],
+   "company": [
+    {
+     "key": "companyName",
+     "label": "Company name",
+     "submitted": "Fixture Castings abf16f",
+     "current": "Fixture Castings abf16f"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category",
+     "submitted": "Automotive & Machinery",
+     "current": "Automotive & Machinery"
+    },
+    {
+     "key": "country",
+     "label": "Company location",
+     "submitted": "India",
+     "current": "India"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number",
+     "submitted": "+919876543210",
+     "current": "+919876543210"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity",
+     "submitted": "500 units/month",
+     "current": "500 units/month"
+    }
+   ],
+   "changedOnResubmit": [],
+   "companyHasOwner": true,
+   "canMakePrimary": false,
+   "seen": "2026-10-16T17:13:12.324909+00:00",
+   "events": [
+    {
+     "event": "submitted",
+     "by": "Ravi Kumar",
+     "role": "requester",
+     "at": "2026-10-16T17:13:12.335578+00:00",
+     "details": {}
+    }
+   ]
+  },
+  {
+   "id": "7bc7f775-6542-45d9-9860-8b6dd66695ad",
+   "kind": "join_company",
+   "kindLabel": "Join an existing company",
+   "status": "approved",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:12.798155+00:00",
+   "createdAt": "2026-10-16T17:13:12.798155+00:00",
+   "updatedAt": "2026-10-16T17:13:13.218226+00:00",
+   "reviewedAt": "2026-10-16T17:13:13.218226+00:00",
+   "reviewedBy": "Jordan Lee",
+   "feedback": null,
+   "internalNotes": "",
+   "correctionFields": [],
+   "correctable": [
+    {
+     "key": "firstName",
+     "label": "First name"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth"
+    },
+    {
+     "key": "company",
+     "label": "Selected company"
+    },
+    {
+     "key": "companyName",
+     "label": "Company name"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category"
+    },
+    {
+     "key": "country",
+     "label": "Company location"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity"
+    }
+   ],
+   "applicant": {
+    "id": "e3d2fd3c-3707-441c-a51f-ac155e1b44f9",
+    "name": "Meena S",
+    "personalEmail": "meena.s@gmail.com",
+    "signInEmail": "user_fxm_d9b865@example.com",
+    "accountStatus": "active",
+    "isMember": true
+   },
+   "personal": [
+    {
+     "key": "firstName",
+     "label": "First name",
+     "value": "Meena"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name",
+     "value": "S"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email",
+     "value": "meena.s@gmail.com"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth",
+     "value": "1993-04-04"
+    }
+   ],
+   "company": [
+    {
+     "key": "companyName",
+     "label": "Company name",
+     "submitted": "Fixture Castings abf16f",
+     "current": "Fixture Castings abf16f"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category",
+     "submitted": "Automotive & Machinery",
+     "current": "Automotive & Machinery"
+    },
+    {
+     "key": "country",
+     "label": "Company location",
+     "submitted": "India",
+     "current": "India"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number",
+     "submitted": "+919876543210",
+     "current": "+919876543210"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity",
+     "submitted": "500 units/month",
+     "current": "500 units/month"
+    }
+   ],
+   "changedOnResubmit": [],
+   "companyHasOwner": true,
+   "canMakePrimary": false,
+   "seen": null,
+   "events": [
+    {
+     "event": "submitted",
+     "by": "Meena S",
+     "role": "requester",
+     "at": "2026-10-16T17:13:12.809014+00:00",
+     "details": {}
+    },
+    {
+     "event": "decision",
+     "by": "Jordan Lee",
+     "role": "admin",
+     "at": "2026-10-16T17:13:13.261371+00:00",
+     "details": {
+      "decision": "approved",
+      "feedback": null,
+      "makePrimary": false,
+      "internalNote": null,
+      "correctionFields": []
+     }
+    },
+    {
+     "event": "membership_granted",
+     "by": "Jordan Lee",
+     "role": "admin",
+     "at": "2026-10-16T17:13:13.262327+00:00",
+     "details": {
+      "role": "member"
+     }
+    }
+   ]
+  },
+  {
+   "id": "fa631f37-8460-4d06-acf0-8cb5638de297",
+   "kind": "new_company",
+   "kindLabel": "New company",
+   "status": "approved",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:11.270089+00:00",
+   "createdAt": "2026-10-16T17:13:11.270089+00:00",
+   "updatedAt": "2026-10-16T17:13:12.086807+00:00",
+   "reviewedAt": "2026-10-16T17:13:12.086807+00:00",
+   "reviewedBy": "Jordan Lee",
+   "feedback": null,
+   "internalNotes": "",
+   "correctionFields": [],
+   "correctable": [
+    {
+     "key": "firstName",
+     "label": "First name"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth"
+    },
+    {
+     "key": "companyName",
+     "label": "Company name"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category"
+    },
+    {
+     "key": "country",
+     "label": "Company location"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity"
+    }
+   ],
+   "applicant": {
+    "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+    "name": "Owner Rao",
+    "personalEmail": "user_own_9d5751@mail.in",
+    "signInEmail": "user_own_9d5751@example.com",
+    "accountStatus": "active",
+    "isMember": true
+   },
+   "personal": [
+    {
+     "key": "firstName",
+     "label": "First name",
+     "value": "Owner"
+    },
+    {
+     "key": "lastName",
+     "label": "Last name",
+     "value": "Rao"
+    },
+    {
+     "key": "personalEmail",
+     "label": "Personal email",
+     "value": "user_own_9d5751@mail.in"
+    },
+    {
+     "key": "dob",
+     "label": "Date of birth",
+     "value": "1990-02-02"
+    }
+   ],
+   "company": [
+    {
+     "key": "companyName",
+     "label": "Company name",
+     "submitted": "Fixture Castings abf16f",
+     "current": "Fixture Castings abf16f"
+    },
+    {
+     "key": "companyType",
+     "label": "Company category",
+     "submitted": "Automotive & Machinery",
+     "current": "Automotive & Machinery"
+    },
+    {
+     "key": "country",
+     "label": "Company location",
+     "submitted": "India",
+     "current": "India"
+    },
+    {
+     "key": "companyPhone",
+     "label": "Company phone number",
+     "submitted": "+919876543210",
+     "current": "+919876543210"
+    },
+    {
+     "key": "capacity",
+     "label": "Production capacity",
+     "submitted": "500 units/month",
+     "current": "500 units/month"
+    }
+   ],
+   "changedOnResubmit": [],
+   "companyHasOwner": true,
+   "canMakePrimary": false,
+   "seen": null,
+   "events": [
+    {
+     "event": "submitted",
+     "by": "Owner Rao",
+     "role": "requester",
+     "at": "2026-10-16T17:13:11.295673+00:00",
+     "details": {}
+    },
+    {
+     "event": "decision",
+     "by": "Jordan Lee",
+     "role": "admin",
+     "at": "2026-10-16T17:13:12.102112+00:00",
+     "details": {
+      "decision": "approved",
+      "feedback": null,
+      "makePrimary": false,
+      "internalNote": null,
+      "correctionFields": []
+     }
+    },
+    {
+     "event": "merged",
+     "by": "Jordan Lee",
+     "role": "admin",
+     "at": "2026-10-16T17:13:12.108017+00:00",
+     "details": {}
+    }
+   ]
+  }
+ ],
+ "admins": [
+  {
+   "id": "0519a84e-eeb3-4eb2-ae3e-b7c5dc5b7b5e",
+   "name": "Asha Verma",
+   "email": "idle_18e3df@xy.test"
+  },
+  {
+   "id": "067838d9-1801-4d0d-87ce-95ad8c2572e0",
+   "name": "Asha Verma",
+   "email": "lock_15c005@xy.test"
+  },
+  {
+   "id": "230918aa-0946-47fe-a2d6-9097e2742974",
+   "name": "Asha Verma",
+   "email": "idle_cd20d3@xy.test"
+  }
+ ],
+ "requiredFields": [
+  {
+   "key": "r_first_name",
+   "label": "First name",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_last_name",
+   "label": "Last name",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_contact",
+   "label": "Email or phone",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_dob",
+   "label": "Date of birth",
+   "section": "Personal info",
+   "done": true
+  },
+  {
+   "key": "r_company_name",
+   "label": "Company name",
+   "section": "Company info",
+   "done": true
+  },
+  {
+   "key": "r_industry",
+   "label": "Company category",
+   "section": "Company info",
+   "done": true
+  },
+  {
+   "key": "r_account_country",
+   "label": "Country",
+   "section": "Company info",
+   "done": true
+  },
+  {
+   "key": "r_about",
+   "label": "About the company",
+   "section": "Company details",
+   "done": false
+  },
+  {
+   "key": "r_address",
+   "label": "Facility address",
+   "section": "Location",
+   "done": false
+  },
+  {
+   "key": "r_city",
+   "label": "City",
+   "section": "Location",
+   "done": false
+  },
+  {
+   "key": "r_location_country",
+   "label": "Facility country",
+   "section": "Location",
+   "done": false
+  },
+  {
+   "key": "r_certification",
+   "label": "At least one certification",
+   "section": "Certifications",
+   "done": false
+  },
+  {
+   "key": "r_infrastructure",
+   "label": "Infrastructure details",
+   "section": "Infrastructure",
+   "done": false
+  },
+  {
+   "key": "r_faq",
+   "label": "At least one FAQ",
+   "section": "FAQ",
+   "done": false
+  }
+ ],
+ "sectionsOrder": [
+  "Personal info",
+  "Company info",
+  "Company details",
+  "Location",
+  "Certifications",
+  "Infrastructure",
+  "FAQ"
+ ],
+ "editable": {
+  "profile": {
+   "company.name": "Company name",
+   "company.about": "About the company",
+   "company.vision": "Vision & mission",
+   "company.estYear": "Year established",
+   "company.employees": "Number of employees",
+   "company.businessType": "Business type",
+   "company.orgSize": "Organization size",
+   "location.address": "Facility address",
+   "location.city": "City",
+   "location.state": "State / province",
+   "location.country": "Facility country",
+   "location.zip": "ZIP / postal code",
+   "location.sez": "SEZ status",
+   "location.serviceableAreas": "Serviceable areas",
+   "infra.electricity": "Electricity",
+   "infra.water": "Water",
+   "infra.storage": "Storage",
+   "infra.packaging": "Packaging",
+   "infra.waste": "Waste disposal",
+   "infra.qa": "Quality assurance",
+   "certifications": "Certifications",
+   "faqs": "FAQs"
+  },
+  "account": {
+   "account.companyType": "Company category",
+   "account.country": "Country",
+   "account.capacity": "Production capacity",
+   "contact.email": "Contact email",
+   "contact.phone": "Contact phone"
+  },
+  "machinery": {
+   "industry": "Industry",
+   "subcategory": "Subcategory",
+   "type": "Machinery type",
+   "capacity": "Capacity",
+   "age": "Age",
+   "condition": "Condition",
+   "technical": "Technical details",
+   "rawMatStatus": "Raw materials",
+   "materialDetails": "Material details",
+   "laborType": "Labour type",
+   "workerCount": "Workers",
+   "workerRoles": "Worker roles",
+   "logistics": "Logistics",
+   "logisticsPartner": "Logistics partner",
+   "pricing": "Pricing",
+   "insurance": "Insurance"
+  },
+  "required": [
+   "account.companyType",
+   "account.country",
+   "company.about",
+   "company.name",
+   "location.address",
+   "location.city",
+   "location.country"
+  ]
+ }
+}

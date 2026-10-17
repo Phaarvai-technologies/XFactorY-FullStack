@@ -1,0 +1,45 @@
+{
+ "items": [
+  {
+   "id": "e4adaa0b-9d68-40c3-991b-2102c8622862",
+   "kind": "application_submitted",
+   "title": "New manufacturer application",
+   "body": "Asha Rao applied for Fresh Fixture Works 989814 (new company).",
+   "createdAt": "2026-10-16T17:13:13.614967+00:00",
+   "read": false,
+   "companyId": "f9de2ba1-58d9-4e21-920c-ffd565b6dadf",
+   "applicationId": "a34a64a4-6c63-4569-8859-8895c38394c3"
+  },
+  {
+   "id": "c35bf70f-eaee-4e90-b160-e314860fb4f5",
+   "kind": "application_submitted",
+   "title": "New manufacturer application",
+   "body": "Meena S applied for Fixture Castings abf16f (join an existing company).",
+   "createdAt": "2026-10-16T17:13:12.798155+00:00",
+   "read": true,
+   "companyId": "a107db0e-a722-42d9-b84d-773dc51e03e4",
+   "applicationId": "7bc7f775-6542-45d9-9860-8b6dd66695ad"
+  },
+  {
+   "id": "6b99785d-a173-460e-b236-b61ea03b1fa8",
+   "kind": "application_submitted",
+   "title": "New manufacturer application",
+   "body": "Ravi Kumar applied for Fixture Castings abf16f (join an existing company).",
+   "createdAt": "2026-10-16T17:13:12.324909+00:00",
+   "read": true,
+   "companyId": "a107db0e-a722-42d9-b84d-773dc51e03e4",
+   "applicationId": "9b05c678-e64c-4aca-aa5e-8d11e495cf9a"
+  },
+  {
+   "id": "8b298670-abb3-48aa-b889-18f8930ef68c",
+   "kind": "application_submitted",
+   "title": "New manufacturer application",
+   "body": "Owner Rao applied for Fixture Castings abf16f (new company).",
+   "createdAt": "2026-10-16T17:13:11.270089+00:00",
+   "read": true,
+   "companyId": "a107db0e-a722-42d9-b84d-773dc51e03e4",
+   "applicationId": "fa631f37-8460-4d06-acf0-8cb5638de297"
+  }
+ ],
+ "unread": 1
+}

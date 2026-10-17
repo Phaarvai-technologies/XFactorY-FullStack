@@ -259,6 +259,16 @@
 .adm-root .adm-filter-grid input { padding-top: 9px; padding-bottom: 9px; font-size: 13.5px; }
 .adm-root .adm-filter-pills { display: flex; flex-wrap: wrap; gap: 14px 28px; }
 .adm-root .adm-pills .pill-option { padding: 7px 13px; font-size: 12.5px; }
+/* Data filter (Real / Demo / Real + demo) */
+.adm-root .adm-seg { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--slate-200); border-radius: 12px; background: var(--slate-50, #f8fafc); max-width: 100%; }
+.adm-root .adm-seg-label { font-size: 12px; font-weight: 700; color: var(--slate-500); padding: 0 8px 0 6px; }
+.adm-root .adm-seg-btn { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; border-radius: 9px; padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--slate-600); cursor: pointer; white-space: nowrap; }
+.adm-root .adm-seg-btn:hover { color: var(--slate-900, #0f172a); }
+.adm-root .adm-seg-btn.on { background: #fff; color: var(--blue-700); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+.adm-root .adm-seg-btn:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 1px; }
+.adm-root .adm-seg-count { font-size: 11.5px; font-weight: 700; color: var(--slate-500); background: var(--slate-100); border-radius: 999px; padding: 1px 7px; }
+.adm-root .adm-seg-hint { font-size: 12.5px; color: var(--slate-500); }
+.adm-root .adm-seg-btn.on .adm-seg-count { background: var(--blue-50); color: var(--blue-700); }
 .adm-root .adm-toggle {
   display: inline-flex;
   align-items: center;
@@ -905,6 +915,9 @@
   .adm-root .adm-main { padding: 16px 12px 56px; }
   .adm-root .adm-search { min-width: 0; flex-basis: 100%; }
   .adm-root .adm-select-sm { min-width: 0; flex: 1 1 140px; }
+  .adm-root .adm-seg { display: flex; width: 100%; }
+  .adm-root .adm-seg-label { padding: 0 4px; }
+  .adm-root .adm-seg-btn { flex: 1 1 0; justify-content: center; padding: 7px 4px; gap: 4px; min-width: 0; }
   .adm-root .adm-welcome { padding: 18px; }
   .adm-root .adm-welcome .welcome-title { font-size: 20px; }
   .adm-root .adm-section { padding: 16px; }
@@ -939,3 +952,11 @@
 .adm-root .adm-w-ru-open { width: 84px; }
 .adm-root .adm-ru-table { min-width: 720px; }
 .adm-root .adm-ru-table code.adm-code { font-size: 11.5px; }
+
+/* header name chip: opens "Edit my details" */
+.adm-root .adm-me-chip { cursor: pointer; font: inherit; color: inherit; }
+.adm-root .adm-me-chip:hover { border-color: var(--blue-600); }
+.adm-root .adm-me-chip:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; }
+.adm-root .adm-me-chip:disabled { cursor: default; }
+.adm-root .adm-pw-link { margin-top: 12px; }
+.adm-root .adm-readonly { background: var(--slate-50, #f8fafc); color: var(--slate-500); cursor: not-allowed; }

@@ -1,0 +1,167 @@
+{
+ "registeredUsers": [
+  {
+   "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+   "name": "Owner Rao",
+   "email": "user_own_9d5751@example.com",
+   "personalEmail": "user_own_9d5751@mail.in",
+   "role": "owner",
+   "membershipStatus": "active",
+   "accountStatus": "active",
+   "linkedAt": "2026-10-16T17:13:11.251276+00:00",
+   "registeredAt": "2026-10-16T17:13:11.242231+00:00",
+   "roles": [
+    "manufacturer"
+   ]
+  },
+  {
+   "id": "e3d2fd3c-3707-441c-a51f-ac155e1b44f9",
+   "name": "Meena S",
+   "email": "user_fxm_d9b865@example.com",
+   "personalEmail": "meena.s@gmail.com",
+   "role": "member",
+   "membershipStatus": "active",
+   "accountStatus": "active",
+   "linkedAt": "2026-10-16T17:13:13.218226+00:00",
+   "registeredAt": "2026-10-16T17:13:12.774599+00:00",
+   "roles": [
+    "manufacturer"
+   ]
+  }
+ ],
+ "requests": [
+  {
+   "id": "6756f4dc-242b-44b2-9eaf-450c4c1d1392",
+   "kind": "update_request",
+   "kindLabel": "Update request from another user",
+   "status": "pending",
+   "statusLabel": "Awaiting review",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:12.324909+00:00",
+   "reviewedAt": null,
+   "reviewer": null,
+   "feedback": null,
+   "requester": {
+    "id": "cc67b66b-bbdd-4c0e-84e2-d40c3a2b710e",
+    "name": "Ravi Kumar",
+    "email": "user_fx_d3c043@example.com",
+    "personalEmail": "ravi.kumar@gmail.com"
+   },
+   "requesterIsMember": false
+  },
+  {
+   "id": "9b05c678-e64c-4aca-aa5e-8d11e495cf9a",
+   "kind": "join_company",
+   "kindLabel": "Application to join this company",
+   "status": "pending",
+   "statusLabel": "Awaiting review",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:12.324909+00:00",
+   "reviewedAt": null,
+   "reviewer": null,
+   "feedback": null,
+   "requester": {
+    "id": "cc67b66b-bbdd-4c0e-84e2-d40c3a2b710e",
+    "name": "Ravi Kumar",
+    "email": "user_fx_d3c043@example.com",
+    "personalEmail": "ravi.kumar@gmail.com"
+   },
+   "requesterIsMember": false
+  },
+  {
+   "id": "7bc7f775-6542-45d9-9860-8b6dd66695ad",
+   "kind": "join_company",
+   "kindLabel": "Application to join this company",
+   "status": "approved",
+   "statusLabel": "Approved",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:12.798155+00:00",
+   "reviewedAt": "2026-10-16T17:13:13.218226+00:00",
+   "reviewer": "Jordan Lee",
+   "feedback": null,
+   "requester": {
+    "id": "e3d2fd3c-3707-441c-a51f-ac155e1b44f9",
+    "name": "Meena S",
+    "email": "user_fxm_d9b865@example.com",
+    "personalEmail": "meena.s@gmail.com"
+   },
+   "requesterIsMember": true
+  },
+  {
+   "id": "fa631f37-8460-4d06-acf0-8cb5638de297",
+   "kind": "new_company",
+   "kindLabel": "New company account",
+   "status": "approved",
+   "statusLabel": "Approved",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:11.270089+00:00",
+   "reviewedAt": "2026-10-16T17:13:12.086807+00:00",
+   "reviewer": "Jordan Lee",
+   "feedback": null,
+   "requester": {
+    "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+    "name": "Owner Rao",
+    "email": "user_own_9d5751@example.com",
+    "personalEmail": "user_own_9d5751@mail.in"
+   },
+   "requesterIsMember": true
+  }
+ ],
+ "primaryUser": {
+  "id": "dd7a9071-a00f-4459-955c-e9950ab2744f",
+  "name": "Owner Rao",
+  "email": "user_own_9d5751@example.com",
+  "personalEmail": "user_own_9d5751@mail.in",
+  "role": "owner",
+  "membershipStatus": "active",
+  "accountStatus": "active",
+  "linkedAt": "2026-10-16T17:13:11.251276+00:00",
+  "registeredAt": "2026-10-16T17:13:11.242231+00:00",
+  "roles": [
+   "manufacturer"
+  ]
+ },
+ "otherUsers": [
+  {
+   "id": "e3d2fd3c-3707-441c-a51f-ac155e1b44f9",
+   "name": "Meena S",
+   "email": "user_fxm_d9b865@example.com",
+   "personalEmail": "meena.s@gmail.com",
+   "role": "member",
+   "membershipStatus": "active",
+   "accountStatus": "active",
+   "linkedAt": "2026-10-16T17:13:13.218226+00:00",
+   "registeredAt": "2026-10-16T17:13:12.774599+00:00",
+   "roles": [
+    "manufacturer"
+   ]
+  }
+ ],
+ "pendingApplicants": [
+  {
+   "id": "9b05c678-e64c-4aca-aa5e-8d11e495cf9a",
+   "kind": "join_company",
+   "kindLabel": "Application to join this company",
+   "status": "pending",
+   "statusLabel": "Awaiting review",
+   "source": "web_dashboard",
+   "submittedAt": "2026-10-16T17:13:12.324909+00:00",
+   "reviewedAt": null,
+   "reviewer": null,
+   "feedback": null,
+   "requester": {
+    "id": "cc67b66b-bbdd-4c0e-84e2-d40c3a2b710e",
+    "name": "Ravi Kumar",
+    "email": "user_fx_d3c043@example.com",
+    "personalEmail": "ravi.kumar@gmail.com"
+   },
+   "requesterIsMember": false
+  }
+ ],
+ "counts": {
+  "linkedUsers": 2,
+  "confirmedUsers": 2,
+  "pendingApplicants": 1,
+  "openRequests": 2
+ }
+}

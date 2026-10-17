@@ -57,7 +57,7 @@ def test_bodies_without_source_pass_through_unchanged():
 
 def test_account_payload_rejects_source_and_accepts_normal_body():
     good = {"firstName": "A", "lastName": "B", "contact": "a@b.co", "dob": "1990-01-01", "companyName": "C",
-            "companyType": "Other", "country": "India"}
+            "companyType": "Other", "country": "India", "phone": "9876543210"}
     assert AccountPayload(**good).companyName == "C"
     with pytest.raises(ValueError):
         AccountPayload(**good, onboardingSource="ai_voice_call")

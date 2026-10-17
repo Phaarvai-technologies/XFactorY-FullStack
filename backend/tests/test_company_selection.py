@@ -12,7 +12,7 @@ from test_e2e_local import approve_company, client  # noqa: F401  (shared fixtur
 pytestmark = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
 
 ACCOUNT = {"firstName": "Jo", "lastName": "Owner", "contact": "jo@example.com", "dob": "1990-01-01",
-           "companyType": "Automotive & Machinery", "country": "India", "phone": "", "capacity": ""}
+           "companyType": "Automotive & Machinery", "country": "India", "phone": "9876543210", "capacity": ""}
 
 
 def _tag() -> str:
@@ -129,7 +129,8 @@ async def test_selecting_loads_the_exact_record_and_unclaimed_companies_can_be_c
     assert r.status_code == 200, r.text
     assert r.json() == {"id": pune_id, "companyName": f"Nova Metals {t}", "companyType": "Automotive & Machinery",
                         "country": "India", "city": "Pune", "state": "", "capacity": "900 t",
-                        "phone": "", "access": "unclaimed", "canUpdate": True}  # contact hidden; may complete
+                        # the company's phone is shown (read-only on the form); nothing missing
+                        "phone": "+91 99999 00000", "missing": [], "access": "unclaimed", "canUpdate": True}
     assert (await client.get(f"/manufacturer/companies/{uuid.uuid4()}", headers=h)).status_code == 404
 
     assert (await client.get(f"/manufacturer/companies/{pune_id}", headers=h)).json()["canUpdate"] is True
@@ -143,7 +144,7 @@ async def test_selecting_loads_the_exact_record_and_unclaimed_companies_can_be_c
                                    WHERE o.id=CAST(:id AS uuid)""", id=pune_id)
     r = await client.post("/manufacturer/account", headers=h, json={
         **ACCOUNT, "companyName": f"Nova Metals {t}", "companyId": pune_id, "capacity": "1 t",
-        "companyType": "Other", "contact": "9876543210"})
+        "companyType": "Other"})
     assert r.status_code == 201, r.text
     assert r.json()["approval"]["status"] == "pending" and r.json()["approval"]["kind"] == "claim"
     assert await client.sql("""SELECT o.display_name, o.status, op.company_category, op.production_capacity_label,
@@ -247,7 +248,8 @@ async def test_owner_updates_their_selected_company_and_others_only_request_chan
 
     other = f"user_oth_{_tag()}"
     seen = (await client.get(f"/manufacturer/companies/{org_id['id']}", headers=_hdr(client, other))).json()
-    assert seen["access"] == "claimed" and seen["phone"] == "" and seen["canUpdate"] is False
+    # the company's own phone is shown (read-only on the form) - business information, not a person's
+    assert seen["access"] == "claimed" and seen["phone"] == "+919876543210" and seen["canUpdate"] is False
     r = await client.post("/manufacturer/account", headers=_hdr(client, other), json={
         **ACCOUNT, "companyName": f"Sigma Fab {t}", "companyId": org_id["id"], "capacity": "1 unit"})
     # No longer refused: staged as an update request for admin review (test_company_update_requests.py).

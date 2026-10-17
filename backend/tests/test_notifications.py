@@ -28,7 +28,8 @@ async def test_admin_actions_notify_the_manufacturer(client, no_clerk):  # noqa:
 
     # Needs correction + note -> notification, popup, correction box with the note
     r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
-                           json={"review_status": "NEEDS_CORRECTION", "reason": "Upload a clearer ISO certificate"})
+                           json={"review_status": "NEEDS_CORRECTION", "reason": "Upload a clearer ISO certificate",
+                                 "correction_fields": ["capacity"]})
     assert r.status_code == 200, r.text
     # A shared note
     r = await client.post(f"/admin/manufacturers/{org}/notes", headers=admin,
@@ -46,7 +47,8 @@ async def test_admin_actions_notify_the_manufacturer(client, no_clerk):  # noqa:
     assert kinds == ["profile_edit", "admin_note", "needs_correction"], kinds
     assert n["unread"] == 3 and n["popup"] == {"count": 3, "needsCorrection": True}
     nc = n["items"][2]
-    assert nc["title"] == "Your profile needs a few corrections" and nc["body"] == "Upload a clearer ISO certificate"
+    assert nc["title"] == "Your manufacturer application needs corrections"
+    assert nc["body"] == "Upload a clearer ISO certificate\nFields to correct: Production capacity"
     assert "Injection moulded food containers" in n["items"][0]["body"] and "Typo" in n["items"][0]["body"]
     assert n["correction"]["reason"] == "Upload a clearer ISO certificate"
     notes = [x["note"] for x in n["correction"]["notes"]]
@@ -72,7 +74,7 @@ async def test_admin_actions_notify_the_manufacturer(client, no_clerk):  # noqa:
     await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"review_status": "REVIEWED"})
     n = (await client.get("/manufacturer/notifications", headers=mh)).json()
     assert n["correction"] is None and len(n["items"]) == 4
-    assert n["items"][0]["title"] == "Your company details were approved"
+    assert n["items"][0]["title"] == "Your manufacturer application has been approved"
 
     # Signed out -> 401
     assert (await client.get("/manufacturer/notifications", headers={"Authorization": ""})).status_code == 401

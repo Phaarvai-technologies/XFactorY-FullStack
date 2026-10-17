@@ -101,6 +101,18 @@ function reset(path: string, signedIn = true) {
 }
 
 describe("Manufacturer portal entry", () => {
+  it("prefills the details form with the user's own registration details", async () => {
+    reset("/manufacturer/account");
+    replies = [{ status: 200, body: { ...existing, accountExists: false,
+      user: { firstName: "Jansi", lastName: "Rani", email: "jansi.signin@example.com", personalEmail: "" } } }];
+    render(<ManufacturerApp />);
+    await answer();
+    const value = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value;
+    assert(value("acc-first") === "Jansi" && value("acc-last") === "Rani", `names: ${value("acc-first")} ${value("acc-last")}`);
+    assert(value("acc-email") === "jansi.signin@example.com", `email: ${value("acc-email")}`);
+    assert(value("acc-dob") === "", "date of birth is optional and not prefilled");
+  });
+
   it("loads an existing account without flashing the Join page", async () => {
     reset("/manufacturer");
     render(<ManufacturerApp />);

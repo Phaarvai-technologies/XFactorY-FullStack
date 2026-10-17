@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.admins import AdminManager
 from app.admin.auth import AdminContext, current_admin
-from app.admin.schemas import (AccountStatusIn, AdminAddIn, AdminFields, AdminRestoreIn, AdminRoleIn, ArchiveIn,
-                               BatchArchiveIn, CompanyCreate, FieldEdit, NoteIn, TestEmailIn, UpdateRequestDecision,
+from app.admin.schemas import (AccountStatusIn, AdminAddIn, AdminDetailsIn, AdminFields, AdminRestoreIn, AdminRoleIn, ArchiveIn,
+                               BatchArchiveIn, CompanyCreate, FieldEdit, NoteIn, RecordTypeIn, TestEmailIn, UpdateRequestDecision,
                                UpdateRequestEdit)
 from app.admin.service import AdminService
 from app.core.config import Settings, get_settings
@@ -80,6 +80,13 @@ async def change_admin_role(user_id: UUID, body: AdminRoleIn, admin: Admin, mgr:
     return await mgr.change_role(admin, user_id, body.role)
 
 
+@router.patch("/admin-users/{user_id}")
+async def update_admin_details(user_id: UUID, body: AdminDetailsIn, admin: Admin, mgr: Mgr):
+    """Edit an admin's name / phone (and sign-in email for admin-only accounts). Administrators can
+    edit anyone; every admin can edit their own details."""
+    return await mgr.update_details(admin, user_id, body.model_dump(exclude_unset=True))
+
+
 @router.post("/admin-users/{user_id}/reset-password")
 async def reset_admin_password(user_id: UUID, admin: Admin, mgr: Mgr):
     """New temporary password (shown once). Administrators only."""
@@ -99,11 +106,14 @@ async def manufacturers(admin: Admin, svc: Svc, q: str | None = None, industry: 
                         entry_source: ListParam = None,
                         archived: Literal["active", "archived", "all"] = "active",
                         assigned: Literal["unassigned"] | None = None,
+                        listing: Literal["listed", "awaiting", "all"] = "listed",
                         sort: Literal["updated", "name", "completeness", "registered"] = "updated",
                         page: int = Query(1, ge=1), page_size: int = Query(25, ge=5, le=100)):
     filters = {"q": q, "industry": industry, "process": process, "location": location,
                "completeness": completeness, "review_status": review_status, "record_type": record_type,
-               "entry_source": entry_source, "archived": archived, "assigned": assigned}
+               "entry_source": entry_source, "archived": archived, "assigned": assigned, "listing": listing}
+    # listing: "listed" (default) = approved companies + imported / admin-added ones; "awaiting" =
+    # companies users submitted that are not approved yet (they are in Onboarding & review); "all".
     return await svc.manufacturers(filters, page, page_size, sort)
 
 
@@ -200,18 +210,29 @@ async def users(admin: Admin, svc: Svc, q: str | None = None,
                 onboarding_status: Literal["NO_PROFILE", "NOT_STARTED", "IN_PROGRESS", "SUBMITTED",
                                            "NEEDS_CORRECTION", "REVIEWED"] | None = None,
                 role: Literal["manufacturer", "visionary"] | None = None,
+                data: Literal["real", "demo", "all"] = "all",
                 page: int = Query(1, ge=1), page_size: int = Query(25, ge=5, le=100)):
+    """data: real, demo (the person or their linked company is marked Demo or Test) or all."""
     return await svc.users({"q": q, "account_status": account_status, "onboarding_status": onboarding_status,
-                            "role": role}, page, page_size)
+                            "role": role, "data": data}, page, page_size)
 
 
 @router.get("/visionaries")
 async def visionaries(admin: Admin, svc: Svc, q: str | None = None,
                       account_status: Literal["active", "suspended", "deactivated"] | None = None,
                       profile: Literal["saved", "missing"] | None = None,
+                      data: Literal["real", "demo", "all"] = "all",
                       page: int = Query(1, ge=1), page_size: int = Query(25, ge=5, le=100)):
-    """Visionary (demand-side) users: one row per user, with their saved profile and counts. Read-only."""
-    return await svc.visionaries({"q": q, "account_status": account_status, "profile": profile}, page, page_size)
+    """Visionary (demand-side) users: one row per user, with their saved profile and counts.
+    data: real / demo (marked Demo or Test by an admin) / all."""
+    return await svc.visionaries({"q": q, "account_status": account_status, "profile": profile, "data": data},
+                                 page, page_size)
+
+
+@router.patch("/visionaries/{user_id}/record-type")
+async def visionary_record_type(user_id: UUID, body: RecordTypeIn, admin: Admin, svc: Svc):
+    """Mark a Visionary as real / demo / test data (recorded in their activity log)."""
+    return await svc.set_visionary_record_type(admin, str(user_id), body.record_type, body.reason)
 
 
 @router.get("/visionaries/{user_id}")

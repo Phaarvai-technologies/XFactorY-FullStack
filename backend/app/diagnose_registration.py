@@ -28,6 +28,7 @@ from sqlalchemy import text
 
 from app.core.config import Settings, get_settings
 from app.identity.registration import _DB_EVIDENCE_SQL
+from app.core.cli import run as run_cli
 
 
 def publishable_key_host(key: str | None) -> tuple[str | None, str | None]:
@@ -150,4 +151,4 @@ async def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(run_cli(main()))

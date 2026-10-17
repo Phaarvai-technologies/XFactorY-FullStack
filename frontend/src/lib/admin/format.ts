@@ -182,4 +182,10 @@ export function machineTone(status: string): string {
   return status === "Published" ? "badge-verified" : status === "Archived" ? "badge-neutral" : "badge-pending";
 }
 
-export const MEMBERSHIP_LABELS: Record<string, string> = { active: "Active", suspended: "Suspended", removed: "Removed" };
+export const MEMBERSHIP_LABELS: Record<string, string> = {
+  active: "Active",
+  suspended: "Suspended",
+  removed: "Removed",
+  // an applicant listed under the company while their application is reviewed (not a member yet)
+  pending: "Pending approval",
+};

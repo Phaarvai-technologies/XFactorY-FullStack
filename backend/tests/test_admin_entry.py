@@ -110,8 +110,8 @@ async def test_admin_entry_company_claimed_and_approved_keeps_its_source(client)
     sub_row = (await client.sql("""SELECT kind, source FROM manufacturer_submissions
                                    WHERE target_organization_id=CAST(:o AS uuid)""", o=org))[0]
     assert tuple(sub_row) == ("claim", "web_dashboard")
-    await complete_profile(client, h)
     assert (await approve_company(client, org)).status_code == 200
+    await complete_profile(client, h)  # approval first: the profile opens once approved
     assert (await _org(client, org))[0] == "admin_entry"
     assert [e[:2] for e in await _events(client, org)] == [
         ("created", "admin_entry"), ("submitted", "web_dashboard"), ("decision", "admin_review"),
