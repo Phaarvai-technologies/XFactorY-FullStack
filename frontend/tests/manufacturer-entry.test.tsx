@@ -7,7 +7,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { ManufacturerApp } from "../src/components/manufacturer/ManufacturerApp";
+import { ManufacturerApp } from "@/components/manufacturer/ManufacturerApp";
 import existing from "./fixtures/bootstrap-existing.json";
 import { clerkCalls, session } from "./mocks/clerk";
 import { nav } from "./mocks/navigation";
@@ -42,9 +42,9 @@ let replies: Reply[] = [];
 const calls: string[] = [];
 let releaseFetch: (() => void) | null = null;
 
-globalThis.fetch = async (input: RequestInfo | URL) => {
-  const url = input instanceof Request ? input.url : String(input);
-  calls.push(url);
+(globalThis as any).fetch = async (url: string) => {
+  calls.push(String(url));
+
   if (String(url).includes("/manufacturer/notifications")) {
     return new Response(
       JSON.stringify({
