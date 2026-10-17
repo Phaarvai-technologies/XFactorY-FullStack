@@ -286,9 +286,9 @@ class ManufacturerRepository:
                               {"k": f"xy-account:{ctx['user_id']}"})
         workspace = ctx["organization_id"]
         target = await self._account_target(ctx, data)
-        contact = data["contact"].strip()
-        email = contact if "@" in contact else None
-        contact_phone = data.get("phone") or (None if email else contact)
+        email = data["email"].strip()
+        contact_phone = data.get("phone") or None
+        
         country = await self._country_code(data["country"])
         first, last = data["firstName"].strip(), data["lastName"].strip()
         # Personal details belong to the user and are saved directly (not company data).

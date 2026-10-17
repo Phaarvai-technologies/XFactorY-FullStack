@@ -19,7 +19,7 @@ class AccountPayload(_Model):
     # Prefilled from the saved user record; saved only if the user changed them.
     firstName: str = Field(min_length=1, max_length=100)
     lastName: str = Field(min_length=1, max_length=100)
-    contact: str = Field(min_length=3, max_length=320)
+    email: str = Field(min_length=3, max_length=320)
     dob: date
     companyName: str = Field(min_length=1, max_length=200)
     companyType: str = Field(min_length=1, max_length=150)
