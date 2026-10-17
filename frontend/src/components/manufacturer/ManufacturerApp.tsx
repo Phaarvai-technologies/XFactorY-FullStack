@@ -846,22 +846,14 @@ export function ManufacturerApp() {
     correctionFields={access?.status === "changes_requested" ? access.application?.correctionFields : undefined}
     initial={server?.approval?.status === "changes_requested" || canReapply ? {
       ...state.account,
-<<<<<<< HEAD
       // the user's own personal email; the phone is the company's
       email: state.account.personalEmail || "",
-=======
-       email: state.contact.email || "",
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
       phone: state.contact.phone || "",
       companyId: server?.approval?.kind === "new_company" ? null : server?.approval?.selectedCompanyId ?? null,
     } : requestToCorrect ? {
       // Correcting an update request: the user's own submitted values for that company.
       ...state.account,
-<<<<<<< HEAD
       email: state.account.personalEmail || "",
-=======
-      email: String(requestToCorrect.proposed.contactEmail ?? ""),
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
       companyName: requestToCorrect.companyName,
       companyType: String(requestToCorrect.proposed.companyType ?? ""),
       country: String(requestToCorrect.proposed.country ?? ""),

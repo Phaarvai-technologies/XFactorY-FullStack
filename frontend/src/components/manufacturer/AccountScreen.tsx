@@ -302,22 +302,14 @@ if (!email.trim()) {
 // Indian mobile number validation
 const indianMobileRegex = /^[6-9]\d{9}$/;
 
-<<<<<<< HEAD
 if (locked.phone) {
   // the selected company's saved phone: read-only, sent unchanged
 } else if (!phone.trim()) {
-=======
-if (!phone.trim()) {
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
   nextErrors.phone = "Mobile number is required.";
 } else if (!indianMobileRegex.test(phone.trim())) {
   nextErrors.phone =
     "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.";
 }
-<<<<<<< HEAD
-=======
-    if (!dob) nextErrors.dob = "Enter your date of birth.";
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
     if (!companyName.trim()) nextErrors.companyName = "Enter your company name.";
     else if (companyDetailsStatus === "loading") nextErrors.companyName = "Loading the selected company's details…";
     if (!companyType) nextErrors.companyType = "Select a company category.";
@@ -339,19 +331,11 @@ if (!phone.trim()) {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
-<<<<<<< HEAD
         dob: dob || null,
         companyName: companyName.trim(),
         companyType,
         country,
         phone: locked.phone ? savedPhone.current : `+91${phone.trim()}`,
-=======
-        dob,
-        companyName: companyName.trim(),
-        companyType,
-        country,
-        phone: `+91${phone.trim()}`,
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
         capacity: capacity.trim(),
         companyId: selectedCompany?.id ?? null,
       })).catch(() => setSubmitting(false));
@@ -504,10 +488,7 @@ if (!phone.trim()) {
       autoComplete="email"
       className={errors.email ? "error" : ""}
       value={email}
-<<<<<<< HEAD
       disabled={closed("personalEmail")}
-=======
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
       onChange={(e) => setEmail(e.target.value)}
     />
   </div>
@@ -755,10 +736,7 @@ if (!phone.trim()) {
       required
       className={errors.phone ? "error" : ""}
       value={phone}
-<<<<<<< HEAD
       disabled={Boolean(locked.phone) || closed("companyPhone")}
-=======
->>>>>>> 731d65e6439d53fe3fa9a48157a914f0b52aecc0
       onChange={(e) => {
   const value = e.target.value.replace(/\D/g, "").slice(0, 10);
 
