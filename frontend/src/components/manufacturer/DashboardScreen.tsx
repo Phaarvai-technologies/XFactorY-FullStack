@@ -716,21 +716,20 @@ function CapacityForm({
         <label htmlFor="cap-machine">Machine Name</label>
         {/* The signed-in manufacturer's own machinery (loaded from the database with the
             dashboard). A plan saved earlier for a machine no longer listed stays selectable. */}
-        <select
-          id="cap-machine"
-          className={machine ? "" : "placeholder-shown"}
-          value={machine}
-          onChange={(e) => setMachine(e.target.value)}
-        >
-          <option value="" disabled>
-            {machineOptions.length ? "Select a machine" : "Add machinery first"}
-          </option>
-          {machineOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <input
+  id="cap-machine"
+  type="text"
+  className={machine ? "" : "placeholder-shown"}
+  placeholder={
+    machineOptions.length
+      ? "Type or enter machine name"
+      : "Enter machine name"
+  }
+  value={machine}
+  
+  onChange={(e) => setMachine(e.target.value)}
+/>
+
       </div>
         <div>
           <label htmlFor="cap-count">No. of Machines</label>
