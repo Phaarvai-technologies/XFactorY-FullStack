@@ -29,13 +29,6 @@ type DashboardScreenProps = {
   onFixCompanyDetails?: () => void;
   /** The user's update requests for companies managed by someone else (status and feedback). */
   updateRequests?: CompanyUpdateRequest[];
-  /**
-   * Approval first: set while X!Y has not approved the manufacturer application. The remaining
-   * sections stay locked (the backend refuses them too); the status is shown in the next-step row.
-   */
-  lock?: { message: string; detail?: string | null; actionLabel?: string | null } | null;
-  /** Approved member (not the company's owner): the shared company profile is read-only. */
-  profileLockedMessage?: string | null;
   onOpenMachineryWizard: () => void;
   onEditMachinery: (machine: MachineryListing) => void;
   onSetMachineryStatus: (id: number, status: MachineryListing["status"]) => void;
@@ -82,8 +75,6 @@ export function DashboardScreen({
   onOpenProfileWizard,
   onFixCompanyDetails,
   updateRequests = [],
-  lock = null,
-  profileLockedMessage = null,
   onOpenMachineryWizard,
   onEditMachinery,
   onSetMachineryStatus,
@@ -121,11 +112,6 @@ export function DashboardScreen({
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
 
   function showPanel(next: DashboardPanel) {
-    // Approval first: nothing past the dashboard opens until X!Y approves the application.
-    if (lock && next !== "home") {
-      showToast(lock.message);
-      return;
-    }
     setPanel(next);
     window.scrollTo(0, 0);
   }
@@ -201,36 +187,12 @@ export function DashboardScreen({
                 })}
               </div>
               <div className="welcome-next-row">
-                {lock ? (
-                  <div className="welcome-next-text">
-                    <b>{lock.message}</b>
-                    {lock.detail ? (
-                      <>
-                        <br />
-                        {lock.detail}
-                      </>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="welcome-next-text">
-                    Next step: <b>{nextStepLabel}</b>
-                  </div>
-                )}
-                {lock ? (
-                  lock.actionLabel && onFixCompanyDetails ? (
-                    <button className="btn-primary" type="button" onClick={onFixCompanyDetails}>
-                      {lock.actionLabel}
-                    </button>
-                  ) : null
-                ) : (
-                  <button
-                    className="btn-primary"
-                    type="button"
-                    onClick={() => (profileLockedMessage ? showToast(profileLockedMessage) : onOpenProfileWizard(true))}
-                  >
-                    Complete remaining details
-                  </button>
-                )}
+                <div className="welcome-next-text">
+                  Next step: <b>{nextStepLabel}</b>
+                </div>
+                <button className="btn-primary" type="button" onClick={() => onOpenProfileWizard(true)}>
+                  Complete remaining details
+                </button>
               </div>
             </div>
 
@@ -342,7 +304,7 @@ export function DashboardScreen({
                 className="btn-primary"
                 type="button"
                 style={{ marginTop: 22 }}
-                onClick={() => (profileLockedMessage ? showToast(profileLockedMessage) : onOpenProfileWizard(false))}
+                onClick={() => onOpenProfileWizard(false)}
               >
                 Open profile setup
               </button>
@@ -754,21 +716,20 @@ function CapacityForm({
         <label htmlFor="cap-machine">Machine Name</label>
         {/* The signed-in manufacturer's own machinery (loaded from the database with the
             dashboard). A plan saved earlier for a machine no longer listed stays selectable. */}
-        <select
-          id="cap-machine"
-          className={machine ? "" : "placeholder-shown"}
-          value={machine}
-          onChange={(e) => setMachine(e.target.value)}
-        >
-          <option value="" disabled>
-            {machineOptions.length ? "Select a machine" : "Add machinery first"}
-          </option>
-          {machineOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <input
+  id="cap-machine"
+  type="text"
+  className={machine ? "" : "placeholder-shown"}
+  placeholder={
+    machineOptions.length
+      ? "Type or enter machine name"
+      : "Enter machine name"
+  }
+  value={machine}
+  
+  onChange={(e) => setMachine(e.target.value)}
+/>
+
       </div>
         <div>
           <label htmlFor="cap-count">No. of Machines</label>

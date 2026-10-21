@@ -55,7 +55,9 @@ class SupabaseStorage:
         self.settings = settings
 
     def public_base(self) -> str:
-        return f"{self.settings.supabase_url.rstrip('/')}/storage/v1/object/public/{self.settings.supabase_storage_bucket}"
+        base_url = (self.settings.supabase_url or "").strip().replace("\r", "").replace("\n", "").rstrip("/")
+        bucket = (self.settings.supabase_storage_bucket or "").strip()
+        return f"{base_url}/storage/v1/object/public/{bucket}"
 
     def public_url(self, key: str | None) -> str | None:
         return f"{self.public_base()}/{key}" if key else None
@@ -64,7 +66,9 @@ class SupabaseStorage:
         if not self.settings.supabase_url or not self.settings.supabase_service_role_key:
             raise RuntimeError("Supabase Storage is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)")
         key = f"{prefix}/{uuid4()}.{image.extension}"
-        url = f"{self.settings.supabase_url.rstrip('/')}/storage/v1/object/{self.settings.supabase_storage_bucket}/{key}"
+        base_url = (self.settings.supabase_url or "").strip().replace("\r", "").replace("\n", "").rstrip("/")
+        bucket = (self.settings.supabase_storage_bucket or "").strip()
+        url = f"{base_url}/storage/v1/object/{bucket}/{key}"
         headers = {
             "Authorization": f"Bearer {self.settings.supabase_service_role_key}",
             "apikey": self.settings.supabase_service_role_key,
