@@ -97,7 +97,7 @@ export function StepProfile({
                   id="name"
                   name="name"
                   autoComplete="name"
-                  placeholder="e.g. Priya"
+                  placeholder="e.g. Abinav"
                   required
                   value={profile.name}
                   onChange={(event) => update("name", event.target.value)}
