@@ -29,6 +29,10 @@ class CompleteRegistrationRequest(BaseModel):
     flowToken: str = Field(min_length=10, max_length=2048)
 
 
+class AccountStatusRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
 @router.post("/registration/flows", status_code=201)
 async def start_sign_up_flow(
     body: SignUpFlowRequest,
@@ -46,6 +50,25 @@ async def start_sign_up_flow(
         raise HTTPException(409, {"code": "terms_outdated", "message": registration.TERMS_OUTDATED_MESSAGE})
     return registration.issue_flow_token(settings, "sign-up", body.method, body.returnPath,
                                          terms_version=settings.terms_version)
+
+
+@router.post("/registration/account-status")
+async def account_status(
+    body: AccountStatusRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Sign-up page, only after Clerk answered that the email already has an account: is that a
+    REGISTERED X!Y account? true → the page says "You already have an account. Please sign in."
+    straight away (no Clerk sign-in, no verification code, nothing written). false → a Clerk
+    identity that never finished X!Y sign-up; the page then proves it with the entered password
+    and completes the registration. Read-only. It tells no more than Clerk's own "email taken"
+    answer on the same page; the API gateway's rate limits apply."""
+    registered = await session.scalar(text("""
+        SELECT EXISTS (SELECT 1 FROM users
+                       WHERE email = CAST(:e AS citext) AND registration_completed_at IS NOT NULL
+                         AND clerk_user_id NOT LIKE 'local-admin:%')
+    """), {"e": body.email.strip()})
+    return {"registered": bool(registered)}
 
 
 @router.get("/registration")

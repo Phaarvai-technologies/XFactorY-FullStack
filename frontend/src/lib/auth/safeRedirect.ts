@@ -6,7 +6,7 @@ import { stripBase } from "@/lib/basePath";
  * those, e.g. "http://localhost:3000/manufacturer/dashboard"). Anything else, such as
  * "https://evil.com", "//evil.com", "/\evil.com" or "javascript:...", returns null
  * (callers then use "/"), so a crafted ?redirect_url= link cannot send users to a
- * fake site after they sign in.
+ * fake site after they sign in. The sign-in / sign-up pages themselves are refused too (loops).
  */
 export function safeRedirectPath(raw: string | string[] | null | undefined, origin: string): string | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -17,7 +17,11 @@ export function safeRedirectPath(raw: string | string[] | null | undefined, orig
     const url = new URL(value, origin);
     if (url.origin !== origin || (url.protocol !== "http:" && url.protocol !== "https:")) return null;
     // Clerk sends the full address (with /xfactory inside the Phaarvai website); the router adds it itself.
-    return stripBase(`${url.pathname}${url.search}${url.hash}`);
+    const path = stripBase(`${url.pathname}${url.search}${url.hash}`);
+    // Never "back" to Sign-in, Sign-up or the Google callback after signing in: that would send a
+    // signed-in user round in a loop between those pages. Callers then use "/".
+    if (/^\/(sign-in|sign-up|sso-callback)(\/|\?|#|$)/.test(path)) return null;
+    return path;
   } catch {
     return null;
   }

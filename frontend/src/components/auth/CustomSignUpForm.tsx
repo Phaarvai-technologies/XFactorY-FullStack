@@ -2,15 +2,17 @@
 
 import { useClerk } from "@clerk/nextjs";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
-import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
 import { activateRegisteredSession, endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
 import {
+  accountStatusForEmail,
+  ACCOUNT_EXISTS_MESSAGE,
   completeRegistration,
   noticeFor,
+  oauthCallbackUrl,
   rememberOAuthIntent,
   SignUpFlowError,
   startSignUpFlow,
@@ -32,6 +34,8 @@ type StatusTone = "error" | "warn" | "ok";
 type StatusState = {
   tone: StatusTone;
   message: string;
+  /** "sign-in": a Sign-in link follows the message (existing account). */
+  action?: "sign-in";
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -133,8 +137,8 @@ function splitName(fullName: string) {
 
 const START_FAILED = "We couldn't start creating your account right now. Please try again.";
 const TERMS_ERROR = "Please accept the Terms of Service and Privacy Policy to continue.";
-/** Sign-up with an email that already has an account: stay on Sign-up and say so. */
-export const EMAIL_EXISTS = "An account with this email already exists. Please sign in instead, or use a different email.";
+/** Sign-up with an email that already has an account: stay on Sign-up and say so (with a Sign-in link). */
+export const EMAIL_EXISTS = ACCOUNT_EXISTS_MESSAGE;
 const flowErrorText = (error: unknown) => (error instanceof SignUpFlowError ? error.message : START_FAILED);
 
 export function CustomSignUpForm({
@@ -185,6 +189,16 @@ export function CustomSignUpForm({
   function clearField(field: keyof FieldErrors) {
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
   }
+
+  /** "You already have an account. Please sign in." with a Sign-in link; nothing was created. */
+  function showAccountExists() {
+    setNeedsVerification(false);
+    setSecondStep(null);
+    setStatus({ tone: "warn", message: EMAIL_EXISTS, action: "sign-in" });
+  }
+
+  const signInHref =
+    redirectTo && redirectTo !== "/" ? `/sign-in?redirect_url=${encodeURIComponent(redirectTo)}` : "/sign-in";
 
   // Signed in with an identity that never completed X!Y sign-up (e.g. sent here by the
   // proxy): end that session so sign-up can run. Only a session present when the page opened.
@@ -268,13 +282,10 @@ export function CustomSignUpForm({
       flowToken.current = null; // single use: a later attempt on this page gets its own
       setPendingSession(null);
       if (result.alreadyRegistered && existingAccountError.current) {
-        // Existing, already-registered account on the Sign-up page: unchanged behaviour.
+        // Existing, already-registered account on the Sign-up page: say so, nothing signed in.
         await endSession(clerk, sessionId);
-        const message = existingAccountError.current;
         existingAccountError.current = null;
-        setNeedsVerification(false);
-        setSecondStep(null);
-        setFieldErrors((current) => ({ ...current, email: message }));
+        showAccountExists();
         return;
       }
       router.replace(await activateRegisteredSession(clerk, setActive, sessionId, activated, redirectTo));
@@ -299,7 +310,7 @@ export function CustomSignUpForm({
    */
   async function registerExistingIdentity(takenMessage: string) {
     if (!signIn) {
-      setFieldErrors((current) => ({ ...current, email: takenMessage }));
+      showAccountExists();
       return;
     }
     existingAccountError.current = takenMessage;
@@ -328,7 +339,7 @@ export function CustomSignUpForm({
       // Wrong password, Google-only account, rate limit...: fall back to Clerk's message.
     }
     existingAccountError.current = null;
-    setFieldErrors((current) => ({ ...current, email: takenMessage }));
+    showAccountExists();
   }
 
   function validateForm() {
@@ -411,7 +422,11 @@ export function CustomSignUpForm({
       if (parsed.paramName === "first_name" || parsed.paramName === "last_name") {
         setFieldErrors((current) => ({ ...current, name: parsed.message }));
       } else if (parsed.code === "form_identifier_exists") {
-        await registerExistingIdentity(EMAIL_EXISTS);
+        // One quick question to X!Y first: a registered account gets the message at once
+        // (no Clerk sign-in, no code e-mailed, nothing written). Only a Clerk identity that never
+        // finished X!Y sign-up goes on to the password check that completes its registration.
+        if ((await accountStatusForEmail(email.trim())) === "registered") showAccountExists();
+        else await registerExistingIdentity(EMAIL_EXISTS);
       } else if (parsed.paramName === "email_address") {
         setFieldErrors((current) => ({ ...current, email: parsed.message }));
       } else if (parsed.paramName === "password") {
@@ -537,19 +552,23 @@ export function CustomSignUpForm({
         setIsSubmitting(false);
         return;
       }
-      // Explicit sign-up intent for the callback, backed by the server-signed token.
-      rememberOAuthIntent({ purpose: "sign-up", returnPath: redirectTo, flowToken: googleFlow });
+      // Explicit sign-up intent for the callback, backed by the server-signed token; it travels
+      // in the full callback address too (a bare path is resolved by Clerk's servers in
+      // production, not by the browser: see oauthCallbackUrl).
+      const intent = { purpose: "sign-up", returnPath: redirectTo, flowToken: googleFlow } as const;
+      rememberOAuthIntent(intent);
+      const callback = oauthCallbackUrl(intent);
       await signUp.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectUrl: withBase("/sso-callback"),
-        redirectUrlComplete: withBase("/sso-callback"),
+        redirectUrl: callback,
+        redirectUrlComplete: callback,
         emailAddress: email.trim() || undefined,
         legalAccepted: consent,
       });
     } catch (error) {
       const parsed = parseClerkError(error);
       if (parsed.code === "form_identifier_exists") {
-        setFieldErrors((current) => ({ ...current, email: EMAIL_EXISTS }));
+        showAccountExists();
       } else {
         setStatus({ tone: "error", message: parsed.message });
       }
@@ -566,7 +585,17 @@ export function CustomSignUpForm({
 
       <div className={`status-box status-${status?.tone ?? "ok"}${status ? " show" : ""}`}>
         <StatusIcon tone={status?.tone ?? "ok"} />
-        <span>{status?.message}</span>
+        <span>
+          <span>{status?.message}</span>
+          {status?.action === "sign-in" && (
+            <>
+              {" "}
+              <Link href={signInHref} className="auth-link-button">
+                Sign in
+              </Link>
+            </>
+          )}
+        </span>
       </div>
 
       {/* Always mounted so Clerk bot protection can initialize (custom sign-up flows). */}
@@ -878,15 +907,7 @@ export function CustomSignUpForm({
 
       <div className="switch-row">
         Already have an account?{" "}
-        <Link
-          href={
-            redirectTo && redirectTo !== "/"
-              ? `/sign-in?redirect_url=${encodeURIComponent(redirectTo)}`
-              : "/sign-in"
-          }
-        >
-          Sign in
-        </Link>
+        <Link href={signInHref}>Sign in</Link>
       </div>
     </form>
   );

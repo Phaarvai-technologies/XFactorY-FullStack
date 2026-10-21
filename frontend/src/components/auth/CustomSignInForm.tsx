@@ -2,7 +2,6 @@
 
 import { useClerk } from "@clerk/nextjs";
 import { useSignIn } from "@clerk/nextjs/legacy";
-import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,6 +11,7 @@ import {
   authPageHref,
   checkRegistration,
   noticeFor,
+  oauthCallbackUrl,
   rememberOAuthIntent,
 } from "@/lib/auth/registration";
 import { safeRedirectPath } from "@/lib/auth/safeRedirect";
@@ -558,11 +558,15 @@ async function handleResendDeviceCode() {
       // Sign-in intent (the callback's default anyway). Both URLs point at the callback: it,
       // not Clerk, decides where to go, and it never turns an unknown Google account into a
       // sign-up (Clerk's handleRedirectCallback would: `transferable` defaults to true).
-      rememberOAuthIntent({ purpose: "sign-in", returnPath: redirectTo });
+      // Full callback address carrying the sign-in intent (a bare path is resolved by Clerk's
+      // servers in production, not by the browser: see oauthCallbackUrl).
+      const intent = { purpose: "sign-in", returnPath: redirectTo } as const;
+      rememberOAuthIntent(intent);
+      const callback = oauthCallbackUrl(intent);
       await signIn.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectUrl: withBase("/sso-callback"),
-        redirectUrlComplete: withBase("/sso-callback"),
+        redirectUrl: callback,
+        redirectUrlComplete: callback,
       });
     } catch (error) {
       const parsed = parseClerkError(error);

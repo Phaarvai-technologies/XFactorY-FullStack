@@ -4,7 +4,7 @@
  * tests also check which requests are (and are not) made.
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
   const state = {
@@ -221,7 +221,9 @@ describe("Sign-in", () => {
     render(<CustomSignInForm redirectTo="/visionaries/flow" />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue with Google" })));
     expect(h.signIn.authenticateWithRedirect).toHaveBeenCalledWith({
-      strategy: "oauth_google", redirectUrl: "/sso-callback", redirectUrlComplete: "/sso-callback",
+      strategy: "oauth_google",
+      redirectUrl: "http://localhost:3000/sso-callback?intent=sign-in&redirect_url=%2Fvisionaries%2Fflow",
+      redirectUrlComplete: "http://localhost:3000/sso-callback?intent=sign-in&redirect_url=%2Fvisionaries%2Fflow",
     });
     expect(JSON.parse(window.sessionStorage.getItem("xy-oauth-intent") ?? "{}")).toEqual({
       purpose: "sign-in", returnPath: "/visionaries/flow",
@@ -365,7 +367,10 @@ describe("Sign-up", () => {
       purpose: "sign-up", returnPath: "/visionaries/flow", flowToken: "flow-google",
     });
     expect(h.signUp.authenticateWithRedirect).toHaveBeenCalledWith(expect.objectContaining({
-      strategy: "oauth_google", redirectUrl: "/sso-callback", redirectUrlComplete: "/sso-callback", legalAccepted: true,
+      strategy: "oauth_google",
+      redirectUrl: "http://localhost:3000/sso-callback?intent=sign-up&redirect_url=%2Fvisionaries%2Fflow&flow=flow-google",
+      redirectUrlComplete: "http://localhost:3000/sso-callback?intent=sign-up&redirect_url=%2Fvisionaries%2Fflow&flow=flow-google",
+      legalAccepted: true,
     }));
   });
 });
@@ -379,7 +384,8 @@ async function runCallback() {
   await act(async () => {
     render(<SsoCallbackPage />);
   });
-  await waitFor(() => expect(h.replaced.length).toBeGreaterThan(0));
+  // up to two short retries (fresh token) before a failure is shown
+  await waitFor(() => expect(h.replaced.length).toBeGreaterThan(0), { timeout: 4000 });
 }
 
 describe("Google callback", () => {
@@ -445,11 +451,12 @@ describe("Google callback", () => {
     expect(h.replaced).toEqual(["/onboarding/roles"]);
   });
 
-  it("Google sign-up with an account Clerk already has → transferred to sign-in, then completed", async () => {
+  it("Google sign-up with a Clerk identity that never finished X!Y sign-up → transferred, then registered", async () => {
     intent({ purpose: "sign-up", returnPath: "/", flowToken: "flow-google" });
     createdSession("sess_t");
     h.signUp = { verifications: { externalAccount: { status: "transferable", error: { code: "external_account_exists" } } } };
     h.signIn = { create: vi.fn(async () => ({ status: "complete", createdSessionId: "sess_t" })) };
+    registration("unregistered");
     h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: false } });
     await runCallback();
     expect(h.signIn.create).toHaveBeenCalledWith({ transfer: true });
@@ -474,10 +481,10 @@ describe("Google callback", () => {
 // ------------------------------------------------------------------------------- Round 3
 describe("Notice text", () => {
   it("is exactly the required sentence", () => {
-    expect(SIGN_UP_FIRST_MESSAGE).toBe("Your account is not registered yet. Please sign up first, then sign in to continue.");
+    expect(SIGN_UP_FIRST_MESSAGE).toBe("Please sign up first, then sign in to continue.");
     h.search = new URLSearchParams("notice=signup_required");
     render(<CustomSignUpForm />);
-    expect(screen.getByText("Your account is not registered yet. Please sign up first, then sign in to continue.")).toBeInTheDocument();
+    expect(screen.getByText("Please sign up first, then sign in to continue.")).toBeInTheDocument();
   });
 });
 
@@ -867,5 +874,138 @@ describe("Sign-in: new-device code step when the X!Y check fails", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" })));
     expect(h.signIn.attemptSecondFactor).not.toHaveBeenCalled();
     expect(screen.getByText(/verification step has expired/)).toBeInTheDocument();
+  });
+});
+
+// ------------------------------------------------------------------------------- Production Google fix
+describe("Already registered on Sign-up: quick, clear answer with a Sign-in link", () => {
+  beforeEach(() => {
+    h.backend["POST /identity/registration/flows"] = () => ({ status: 201, json: { flowToken: "flow-manual" } });
+  });
+
+  it("manual: one check, message + Sign-in link at once; no Clerk sign-in, no code, nothing written", async () => {
+    h.signUp.create = vi.fn(async () => {
+      throw clerkError("form_identifier_exists", "That email address is taken. Please try another.", "email_address");
+    });
+    h.signIn.create = vi.fn();
+    h.backend["POST /identity/registration/account-status"] = () => ({ status: 200, json: { registered: true } });
+    render(<CustomSignUpForm redirectTo="/manufacturer/dashboard" />);
+    await fillSignUp("exists@example.com");
+    expect(screen.getByText("You already have an account. Please sign in.")).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: "Sign in" }).map((a) => a.getAttribute("href"));
+    expect(links[0]).toBe("/sign-in?redirect_url=%2Fmanufacturer%2Fdashboard");
+    expect(h.signIn.create).not.toHaveBeenCalled();
+    expect(h.requests.map((r) => `${r.method} ${r.url.replace(API, "")}`)).toEqual([
+      "POST /identity/registration/flows", "POST /identity/registration/account-status"]);
+    expect(h.requests[1].body).toEqual({ email: "exists@example.com" });
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.replaced).toEqual([]);
+    expect((screen.getByRole("button", { name: "Create account" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Google: the callback's notice shows the same message and link", () => {
+    h.search = new URLSearchParams("notice=account_exists&redirect_url=%2Fapp");
+    render(<CustomSignUpForm />);
+    expect(screen.getByText("You already have an account. Please sign in.")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Sign in" })[0].getAttribute("href")).toBe("/sign-in?redirect_url=%2Fapp");
+  });
+
+  it("Google sign-up with a REGISTERED account → nothing completed or activated; Sign-up says so", async () => {
+    intent({ purpose: "sign-up", returnPath: "/app", flowToken: "flow-google" });
+    createdSession("sess_reg_g");
+    h.signUp = { verifications: { externalAccount: { status: "transferable", error: { code: "external_account_exists" } } } };
+    h.signIn = { create: vi.fn(async () => ({ status: "complete", createdSessionId: "sess_reg_g" })) };
+    registration("registered");
+    await runCallback();
+    expect(h.requests.map((r) => `${r.method} ${r.url.replace(API, "")}`)).toEqual(["GET /identity/registration"]);
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.removed).toEqual(["sess_reg_g"]);
+    expect(h.replaced).toEqual(["/sign-up?notice=account_exists&redirect_url=%2Fapp"]);
+  });
+
+  it("Google: Clerk's 'transferable' without the usual error code is still treated as an existing account", async () => {
+    intent({ purpose: "sign-up", returnPath: "/", flowToken: "flow-google" });
+    createdSession("sess_tx");
+    h.signUp = { verifications: { externalAccount: { status: "transferable" } } };
+    h.signIn = { create: vi.fn(async () => ({ status: "complete", createdSessionId: "sess_tx" })) };
+    registration("registered");
+    await runCallback();
+    expect(h.signIn.create).toHaveBeenCalledWith({ transfer: true });
+    expect(h.replaced).toEqual(["/sign-up?notice=account_exists"]);
+  });
+});
+
+describe("Google callback: the intent survives the redirect", () => {
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it("sign-up intent read from the callback address when this tab's storage was lost", async () => {
+    window.history.replaceState(null, "", "/sso-callback?intent=sign-up&redirect_url=%2Fmanufacturer%2Faccount&flow=flow-url");
+    createdSession("sess_url");
+    h.signUp = { status: "complete", createdSessionId: "sess_url", verifications: {} };
+    const bodies: unknown[] = [];
+    h.backend["POST /identity/registration/complete"] = (body) => {
+      bodies.push(body);
+      return { status: 200, json: { registered: true, alreadyRegistered: false } };
+    };
+    await runCallback();
+    expect(bodies).toEqual([{ flowToken: "flow-url" }]);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_url" });
+    expect(h.replaced).toEqual(["/manufacturer/account"]);
+  });
+
+  it("an unknown Google account on Sign-in is still never registered, whatever the address says", async () => {
+    window.history.replaceState(null, "", "/sso-callback?intent=sign-in&redirect_url=%2Fapp");
+    h.signIn = { firstFactorVerification: { status: "transferable" }, status: "needs_identifier" };
+    h.signUp = { create: vi.fn(), verifications: {} };
+    await runCallback();
+    expect(h.signUp.create).not.toHaveBeenCalled();
+    expect(h.requests).toEqual([]);
+    expect(h.replaced).toEqual(["/sign-up?notice=signup_required&redirect_url=%2Fapp"]);
+  });
+
+  it("an unsafe redirect_url in the callback address is not followed", async () => {
+    window.history.replaceState(null, "", "/sso-callback?intent=sign-in&redirect_url=https%3A%2F%2Fevil.example");
+    createdSession("sess_evil");
+    h.signIn = { firstFactorVerification: { status: "verified" }, status: "complete", createdSessionId: "sess_evil" };
+    registration("registered");
+    await runCallback();
+    expect(h.replaced).toEqual(["/"]);
+  });
+});
+
+describe("First Google sign-up succeeds the first time", () => {
+  it("token from the Google redirect refused (401) → retried with a fresh token → signed in, no error", async () => {
+    intent({ purpose: "sign-up", returnPath: "/manufacturer/account", flowToken: "flow-google" });
+    const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, "");
+    const redirectToken = `${b64({ alg: "RS256" })}.${b64({ sid: "sess_first", exp: Math.floor(Date.now() / 1000) + 55 })}.sig`;
+    h.sessions.push({ id: "sess_first", getToken: async () => "fresh-token", remove: async () => { h.removed.push("sess_first"); },
+                      lastActiveToken: { getRawString: () => redirectToken } } as never);
+    h.signUp = { status: "complete", createdSessionId: "sess_first", verifications: { externalAccount: { status: "verified" } } };
+    const auths: (string | null)[] = [];
+    h.backend["POST /identity/registration/complete"] = (_b, auth) => {
+      auths.push(auth);
+      return auth === "Bearer fresh-token"
+        ? { status: 200, json: { registered: true, alreadyRegistered: false } }
+        : { status: 401, json: { detail: "Token authorized party is not allowed" } };
+    };
+    await runCallback();
+    expect(auths).toEqual([`Bearer ${redirectToken}`, "Bearer fresh-token"]);
+    expect(h.removed).toEqual([]);
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_first" });
+    expect(h.replaced).toEqual(["/manufacturer/account"]);
+  });
+
+  it("Clerk already made the new session active (sign-up no longer reported) → registration completes with it", async () => {
+    intent({ purpose: "sign-up", returnPath: "/", flowToken: "flow-google" });
+    createdSession("sess_active");
+    (clerkObject as { session: unknown }).session = { id: "sess_active", getToken: async () => "token-for-sess_active" };
+    h.signUp = { status: null, verifications: {} };
+    h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: false } });
+    try {
+      await runCallback();
+      expect(h.replaced).toEqual(["/"]);
+    } finally {
+      (clerkObject as { session: unknown }).session = null;
+    }
   });
 });

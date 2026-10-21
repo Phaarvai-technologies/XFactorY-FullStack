@@ -8,7 +8,7 @@ import pytest
 from test_e2e_local import client  # noqa: F401  (shared fixture)
 
 needs_db = pytest.mark.skipif(not os.environ.get("E2E_DATABASE_URL"), reason="E2E_DATABASE_URL not set")
-NOTICE = "Your account is not registered yet. Please sign up first, then sign in to continue."
+NOTICE = "Please sign up first, then sign in to continue."
 
 
 def _tag():

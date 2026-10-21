@@ -16,7 +16,7 @@ from test_webhook_security import SECRET, signed
 
 DB = os.environ.get("E2E_DATABASE_URL")
 needs_db = pytest.mark.skipif(not DB, reason="E2E_DATABASE_URL not set")
-NOTICE = "Your account is not registered yet. Please sign up first, then sign in to continue."
+NOTICE = "Please sign up first, then sign in to continue."
 TERMS = "terms-1.2;privacy-1.4"
 
 
@@ -333,3 +333,32 @@ async def test_historical_account_terms_stay_unknown_until_genuinely_accepted(cl
     assert r.status_code == 200 and r.json()["alreadyRegistered"] is True
     row = (await client.sql("SELECT accepted_terms_version, registration_method FROM users WHERE clerk_user_id=:s", s=legacy))[0]
     assert tuple(row) == (TERMS, "legacy")  # explicit acceptance recorded, registration untouched
+
+
+# ---------------------------------------------------------------- Sign-up with an existing email
+@needs_db
+async def test_account_status_answers_only_registered_and_writes_nothing(client, monkeypatch):  # noqa: F811
+    """Sign-up page, after Clerk said "email taken": registered X!Y account → true (the page says
+    "You already have an account. Please sign in." at once); a Clerk identity whose users row came
+    only from the webhook / never finished sign-up → false; unknown email → false. Read-only."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "clerk_webhook_signing_secret", SECRET)
+    status = lambda email: client.post("/identity/registration/account-status",  # noqa: E731
+                                       json={"email": email}, headers={"Authorization": ""})
+    sub = _new_unregistered(client)
+    email = f"{sub}@example.com"
+    r = await status(email)
+    assert r.status_code == 200 and r.json() == {"registered": False}
+    raw, headers = signed({"type": "user.created", "data": {
+        "id": sub, "first_name": "Gee", "last_name": "Oogle", "primary_email_address_id": "e1",
+        "email_addresses": [{"id": "e1", "email_address": email, "verification": {"status": "verified"}}]}})
+    assert (await client.post("/webhooks/clerk", content=raw, headers={**headers, "Authorization": ""})).status_code == 200
+    assert (await status(email.upper())).json() == {"registered": False}      # webhook row is not registration
+    before = await client.sql("SELECT count(*) FROM users")
+    tok = await _flow(client)
+    assert (await client.post("/identity/registration/complete", json={"flowToken": tok},
+                              headers=_hdr(client, sub))).status_code == 200
+    assert (await status(f"  {email.upper()} ")).json() == {"registered": True}   # case / spaces ignored
+    assert (await client.sql("SELECT count(*) FROM users")) == before            # no duplicate user
+    assert (await status("nobody-" + email)).json() == {"registered": False}
+    assert (await status("x")).status_code == 422
