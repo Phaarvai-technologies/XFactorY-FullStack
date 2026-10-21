@@ -122,7 +122,7 @@ export function DashboardScreen({
         <div className="topbar-inner">
           <div className="topbar-logo">
             <FactoryMark className="topbar-factory-mark" />
-            X!Y <span className="topbar-crumb">Manufacturer Dashboard</span>
+            XfactorY <span className="topbar-crumb">Manufacturer Dashboard</span>
           </div>
           <div className="topbar-actions">
             <span className="pct-badge">{pct}% complete</span>

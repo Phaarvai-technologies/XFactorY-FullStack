@@ -124,7 +124,7 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
       <div className="card adm-login-card">
         <div className="adm-login-brand">
           <FactoryMark className="topbar-factory-mark" />
-          <span>X!Y</span>
+          <span>XfactorY</span>
           <span className="topbar-crumb">Admin</span>
         </div>
         <h1 className="adm-login-title">Sign in to the admin dashboard</h1>

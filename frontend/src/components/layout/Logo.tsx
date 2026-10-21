@@ -1,5 +1,3 @@
-import Image from "next/image";
-import { withBase } from "@/lib/basePath";
 import Link from "next/link";
 
 type LogoProps = {
@@ -30,22 +28,18 @@ export function FactoryMark({ className = "factory-mark" }: { className?: string
   );
 }
 
-/** Full X!Y wordmark from the official logo asset (icon + text). */
+/** Factory mark plus the product name. */
 export function Logo({ href = "/", className = "logo", markClassName }: LogoProps) {
   const content = (
-    <Image
-      src={withBase("/images/xy-logo.png")}
-      alt="X!Y"
-      width={156}
-      height={46}
-      className={markClassName ?? "logo-img"}
-      priority
-    />
+    <>
+      <FactoryMark className={markClassName ?? "factory-mark"} />
+      <span className="logo-word">XfactorY</span>
+    </>
   );
 
   if (href) {
     return (
-      <Link href={href} className={className} aria-label="X!Y home">
+      <Link href={href} className={className} aria-label="XfactorY home">
         {content}
       </Link>
     );

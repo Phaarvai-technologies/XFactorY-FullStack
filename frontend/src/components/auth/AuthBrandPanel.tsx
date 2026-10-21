@@ -5,9 +5,9 @@ export function AuthBrandPanel() {
   return (
     <div className="auth-brand">
       <div className="auth-brand-top">
-        <Link href="/" className="auth-brand-logo" aria-label="X!Y home">
+        <Link href="/" className="auth-brand-logo" aria-label="XfactorY home">
           <FactoryMark className="auth-brand-mark" />
-          <span>X!Y</span>
+          <span>XfactorY</span>
         </Link>
       </div>
 

@@ -271,7 +271,7 @@ if (!phone.trim()) {
       <aside className="account-side-panel">
         <div className="account-side-logo">
           <FactoryMark className="account-side-factory-mark" />
-          <span>X!Y</span>
+          <span>XfactorY</span>
         </div>
 
         <div className="account-side-content">

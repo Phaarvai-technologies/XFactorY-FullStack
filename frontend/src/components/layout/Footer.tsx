@@ -9,7 +9,7 @@ export function Footer() {
           <div className="footer-brand-block">
             <div className="footer-brand">
               <FactoryMark />
-              X!Y
+              XfactorY
             </div>
             <p className="footer-desc">
               A discovery and engagement platform for the manufacturing ecosystem —
@@ -43,7 +43,7 @@ export function Footer() {
           </div>
         </div>
         <div className="footer-bottom">
-          <div className="footer-copy">© 2026 X!Y. All rights reserved.</div>
+          <div className="footer-copy">© 2026 XfactorY. All rights reserved.</div>
           <div className="footer-pilot-badge">
             <span className="pilot-dot" /> Pilot status — limited regions
           </div>
