@@ -21,10 +21,26 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
+// Inside the Phaarvai website the browser's address (www.phaarvai.com) differs from this
+// deployment's own host, which the website forwards to. Next.js refuses server actions (used by
+// Clerk's "Sign out") whose Origin is not this host unless that origin is listed here.
+const siteHost = (() => {
+  try {
+    const value = (process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "").trim();
+    return value ? new URL(value).host : "";
+  } catch {
+    return "";
+  }
+})();
+const actionOrigins = siteHost
+  ? [...new Set([siteHost, siteHost.replace(/^www\./, ""), siteHost.startsWith("www.") ? siteHost : `www.${siteHost}`])]
+  : [];
+
 const nextConfig: NextConfig = {
   // Hide the Next.js route indicator (circular "N") that overlays bottom-left UI in dev.
   devIndicators: false,
   ...(basePath ? { basePath } : {}),
+  ...(actionOrigins.length ? { experimental: { serverActions: { allowedOrigins: actionOrigins } } } : {}),
   turbopack: {
     root: projectRoot,
   },
