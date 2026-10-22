@@ -25,7 +25,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "X!Y - Why own it when you can make it",
+  title: "XfactorY - Why own it when you can make it",
   description:
     "X!Y connects designers, manufacturers, suppliers and every partner in between — so production capacity finds demand, and good ideas find a factory floor.",
 };

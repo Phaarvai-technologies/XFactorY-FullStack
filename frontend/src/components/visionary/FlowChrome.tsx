@@ -9,9 +9,9 @@ export function FlowHeader() {
   return (
     <header className="header">
       <div className="wrap">
-        <Link href={VISIONARY_OVERVIEW_PATH} className="xy-logo" aria-label="X!Y home">
+        <Link href={VISIONARY_OVERVIEW_PATH} className="xy-logo" aria-label="XfactorY home">
           <XyMark />
-          <span>X!Y</span>
+          <span>XfactorY</span>
         </Link>
       </div>
     </header>

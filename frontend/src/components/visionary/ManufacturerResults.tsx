@@ -1,22 +1,41 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { FlowHeader } from "@/components/visionary/FlowChrome";
-import { useVisionaryApi } from "@/lib/visionary/api";
+import { useVisionaryApi, type ManufacturerMatches } from "@/lib/visionary/api";
 import type { VisionarySlide } from "@/lib/visionary/paths";
 import {
   TIMELINE_LABELS,
   initials,
   type ManufacturerRecord,
+  type VisionaryRequirements,
 } from "@/lib/visionary/storage";
 import { getVisionaryData } from "@/lib/visionary/store";
 
-function inRange(value: number, range: string): boolean {
-  if (!range) return true;
-  const [lowRaw, highRaw] = range.split("-");
-  const low = lowRaw ? Number(lowRaw) : 0;
-  const high = highRaw ? Number(highRaw) : Infinity;
-  return (value > low && value <= high) || (low === 0 && value <= high);
+/** The requirement chips, in the existing order: location, quantity, budget, timeline, machines. */
+function requirementChips(requirements: VisionaryRequirements | null | undefined): string[] {
+  const chips: string[] = [];
+  if (!requirements) return chips;
+  if (requirements.manufacturing_location) chips.push(requirements.manufacturing_location);
+  if (requirements.quantity?.value) chips.push(`${requirements.quantity.value.toLocaleString("en-IN")} units`);
+  if (requirements.budget?.amount) chips.push(`₹${requirements.budget.amount.toLocaleString("en-IN")}`);
+  if (requirements.timeline && TIMELINE_LABELS[requirements.timeline]) chips.push(TIMELINE_LABELS[requirements.timeline]);
+  for (const machine of requirements.machines ?? []) chips.push(machine);
+  return chips;
+}
+
+const FIELD_LABELS: Record<string, string> = { quantity: "quantity", budget: "budget", timeline: "timeline" };
+
+/** "Matched on location and machines. Quantity, budget and timeline are shown for reference only: …"
+ * (from the backend's answer: what it filtered on and what the data cannot be compared with). */
+function matchingNote(result: ManufacturerMatches | null): string {
+  if (!result?.requirements) return "";
+  const lead = result.applied.length ? `Matched on ${result.applied.join(" and ")}.` : "";
+  const skipped = result.notCompared.map((n) => FIELD_LABELS[n.field] ?? n.field);
+  if (!skipped.length) return lead;
+  const list = skipped.length > 1 ? `${skipped.slice(0, -1).join(", ")} and ${skipped.at(-1)}` : skipped[0];
+  const many = skipped.length > 1;
+  return `${lead} ${list.charAt(0).toUpperCase()}${list.slice(1)} ${many ? "are" : "is"} shown for reference only: manufacturer profiles don't record the data to compare ${many ? "them" : "it"} with.`.trim();
 }
 
 function Pin() {
@@ -43,87 +62,58 @@ export function ManufacturerResults({
   onChoose: (id: string) => void;
   selectedId: string | null;
 }) {
-  const [manufacturers, setManufacturers] = useState<ManufacturerRecord[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [profileId, setProfileId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [location, setLocation] = useState("");
-  const [category, setCategory] = useState("");
-  const [capacity, setCapacity] = useState("");
-  const seededLocation = useRef(false);
-  const requirements = getVisionaryData().requirements;
+  const saved = getVisionaryData().requirements;
   const visionaryApi = useVisionaryApi();
+  /** Which saved requirements the answer belongs to; an answer for other requirements is never shown. */
+  const savedKey = JSON.stringify(saved ?? null);
+  const [answer, setAnswer] = useState<{ key: string; attempt: number; status: "ready" | "error"; result: ManufacturerMatches | null } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const current = answer && answer.key === savedKey && answer.attempt === attempt ? answer : null;
+  const status: "loading" | "ready" | "error" = current ? current.status : "loading";
+  const result = current?.result ?? null;
+  const manufacturers: ManufacturerRecord[] = result?.manufacturers ?? [];
 
-  /** GET /visionary/manufacturers: manufacturers with a saved profile (from the database). */
-  function load() {
-    setStatus("loading");
-    fetchManufacturers();
-  }
-
-  function fetchManufacturers() {
-    visionaryApi.manufacturers().then(
+  /**
+   * GET /visionary/manufacturers/matches: the backend matches the Visionary's SAVED requirements
+   * against the manufacturers in the database (same visibility and approval rules as before).
+   * Runs on open, whenever the saved requirements change, and on "Try Again". Nothing is cached,
+   * and an answer that arrives after a newer request started is ignored.
+   */
+  useEffect(() => {
+    let active = true;
+    visionaryApi.matches().then(
       (next) => {
-        setManufacturers(next);
-        if (!seededLocation.current) {
-          seededLocation.current = true;
-          const wanted = (requirements?.manufacturing_location || "").trim().toLowerCase();
-          const match =
-            next.find((item) => {
-              const place = item.location.toLowerCase();
-              return place === wanted || place.startsWith(`${wanted},`);
-            })?.location ?? "";
-          if (match) setLocation(match);
-        }
-        setStatus("ready");
+        if (active) setAnswer({ key: savedKey, attempt, status: "ready", result: next });
       },
       () => {
-        setManufacturers([]);
-        setStatus("error");
+        if (active) setAnswer({ key: savedKey, attempt, status: "error", result: null });
       },
     );
-  }
-
-  useEffect(() => {
-    fetchManufacturers(); // status starts as "loading"
+    return () => {
+      active = false;
+    };
+    // Only the requirements and Try Again start a new request (not a new API helper object).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const locations = [...new Set(manufacturers.map((item) => item.location).filter(Boolean))].sort();
-  const categories = [...new Set(manufacturers.map((item) => item.category).filter(Boolean))].sort();
+  }, [savedKey, attempt]);
 
-  const chips: string[] = [];
-  if (requirements?.manufacturing_location) chips.push(requirements.manufacturing_location);
-  if (requirements?.quantity?.value) {
-    chips.push(`${requirements.quantity.value.toLocaleString("en-IN")} units`);
-  }
-  if (requirements?.budget?.amount) {
-    chips.push(`₹${requirements.budget.amount.toLocaleString("en-IN")}`);
-  }
-  if (requirements?.timeline && TIMELINE_LABELS[requirements.timeline]) {
-    chips.push(TIMELINE_LABELS[requirements.timeline]);
+  function load() {
+    setAttempt((n) => n + 1);
   }
 
+  // The chips show the requirements the backend matched with (while loading: the saved ones).
+  const chips = requirementChips(status === "ready" ? result?.requirements : saved);
+  const note = status === "ready" ? matchingNote(result) : "";
+
+  // Search: within the matching manufacturers, by company name, product or machine.
   const visible = manufacturers.filter((item) => {
     const text = query.trim().toLowerCase();
-    if (text) {
-      const haystack = [
-        item.name,
-        item.location,
-        item.category,
-        item.capabilities,
-        item.about,
-        ...item.machines,
-        ...item.products,
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (!haystack.includes(text)) return false;
-    }
-    if (location && item.location !== location) return false;
-    if (category && item.category !== category) return false;
-    return inRange(item.capacity, capacity);
+    if (!text) return true;
+    return [item.name, ...item.machines, ...item.products].join(" ").toLowerCase().includes(text);
   });
 
-  const filtersActive = Boolean(query.trim() || location || category || capacity);
+  const filtersActive = Boolean(query.trim());
 
   return (
     <div className="view active" id="v-mf">
@@ -144,9 +134,10 @@ export function ManufacturerResults({
             ))}
           </div>
         ) : null}
+        {note ? <p className="lead">{note}</p> : null}
 
         {profileId ? null : (
-        <section className="filters" aria-label="Filters">
+        <section className="filters search-only" aria-label="Filters">
           <div className="f sw-wrap">
             <label htmlFor="mf-q">Search</label>
             <div className="sw">
@@ -164,34 +155,6 @@ export function ManufacturerResults({
               />
             </div>
           </div>
-          <div className="f">
-            <label htmlFor="mf-loc">Location</label>
-            <select id="mf-loc" value={location} onChange={(event) => setLocation(event.target.value)}>
-              <option value="">All locations</option>
-              {locations.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </div>
-          <div className="f">
-            <label htmlFor="mf-cat">Industry / Category</label>
-            <select id="mf-cat" value={category} onChange={(event) => setCategory(event.target.value)}>
-              <option value="">All categories</option>
-              {categories.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </div>
-          <div className="f">
-            <label htmlFor="mf-cap">Capacity</label>
-            <select id="mf-cap" value={capacity} onChange={(event) => setCapacity(event.target.value)}>
-              <option value="">Any capacity</option>
-              <option value="0-2500">Up to 2,500 units/month</option>
-              <option value="2500-5000">2,500 – 5,000 units/month</option>
-              <option value="5000-10000">5,000 – 10,000 units/month</option>
-              <option value="10000-">10,000+ units/month</option>
-            </select>
-          </div>
         </section>
         )}
 
@@ -206,13 +169,10 @@ export function ManufacturerResults({
               className="link"
               onClick={() => {
                 setQuery("");
-                setLocation("");
-                setCategory("");
-                setCapacity("");
                 document.getElementById("mf-q")?.focus();
               }}
             >
-              Clear filters
+              Clear search
             </button>
           ) : null}
         </div>
@@ -242,17 +202,14 @@ export function ManufacturerResults({
             </div>
           ) : visible.length === 0 ? (
             <div className="empty">
-              {manufacturers.length === 0 ? (
-                <>
-                  <h3>No manufacturers available yet</h3>
-                  <p>Manufacturers will appear here as soon as they create their profiles.</p>
-                </>
-              ) : (
-                <>
-                  <h3>No matching manufacturers</h3>
-                  <p>Try changing your search or filters.</p>
-                </>
-              )}
+              <h3>No matching manufacturers found</h3>
+              <p>
+                {!result?.requirements
+                  ? "Add your manufacturing requirements to find matching manufacturers."
+                  : manufacturers.length > 0
+                    ? "Try changing your search."
+                    : "No manufacturer matches your requirements yet. Try changing your requirements."}
+              </p>
             </div>
           ) : (
             visible.map((item) => (

@@ -163,12 +163,23 @@ function RequestForm({
 
   function payload(status: string): ManufacturingRequest | null {
     if (!manufacturer) return null;
+    const reqMachines = getVisionaryData().requirements?.machines;
+    const available =
+      manufacturer.machines && manufacturer.machines.length > 0
+        ? manufacturer.machines
+        : MACHINE_CATALOG;
+    const resolvedMachine =
+      (reqMachines && available.find((m) => reqMachines.includes(m))) ||
+      (form.machine && available.includes(form.machine) ? form.machine : null) ||
+      available[0] ||
+      MACHINE_CATALOG[0];
+
     return {
       manufacturer_id: manufacturer.id,
       manufacturer_name: manufacturer.name,
       project_name: project,
       visionary: getVisionaryData().profile?.name || "",
-      machine: form.machine,
+      machine: resolvedMachine,
       quantity: { value: parseInt(digitsOnly(form.quantity) || "0", 10), unit: "units" },
       required_duration: form.required_duration,
       manufacturing_location: form.manufacturing_location.trim(),
@@ -180,8 +191,7 @@ function RequestForm({
   }
 
   const any = Boolean(
-    form.machine ||
-      digitsOnly(form.quantity) ||
+    digitsOnly(form.quantity) ||
       form.required_duration ||
       form.manufacturing_location.trim() ||
       digitsOnly(form.budget) ||
@@ -202,7 +212,6 @@ function RequestForm({
       return;
     }
     const nextErrors = {
-      machine: !data.machine,
       quantity: data.quantity.value < 1,
       required_duration: !data.required_duration,
       manufacturing_location: !data.manufacturing_location,
@@ -211,7 +220,7 @@ function RequestForm({
     };
     setErrors(nextErrors);
     const first = (
-      ["machine", "quantity", "required_duration", "manufacturing_location", "budget", "timeline"] as const
+      ["quantity", "required_duration", "manufacturing_location", "budget", "timeline"] as const
     ).find((key) => nextErrors[key]);
     if (first) {
       const id =
@@ -221,11 +230,9 @@ function RequestForm({
             ? "mr-quantity"
             : first === "budget"
               ? "mr-budget"
-              : first === "machine"
-                ? "mr-machine"
-                : first === "required_duration"
-                  ? "mr-required_duration"
-                  : "mr-manufacturing_location";
+              : first === "required_duration"
+                ? "mr-required_duration"
+                : "mr-manufacturing_location";
       document.getElementById(id)?.focus();
       return;
     }
@@ -293,31 +300,6 @@ function RequestForm({
         ) : null}
         <div className="layout">
           <form className="card" noValidate onSubmit={submit}>
-            <div className={`field${errors.machine ? " error" : ""}`}>
-              <label htmlFor="mr-machine">Machine</label>
-              <p className="hint">Choose from the machines this manufacturer has available.</p>
-              <select
-                id="mr-machine"
-                className={form.machine ? undefined : "empty"}
-                required
-                disabled={!manufacturer}
-                value={manufacturer ? form.machine : ""}
-                onChange={(event) => {
-                  setForm((current) => ({ ...current, machine: event.target.value }));
-                  setErrors((current) => ({ ...current, machine: false }));
-                }}
-              >
-                <option value="">
-                  {manufacturer ? "Select available machine" : "Select a manufacturer first"}
-                </option>
-                {(manufacturer?.machines ?? []).map((machine) => (
-                  <option key={machine} value={machine}>
-                    {machine}
-                  </option>
-                ))}
-              </select>
-              <p className="err">Please select a machine.</p>
-            </div>
             <div className="row">
               <div className={`field${errors.quantity ? " error" : ""}`}>
                 <label htmlFor="mr-quantity">Quantity</label>
@@ -481,10 +463,6 @@ function RequestForm({
                   <dd className={manufacturer ? undefined : "none"}>
                     {manufacturer ? label : "No manufacturer selected"}
                   </dd>
-                </div>
-                <div hidden={!form.machine}>
-                  <dt>Machine</dt>
-                  <dd>{form.machine}</dd>
                 </div>
                 <div hidden={!digitsOnly(form.quantity)}>
                   <dt>Quantity</dt>

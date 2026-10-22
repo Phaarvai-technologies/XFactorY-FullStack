@@ -5,6 +5,7 @@ import { FlowHeader, Progress } from "@/components/visionary/FlowChrome";
 import { errorMessage, useVisionaryApi } from "@/lib/visionary/api";
 import type { VisionarySlide } from "@/lib/visionary/paths";
 import {
+  MACHINE_CATALOG,
   TIMELINE_LABELS,
   digitsOnly,
   formatIndianNumber,
@@ -14,7 +15,13 @@ import { getVisionaryData } from "@/lib/visionary/store";
 
 const TIMELINES = Object.entries(TIMELINE_LABELS);
 
+const MACHINES = [
+  ...MACHINE_CATALOG,
+  "Surface Grinding",
+];
+
 type FormState = {
+  machines: string[];
   manufacturing_location: string;
   quantity: string;
   budget: string;
@@ -26,6 +33,7 @@ function fromStored(): FormState {
   const stored: Partial<VisionaryRequirements> | null = getVisionaryData().requirements;
   if (!stored) {
     return {
+      machines: [],
       manufacturing_location: "",
       quantity: "",
       budget: "",
@@ -34,6 +42,7 @@ function fromStored(): FormState {
     };
   }
   return {
+    machines: stored.machines || [],
     manufacturing_location: stored.manufacturing_location || "",
     quantity: stored.quantity?.value ? formatIndianNumber(String(stored.quantity.value)) : "",
     budget: stored.budget?.amount ? formatIndianNumber(String(stored.budget.amount)) : "",
@@ -51,8 +60,13 @@ export function StepNeeds({
 }) {
   const visionaryApi = useVisionaryApi();
   const [form, setForm] = useState<FormState>(fromStored);
+  const [machineQuery, setMachineQuery] = useState("");
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+
+  const filteredMachines = MACHINES.filter((m) =>
+    m.toLowerCase().includes(machineQuery.trim().toLowerCase()),
+  );
 
   function setNumeric(key: "quantity" | "budget", raw: string, caretFromEnd: number) {
     const formatted = formatIndianNumber(raw);
@@ -68,6 +82,7 @@ export function StepNeeds({
 
   function payload(): VisionaryRequirements {
     return {
+      machines: form.machines,
       manufacturing_location: form.manufacturing_location.trim(),
       quantity: { value: parseInt(digitsOnly(form.quantity) || "0", 10), unit: "units" },
       budget: { amount: parseInt(digitsOnly(form.budget) || "0", 10), currency: "INR" },
@@ -100,6 +115,7 @@ export function StepNeeds({
     }
     setSaving(true);
     try {
+      // The selected machines are saved with the other requirements (in the database).
       await visionaryApi.saveRequirements(data, true); // PUT /visionary/project/requirements
       onContinue("results");
     } catch (error) {
@@ -127,6 +143,78 @@ export function StepNeeds({
         <section>
           <Progress label="Manufacturing requirements" step={4} />
           <form className="card" noValidate onSubmit={submit}>
+            <div className="field" data-f="machine">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label htmlFor="machine-search">
+                  Machine <span className="opt-tag">Optional</span>
+                </label>
+                {form.machines.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setForm((c) => ({ ...c, machines: [] }))}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--blue)",
+                      fontSize: "0.85rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    Clear all ({form.machines.length})
+                  </button>
+                )}
+              </div>
+              <p className="hint">Choose from the machines this manufacturer has available.</p>
+              <div className="machine-search">
+                <input
+                  id="machine-search"
+                  type="text"
+                  placeholder="Search machines (e.g. CNC, 3D printing)..."
+                  value={machineQuery}
+                  onChange={(e) => setMachineQuery(e.target.value)}
+                />
+              </div>
+              <div className="machines-container">
+                {filteredMachines.map((machine) => {
+                  const selected = form.machines.includes(machine);
+                  return (
+                    <button
+                      key={machine}
+                      type="button"
+                      className={`machine-pill${selected ? " selected" : ""}`}
+                      onClick={() => {
+                        setForm((c) => ({
+                          ...c,
+                          machines: selected
+                            ? c.machines.filter((m) => m !== machine)
+                            : [...c.machines, machine],
+                        }));
+                      }}
+                    >
+                      {selected && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <path
+                            d="M2.5 6.2l2.3 2.3 4.7-4.7"
+                            stroke="#fff"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                      <span>{machine}</span>
+                    </button>
+                  );
+                })}
+                {filteredMachines.length === 0 && (
+                  <p style={{ fontSize: "0.88rem", color: "var(--muted)", padding: "8px 4px" }}>
+                    No machines match &ldquo;{machineQuery}&rdquo;
+                  </p>
+                )}
+              </div>
+            </div>
             <div className={`field${errors.manufacturing_location ? " error" : ""}`}>
               <label htmlFor="manufacturing_location">Manufacturing location</label>
               <p className="hint">City or region where you want the product made.</p>
@@ -233,7 +321,9 @@ export function StepNeeds({
                 className="btn btn-ghost"
                 onClick={() => {
                   void visionaryApi.saveRequirements(payload(), false).catch(() => undefined);
-                  onContinue("step3");
+                  const prevSlide: VisionarySlide =
+                    getVisionaryData().stage === "Ready for Manufacturing" ? "step3" : "guide";
+                  onContinue(prevSlide);
                 }}
               >
                 Previous

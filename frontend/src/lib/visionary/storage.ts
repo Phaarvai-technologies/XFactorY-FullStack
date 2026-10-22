@@ -59,6 +59,7 @@ export type VisionaryRequirements = {
   budget: { amount: number; currency: "INR" };
   timeline: string;
   additional_requirements: string;
+  machines?: string[];
 };
 
 export type ManufacturerRecord = {

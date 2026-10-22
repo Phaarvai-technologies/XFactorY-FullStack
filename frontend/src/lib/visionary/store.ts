@@ -30,7 +30,12 @@ export function getVisionaryData(): VisionaryData {
 }
 
 export function setVisionaryData(next: VisionaryData): void {
-  current = { ...EMPTY, ...next, requests: next.requests ?? [] };
+  // The server's copy is the only source: the required machines are saved with the other
+  // requirements, so nothing from an earlier browser session can mix in.
+  const requirements = next.requirements
+    ? { ...next.requirements, machines: next.requirements.machines ?? [] }
+    : null;
+  current = { ...EMPTY, ...next, requirements, requests: next.requests ?? [] };
 }
 
 export function addVisionaryRequest(request: ManufacturingRequest): void {

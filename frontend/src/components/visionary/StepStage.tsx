@@ -99,7 +99,11 @@ export function StepStage({
               setSaving(true);
               try {
                 await visionaryApi.saveStage(stage); // PUT /visionary/project/stage
-                onContinue("step4");
+                if (stage === "Ready for Manufacturing") {
+                  onContinue("step4");
+                } else {
+                  onContinue("guide");
+                }
               } catch (error) {
                 onToast(errorMessage(error, "Couldn’t save the project stage. Please try again."));
               } finally {

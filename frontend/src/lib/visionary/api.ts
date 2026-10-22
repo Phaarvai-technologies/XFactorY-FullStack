@@ -21,6 +21,17 @@ export type RequestInput = Omit<
   "manufacturer_name" | "project_name" | "visionary" | "status" | "id" | "request_id" | "created_at"
 >;
 
+/** GET /visionary/manufacturers/matches: what "Find a Manufacturer" shows. */
+export type ManufacturerMatches = {
+  /** The saved requirements the backend matched with (null: none saved yet). */
+  requirements: VisionaryRequirements | null;
+  /** Requirements used as filters: "location" and/or "machines". */
+  applied: ("location" | "machines")[];
+  /** Requirements the database cannot compare, with the reason (shown, never used to filter). */
+  notCompared: { field: "quantity" | "budget" | "timeline"; reason: string }[];
+  manufacturers: (ManufacturerRecord & { matchedMachines: string[] })[];
+};
+
 export function errorMessage(error: unknown, fallback: string): string {
   // 4xx answers carry a readable "detail"; validation lists (422) and server errors do not.
   if (error instanceof ApiError && error.status > 0 && error.status < 500) {
@@ -67,6 +78,8 @@ export function useVisionaryApi() {
       saveRequirements: (requirements: VisionaryRequirements, complete: boolean) =>
         put("/project/requirements", { ...requirements, complete }),
       manufacturers: () => call<ManufacturerRecord[]>("/manufacturers"),
+      /** Manufacturers matching the signed-in Visionary's saved requirements (filtered on the server). */
+      matches: () => call<ManufacturerMatches>("/manufacturers/matches"),
       manufacturer: (id: string) =>
         call<{ record: ManufacturerRecord; profile: PublicManufacturerProfile }>(
           `/manufacturers/${encodeURIComponent(id)}`,

@@ -220,7 +220,7 @@ export function AdminShell() {
           <aside className={`adm-sidebar${menuOpen ? " open" : ""}`}>
             <div className="adm-brand">
               <FactoryMark className="topbar-factory-mark" />
-              <span>X!Y</span>
+              <span>XfactorY</span>
               <span className="topbar-crumb">Admin</span>
               <button type="button" className="adm-menu-close" onClick={() => setMenuOpen(false)} aria-label="Close menu">
                 <X size={18} />
@@ -272,7 +272,7 @@ export function AdminShell() {
                 </button>
                 <div className="topbar-logo adm-topbar-title">
                   <FactoryMark className="topbar-factory-mark adm-mobile-only" />
-                  <span className="adm-mobile-only">X!Y</span>
+                  <span className="adm-mobile-only">XfactorY</span>
                   <span className="topbar-crumb">Admin Dashboard{active ? ` · ${active.label}` : ""}</span>
                 </div>
                 <div className="topbar-actions">

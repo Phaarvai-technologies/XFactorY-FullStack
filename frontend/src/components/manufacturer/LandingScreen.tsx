@@ -30,7 +30,7 @@ export function LandingScreen({ onJoin, onBackToLanding }: LandingScreenProps) {
       <div className="ov-topbar">
         <div className="topbar-logo">
           <FactoryMark className="topbar-factory-mark" />
-          X!Y
+          XfactorY
         </div>
         <button
           className="btn-ghost"

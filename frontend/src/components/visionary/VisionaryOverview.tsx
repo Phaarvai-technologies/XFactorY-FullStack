@@ -40,9 +40,9 @@ export function VisionaryOverview() {
   return (
     <div className="view active" id="v-ov">
       <header className="site-header">
-        <Link className="logo" href="/" aria-label="X!Y home">
+        <Link className="logo" href="/" aria-label="XfactorY home">
           <XyMark />
-          <span className="logo-text">X!Y</span>
+          <span className="logo-text">XfactorY</span>
         </Link>
         <Link className="btn-back" href="/">
           Back to landing page
