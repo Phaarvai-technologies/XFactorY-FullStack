@@ -9,6 +9,7 @@ export type VisionarySlide =
   | "step1"
   | "step2"
   | "step3"
+  | "guide"
   | "step4"
   | "results"
   | "request"
@@ -20,6 +21,7 @@ export const VISIONARY_SLIDE_TITLES: Record<VisionarySlide, string> = {
   step1: "Let’s Start With You – X!Y",
   step2: "Your Idea – X!Y",
   step3: "Project Stage – X!Y",
+  guide: "Your AI Guide – X!Y",
   step4: "Manufacturing Needs – X!Y",
   results: "Find a Manufacturer – X!Y",
   request: "Create Manufacturing Request – X!Y",

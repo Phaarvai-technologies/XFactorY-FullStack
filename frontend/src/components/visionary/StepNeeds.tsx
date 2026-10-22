@@ -233,7 +233,9 @@ export function StepNeeds({
                 className="btn btn-ghost"
                 onClick={() => {
                   void visionaryApi.saveRequirements(payload(), false).catch(() => undefined);
-                  onContinue("step3");
+                  const prevSlide: VisionarySlide =
+                    getVisionaryData().stage === "Ready for Manufacturing" ? "step3" : "guide";
+                  onContinue(prevSlide);
                 }}
               >
                 Previous
