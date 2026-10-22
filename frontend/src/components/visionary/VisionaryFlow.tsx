@@ -22,12 +22,33 @@ const SLIDE_KEY = "xy-visionary-slide";
 
 function readSlide(): VisionarySlide {
   try {
-    const stored = window.sessionStorage.getItem(SLIDE_KEY);
-    if (stored && stored in VISIONARY_SLIDE_TITLES) return stored as VisionarySlide;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get("slide");
+      if (fromUrl && fromUrl in VISIONARY_SLIDE_TITLES) return fromUrl as VisionarySlide;
+      const stored = window.sessionStorage.getItem(SLIDE_KEY);
+      if (stored && stored in VISIONARY_SLIDE_TITLES) return stored as VisionarySlide;
+    }
   } catch {
     // Ignore storage failures.
   }
   return "step1";
+}
+
+function buildSlideUrl(targetSlide: VisionarySlide): string {
+  try {
+    if (typeof window === "undefined") return "";
+    const params = new URLSearchParams(window.location.search);
+    if (targetSlide !== "step1") {
+      params.set("slide", targetSlide);
+    } else {
+      params.delete("slide");
+    }
+    const query = params.toString();
+    return window.location.pathname + (query ? `?${query}` : "");
+  } catch {
+    return "";
+  }
 }
 
 export function VisionaryFlow() {
@@ -60,6 +81,68 @@ export function VisionaryFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Sync history state on initial mount when ready
+  useEffect(() => {
+    if (!ready || typeof window === "undefined") return;
+    try {
+      const currentState = window.history.state;
+      if (!currentState || currentState.slide !== slide) {
+        window.history.replaceState(
+          { slide, manufacturerId },
+          "",
+          buildSlideUrl(slide),
+        );
+      }
+    } catch {
+      // Ignore history failures.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  // Handle browser back and forward navigation (e.g. browser back arrow button)
+  useEffect(() => {
+    if (!ready || typeof window === "undefined") return;
+
+    function onPopState(event: PopStateEvent) {
+      const stateSlide = event.state?.slide as VisionarySlide | undefined;
+      const targetSlide =
+        (stateSlide && stateSlide in VISIONARY_SLIDE_TITLES && stateSlide) ||
+        (() => {
+          try {
+            const params = new URLSearchParams(window.location.search);
+            const querySlide = params.get("slide");
+            if (querySlide && querySlide in VISIONARY_SLIDE_TITLES) {
+              return querySlide as VisionarySlide;
+            }
+          } catch {}
+          return "step1";
+        })();
+
+      setSlide(targetSlide);
+      setVisit((current) => current + 1);
+
+      try {
+        window.sessionStorage.setItem(SLIDE_KEY, targetSlide);
+      } catch {
+        // Ignore storage failures.
+      }
+
+      const targetMid =
+        event.state && "manufacturerId" in event.state
+          ? event.state.manufacturerId
+          : readSelectedManufacturerId();
+      setManufacturerId(targetMid ?? null);
+      if (targetMid) {
+        writeSelectedManufacturerId(targetMid);
+      }
+    }
+
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [ready]);
+
   useEffect(() => {
     if (!ready) return;
     document.title = VISIONARY_SLIDE_TITLES[slide];
@@ -71,7 +154,26 @@ export function VisionaryFlow() {
     }
   }, [ready, slide, visit]);
 
-  function go(next: VisionarySlide) {
+  function go(next: VisionarySlide, nextManufacturerId?: string) {
+    if (next === slide) return;
+
+    const mid =
+      nextManufacturerId !== undefined
+        ? nextManufacturerId
+        : readSelectedManufacturerId() ?? manufacturerId;
+
+    if (typeof window !== "undefined") {
+      try {
+        window.history.pushState(
+          { slide: next, manufacturerId: mid },
+          "",
+          buildSlideUrl(next),
+        );
+      } catch {
+        // Ignore history failures.
+      }
+    }
+
     setSlide(next);
     setVisit((current) => current + 1);
   }
@@ -98,7 +200,7 @@ export function VisionaryFlow() {
           onSelect={selectManufacturer}
           onChoose={(id) => {
             selectManufacturer(id);
-            go("request");
+            go("request", id);
           }}
         />
       ) : null}

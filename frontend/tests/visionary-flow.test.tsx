@@ -4,11 +4,14 @@ import { StepStage } from "@/components/visionary/StepStage";
 import { StepGuide } from "@/components/visionary/StepGuide";
 import { StepNeeds } from "@/components/visionary/StepNeeds";
 import { ManufacturerResults } from "@/components/visionary/ManufacturerResults";
+import { VisionaryFlow } from "@/components/visionary/VisionaryFlow";
 import { setVisionaryData } from "@/lib/visionary/store";
 import type { VisionarySlide } from "@/lib/visionary/paths";
 
 const mockSaveStage = vi.fn().mockResolvedValue({});
 const mockSaveRequirements = vi.fn().mockResolvedValue({});
+const mockSaveProfile = vi.fn().mockResolvedValue({});
+const mockLoad = vi.fn().mockResolvedValue({});
 const mockManufacturers = vi.fn().mockResolvedValue([
   {
     id: "1",
@@ -27,6 +30,8 @@ const mockManufacturers = vi.fn().mockResolvedValue([
 
 vi.mock("@/lib/visionary/api", () => ({
   useVisionaryApi: () => ({
+    load: mockLoad,
+    saveProfile: mockSaveProfile,
     saveStage: mockSaveStage,
     saveRequirements: mockSaveRequirements,
     manufacturers: mockManufacturers,
@@ -320,5 +325,66 @@ describe("Visionary stage and AI guide flow", () => {
     expect(screen.queryByLabelText("Location")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Industry / Category")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Capacity")).not.toBeInTheDocument();
+  });
+
+  it("VisionaryFlow: handles browser back arrow (popstate) to go back slide by slide", async () => {
+    sessionStorage.clear();
+
+    await act(async () => {
+      render(<VisionaryFlow />);
+    });
+
+    // Initial slide is step1
+    expect(
+      screen.getByRole("heading", { name: /let’s start with you/i }),
+    ).toBeInTheDocument();
+
+    // Fill step1 and continue to step2
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. Abinav/i), {
+      target: { value: "John Doe" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. Entrepreneur/i), {
+      target: { value: "Designer" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. Chennai/i), {
+      target: { value: "Chennai" },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    // Should now be on step2
+    expect(
+      screen.getByRole("heading", { name: /what is the idea you want to bring to life/i }),
+    ).toBeInTheDocument();
+    expect(window.history.state).toEqual({ slide: "step2", manufacturerId: null });
+
+    // Now simulate user clicking the browser back arrow (which fires popstate with previous state)
+    await act(async () => {
+      window.dispatchEvent(
+        new PopStateEvent("popstate", {
+          state: { slide: "step1", manufacturerId: null },
+        }),
+      );
+    });
+
+    // Should be back on step1
+    expect(
+      screen.getByRole("heading", { name: /let’s start with you/i }),
+    ).toBeInTheDocument();
+
+    // Now simulate clicking the browser forward arrow
+    await act(async () => {
+      window.dispatchEvent(
+        new PopStateEvent("popstate", {
+          state: { slide: "step2", manufacturerId: null },
+        }),
+      );
+    });
+
+    expect(
+      screen.getByRole("heading", { name: /what is the idea you want to bring to life/i }),
+    ).toBeInTheDocument();
   });
 });
