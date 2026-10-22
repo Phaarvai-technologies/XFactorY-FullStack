@@ -47,10 +47,6 @@ export function ManufacturerResults({
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [profileId, setProfileId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [location, setLocation] = useState("");
-  const [category, setCategory] = useState("");
-  const [capacity, setCapacity] = useState("");
-  const seededLocation = useRef(false);
   const requirements = getVisionaryData().requirements;
   const visionaryApi = useVisionaryApi();
 
@@ -64,16 +60,6 @@ export function ManufacturerResults({
     visionaryApi.manufacturers().then(
       (next) => {
         setManufacturers(next);
-        if (!seededLocation.current) {
-          seededLocation.current = true;
-          const wanted = (requirements?.manufacturing_location || "").trim().toLowerCase();
-          const match =
-            next.find((item) => {
-              const place = item.location.toLowerCase();
-              return place === wanted || place.startsWith(`${wanted},`);
-            })?.location ?? "";
-          if (match) setLocation(match);
-        }
         setStatus("ready");
       },
       () => {
@@ -87,8 +73,6 @@ export function ManufacturerResults({
     fetchManufacturers(); // status starts as "loading"
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const locations = [...new Set(manufacturers.map((item) => item.location).filter(Boolean))].sort();
-  const categories = [...new Set(manufacturers.map((item) => item.category).filter(Boolean))].sort();
 
   const chips: string[] = [];
   if (requirements?.manufacturing_location) chips.push(requirements.manufacturing_location);
@@ -101,29 +85,39 @@ export function ManufacturerResults({
   if (requirements?.timeline && TIMELINE_LABELS[requirements.timeline]) {
     chips.push(TIMELINE_LABELS[requirements.timeline]);
   }
+  let savedMachines: string[] = requirements?.machines ?? [];
+  if (!savedMachines.length && typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem("xy-visionary-machines");
+      if (raw) savedMachines = JSON.parse(raw);
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+  if (savedMachines.length > 0) {
+    savedMachines.forEach((machine) => {
+      chips.push(machine);
+    });
+  }
 
   const visible = manufacturers.filter((item) => {
     const text = query.trim().toLowerCase();
-    if (text) {
-      const haystack = [
-        item.name,
-        item.location,
-        item.category,
-        item.capabilities,
-        item.about,
-        ...item.machines,
-        ...item.products,
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (!haystack.includes(text)) return false;
-    }
-    if (location && item.location !== location) return false;
-    if (category && item.category !== category) return false;
-    return inRange(item.capacity, capacity);
+    if (!text) return true;
+    const haystack = [
+      item.name,
+      item.location,
+      item.category,
+      item.capabilities,
+      item.about,
+      ...item.machines,
+      ...item.products,
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(text);
   });
 
-  const filtersActive = Boolean(query.trim() || location || category || capacity);
+  const filtersActive = Boolean(query.trim());
 
   return (
     <div className="view active" id="v-mf">
@@ -146,7 +140,7 @@ export function ManufacturerResults({
         ) : null}
 
         {profileId ? null : (
-        <section className="filters" aria-label="Filters">
+        <section className="filters search-only" aria-label="Filters">
           <div className="f sw-wrap">
             <label htmlFor="mf-q">Search</label>
             <div className="sw">
@@ -164,34 +158,6 @@ export function ManufacturerResults({
               />
             </div>
           </div>
-          <div className="f">
-            <label htmlFor="mf-loc">Location</label>
-            <select id="mf-loc" value={location} onChange={(event) => setLocation(event.target.value)}>
-              <option value="">All locations</option>
-              {locations.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </div>
-          <div className="f">
-            <label htmlFor="mf-cat">Industry / Category</label>
-            <select id="mf-cat" value={category} onChange={(event) => setCategory(event.target.value)}>
-              <option value="">All categories</option>
-              {categories.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </div>
-          <div className="f">
-            <label htmlFor="mf-cap">Capacity</label>
-            <select id="mf-cap" value={capacity} onChange={(event) => setCapacity(event.target.value)}>
-              <option value="">Any capacity</option>
-              <option value="0-2500">Up to 2,500 units/month</option>
-              <option value="2500-5000">2,500 – 5,000 units/month</option>
-              <option value="5000-10000">5,000 – 10,000 units/month</option>
-              <option value="10000-">10,000+ units/month</option>
-            </select>
-          </div>
         </section>
         )}
 
@@ -206,13 +172,10 @@ export function ManufacturerResults({
               className="link"
               onClick={() => {
                 setQuery("");
-                setLocation("");
-                setCategory("");
-                setCapacity("");
                 document.getElementById("mf-q")?.focus();
               }}
             >
-              Clear filters
+              Clear search
             </button>
           ) : null}
         </div>

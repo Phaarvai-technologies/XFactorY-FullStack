@@ -3,16 +3,33 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { StepStage } from "@/components/visionary/StepStage";
 import { StepGuide } from "@/components/visionary/StepGuide";
 import { StepNeeds } from "@/components/visionary/StepNeeds";
+import { ManufacturerResults } from "@/components/visionary/ManufacturerResults";
 import { setVisionaryData } from "@/lib/visionary/store";
 import type { VisionarySlide } from "@/lib/visionary/paths";
 
 const mockSaveStage = vi.fn().mockResolvedValue({});
 const mockSaveRequirements = vi.fn().mockResolvedValue({});
+const mockManufacturers = vi.fn().mockResolvedValue([
+  {
+    id: "1",
+    name: "Alpha Works",
+    location: "Chennai",
+    category: "Electronics",
+    capabilities: "Assembly",
+    about: "Top manufacturing",
+    machines: ["CNC Machining"],
+    products: ["PCB"],
+    capacity: 1000,
+    moq: 10,
+    availability: "Immediate",
+  },
+]);
 
 vi.mock("@/lib/visionary/api", () => ({
   useVisionaryApi: () => ({
     saveStage: mockSaveStage,
     saveRequirements: mockSaveRequirements,
+    manufacturers: mockManufacturers,
   }),
   errorMessage: (_e: unknown, fallback: string) => fallback,
 }));
@@ -207,5 +224,101 @@ describe("Visionary stage and AI guide flow", () => {
     const prevBtn = screen.getByRole("button", { name: /previous/i });
     fireEvent.click(prevBtn);
     expect(nextSlide).toBe("step3");
+  });
+
+  it("StepNeeds: allows selecting multiple machines and includes them in payload", async () => {
+    setVisionaryData({
+      profile: null,
+      idea: null,
+      stage: "Idea Stage",
+      requirements: null,
+      requests: [],
+    });
+
+    render(
+      <StepNeeds
+        onContinue={() => {}}
+        onToast={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Machine")).toBeInTheDocument();
+    expect(
+      screen.getByText("Choose from the machines this manufacturer has available."),
+    ).toBeInTheDocument();
+
+    const cncPill = screen.getByRole("button", { name: /CNC Machining/i });
+    const printPill = screen.getByRole("button", { name: /3D Printing \(FDM\)/i });
+
+    fireEvent.click(cncPill);
+    fireEvent.click(printPill);
+
+    expect(screen.getByText("Clear all (2)")).toBeInTheDocument();
+
+    const locInput = screen.getByLabelText(/Manufacturing location/i);
+    fireEvent.change(locInput, { target: { value: "Chennai" } });
+
+    const qtyInput = screen.getByLabelText(/Quantity/i);
+    fireEvent.change(qtyInput, { target: { value: "500" } });
+
+    const budgetInput = screen.getByLabelText(/Budget/i);
+    fireEvent.change(budgetInput, { target: { value: "100000" } });
+
+    const timelineRadio = screen.getByDisplayValue("immediately");
+    fireEvent.click(timelineRadio);
+
+    const submitBtn = screen.getByRole("button", { name: /find a manufacturer/i });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    expect(mockSaveRequirements).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manufacturing_location: "Chennai",
+        machines: ["CNC Machining", "3D Printing (FDM)"],
+      }),
+      true,
+    );
+  });
+
+  it("ManufacturerResults: displays chosen machines in Your requirements and only Search in filters", async () => {
+    setVisionaryData({
+      profile: null,
+      idea: null,
+      stage: "Idea Stage",
+      requirements: {
+        manufacturing_location: "Chennai",
+        quantity: { value: 1000, unit: "units" },
+        budget: { amount: 200000, currency: "INR" },
+        timeline: "immediately",
+        additional_requirements: "",
+        machines: ["CNC Machining", "Laser Cutting"],
+      },
+      requests: [],
+    });
+
+    await act(async () => {
+      render(
+        <ManufacturerResults
+          onContinue={() => {}}
+          onSelect={() => {}}
+          onChoose={() => {}}
+          selectedId={null}
+        />,
+      );
+    });
+
+    expect(screen.getByText("Your requirements")).toBeInTheDocument();
+    expect(screen.getAllByText("Chennai").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("CNC Machining").length).toBeGreaterThan(0);
+    expect(screen.getByText("Laser Cutting")).toBeInTheDocument();
+
+    expect(
+      screen.getByPlaceholderText("Search by name, product or machine"),
+    ).toBeInTheDocument();
+
+    expect(screen.queryByLabelText("Location")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Industry / Category")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Capacity")).not.toBeInTheDocument();
   });
 });

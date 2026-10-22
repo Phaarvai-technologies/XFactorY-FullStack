@@ -16,8 +16,6 @@ const EMPTY: VisionaryProfile = {
   intro: "",
 };
 
-const ROLES = ["Entrepreneur", "Product designer", "Engineer", "Inventor", "Student", "Investor"];
-
 export function StepProfile({
   onContinue,
   onToast,
@@ -110,17 +108,12 @@ export function StepProfile({
                 <input
                   id="role"
                   name="role"
-                  list="roles"
+                  maxLength={20}
                   placeholder="e.g. Entrepreneur"
                   required
                   value={profile.role}
                   onChange={(event) => update("role", event.target.value)}
                 />
-                <datalist id="roles">
-                  {ROLES.map((role) => (
-                    <option key={role} value={role} />
-                  ))}
-                </datalist>
                 <p className="err">Tell us what you do.</p>
               </div>
             </div>

@@ -30,7 +30,19 @@ export function getVisionaryData(): VisionaryData {
 }
 
 export function setVisionaryData(next: VisionaryData): void {
-  current = { ...EMPTY, ...next, requests: next.requests ?? [] };
+  let machines = next.requirements?.machines ?? current.requirements?.machines;
+  if ((!machines || !machines.length) && typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem("xy-visionary-machines");
+      if (raw) machines = JSON.parse(raw);
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+  const requirements = next.requirements
+    ? { ...next.requirements, machines: machines ?? [] }
+    : null;
+  current = { ...EMPTY, ...next, requirements, requests: next.requests ?? [] };
 }
 
 export function addVisionaryRequest(request: ManufacturingRequest): void {
