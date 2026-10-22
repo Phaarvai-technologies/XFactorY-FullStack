@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, ClipboardCheck, Cog, Eye, Pencil, Plus, SlidersHorizontal } from "lucide-react";
+import { Archive, ArchiveRestore, BadgeCheck, ClipboardCheck, Cog, Eye, FlaskConical, Pencil, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useState } from "react";
 import { AddCompanyModal } from "@/components/admin/AddCompany";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
@@ -20,6 +20,8 @@ import {
   ReviewBadge,
   SearchInput,
   Truncate,
+  DataScopeFilter,
+  type DataScope,
 } from "@/components/admin/ui";
 import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
 import {
@@ -41,7 +43,7 @@ export function Manufacturers() {
   const toast = useToast();
   const f = useUrlFilters("/admin/manufacturers");
   const [showFilters, setShowFilters] = useState(() =>
-    ["industry", "process", "location", "completeness", "review_status", "record_type", "entry_source", "archived", "assigned"].some(
+    ["industry", "process", "location", "completeness", "review_status", "record_type", "entry_source", "archived", "assigned", "listing"].some(
       (k) => f.search.has(k),
     ),
   );
@@ -66,24 +68,50 @@ export function Manufacturers() {
     entry_source: f.getAll("entry_source"),
     archived: f.get("archived") || "active",
     assigned: f.get("assigned"),
+    // listed (default): approved companies + imported / admin-added ones; awaiting: submitted by users,
+    // not approved yet (they are in Onboarding & review); all: both
+    listing: (["awaiting", "all"].includes(f.get("listing")) ? f.get("listing") : "listed") as "listed" | "awaiting" | "all",
     sort: f.get("sort") || "updated",
     page: f.get("page") || "1",
     page_size: "25",
   };
-  const path = `/manufacturers${toQuery({ ...params, archived: params.archived === "active" ? null : params.archived })}`;
+  const path = `/manufacturers${toQuery({
+    ...params,
+    archived: params.archived === "active" ? null : params.archived,
+    listing: params.listing === "listed" ? null : params.listing,
+  })}`;
   const { data, error, loading, reload } = useResource<ManufacturerList>(path);
   const setFilters = f.set;
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
+
+  // Data filter = a shortcut over the Record type filter: Real -> REAL; Demo -> DEMO + TEST; all -> none.
+  const recordSet = [...params.record_type].sort().join(",");
+  const dataScope: DataScope | null =
+    recordSet === "" ? "all" : recordSet === "REAL" ? "real" : recordSet === "DEMO,TEST" ? "demo" : null;
+  const setDataScope = (v: DataScope) =>
+    f.set({ record_type: v === "real" ? ["REAL"] : v === "demo" ? ["DEMO", "TEST"] : [] });
 
   const activeFilterCount =
     [params.industry, params.process, params.location, params.completeness, params.assigned].filter(Boolean).length +
     params.review_status.length +
     params.record_type.length +
     params.entry_source.length +
-    (params.archived !== "active" ? 1 : 0);
+    (params.archived !== "active" ? 1 : 0) +
+    (params.listing !== "listed" ? 1 : 0);
 
   const rows = data?.rows ?? [];
   const selectable = rows.filter((r) => r.recordType !== "REAL" && !r.isArchived);
+
+  /** Mark as demo / real (the company's Record type; history keeps who changed it and when). */
+  async function setRecordType(r: ManufacturerRow, type: RecordType) {
+    try {
+      await call(`/manufacturers/${r.id}/admin-fields`, jsonBody("PATCH", { record_type: type }));
+      toast(`${r.companyName || "Company"} marked as ${type === "REAL" ? "real" : "demo"} data`);
+      reload();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not update");
+    }
+  }
 
   async function runArchive() {
     if (!confirm) return;
@@ -120,7 +148,7 @@ export function Manufacturers() {
     <>
       <PageHeader
         title="Manufacturers"
-        subtitle="Search and filter manufacturer records. Archived records are hidden unless you choose to show them."
+        subtitle="Approved companies and those added by admins. New submissions wait in Onboarding & review."
         actions={canAdd ? (
           <button type="button" className="btn-primary adm-btn-md" onClick={() => setAdding(true)}>
             <Plus size={15} /> Add company
@@ -146,6 +174,10 @@ export function Manufacturers() {
           <button type="button" className={`btn-ghost adm-filter-btn${showFilters ? " on" : ""}`} onClick={() => setShowFilters((s) => !s)}>
             <SlidersHorizontal size={15} /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
           </button>
+        </div>
+        <div className="adm-toolbar-row">
+          <DataScopeFilter value={dataScope} onChange={setDataScope} />
+          {dataScope === null && <span className="adm-seg-hint">Custom record type filter applied</span>}
         </div>
 
         {showFilters && (
@@ -187,6 +219,14 @@ export function Manufacturers() {
                   <option value="active">Active only</option>
                   <option value="archived">Archived only</option>
                   <option value="all">Active and archived</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="f-listing">Listing</label>
+                <select id="f-listing" value={params.listing} onChange={(e) => f.set({ listing: e.target.value === "listed" ? null : e.target.value })}>
+                  <option value="listed">Approved and admin-added</option>
+                  <option value="awaiting">Awaiting approval</option>
+                  <option value="all">All companies</option>
                 </select>
               </div>
               <div>
@@ -241,6 +281,7 @@ export function Manufacturers() {
                     entry_source: [],
                     archived: null,
                     assigned: null,
+                    listing: null,
                   })
                 }
               >
@@ -323,6 +364,7 @@ export function Manufacturers() {
                     onSelect={(on) => setSelected(on ? [...selected, r.id] : selected.filter((id) => id !== r.id))}
                     onOpen={(tab) => go(`/admin/manufacturers/${r.id}${tab ? `?tab=${tab}` : ""}`)}
                     onArchive={() => setConfirm({ ids: [r.id], archive: !r.isArchived, batch: false })}
+                    onRecordType={(type) => void setRecordType(r, type)}
                   />
                 ))}
               </tbody>
@@ -396,6 +438,7 @@ function Row({
   onOpen,
   onArchive,
   onMachinery,
+  onRecordType,
 }: {
   r: ManufacturerRow;
   selected: boolean;
@@ -405,6 +448,7 @@ function Row({
   onOpen: (tab?: string) => void;
   onArchive: () => void;
   onMachinery: () => void;
+  onRecordType: (type: RecordType) => void;
 }) {
   const canBatch = r.recordType !== "REAL" && !r.isArchived;
   const name = r.companyName || "Unnamed company";
@@ -455,6 +499,9 @@ function Row({
               { label: "Edit company details", icon: <Pencil size={15} />, onSelect: () => onOpen("company") },
               { label: "Onboarding & review", icon: <ClipboardCheck size={15} />, onSelect: () => onOpen("onboarding") },
               { label: "View machinery", icon: <Cog size={15} />, onSelect: onMachinery },
+              r.recordType === "REAL"
+                ? { label: "Mark as demo", icon: <FlaskConical size={15} />, onSelect: () => onRecordType("DEMO"), group: true }
+                : { label: "Mark as real", icon: <BadgeCheck size={15} />, onSelect: () => onRecordType("REAL"), group: true },
               r.isArchived
                 ? { label: "Restore", icon: <ArchiveRestore size={15} />, onSelect: onArchive, group: true }
                 : { label: "Archive", icon: <Archive size={15} />, onSelect: onArchive, danger: true, group: true },

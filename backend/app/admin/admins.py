@@ -11,6 +11,7 @@ Rules that keep the portal reachable:
 - the last active platform administrator cannot be revoked or downgraded.
 """
 import asyncio
+import logging
 import uuid
 from uuid import UUID
 
@@ -21,7 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin import accounts
 from app.admin.accounts import LOCAL_CLERK_PREFIX, hash_password
 from app.admin.auth import ADMIN_ROLES, AdminContext, grant
+from app.core.clerk import ClerkManagement
 from app.core.config import Settings
+
+log = logging.getLogger(__name__)
 
 ROLE_LABELS = {
     "platform_administrator": "Administrator",
@@ -38,7 +42,8 @@ _LIST_SQL = """
       WHERE platform_role IN ('platform_administrator','platform_operator','support_specialist','verification_analyst')
       ORDER BY user_id, (status='active' AND revoked_at IS NULL) DESC, granted_at DESC
     )
-    SELECT u.id, u.email::text AS email, u.status AS user_status, u.last_seen_at,
+    SELECT u.id, u.email::text AS email, u.status AS user_status, u.last_seen_at, u.clerk_user_id,
+           u.first_name, u.last_name, u.phone,
            coalesce(nullif(btrim(concat_ws(' ', u.first_name, u.last_name)), ''), u.display_name) AS name,
            u.clerk_user_id NOT LIKE 'local-admin:%' AS has_xy_account,
            r.platform_role, (r.status='active' AND r.revoked_at IS NULL) AS role_active,
@@ -74,6 +79,7 @@ class AdminManager:
         last_login = max([d for d in (row["last_login_at"], row["last_seen_at"]) if d], default=None)
         return {
             "id": str(row["id"]), "name": row["name"], "email": row["email"],
+            "firstName": row["first_name"], "lastName": row["last_name"], "phone": row["phone"],
             "role": row["platform_role"] or "", "roleLabel": ROLE_LABELS.get(row["platform_role"] or "", ""),
             "status": _status(row),
             "hasAdminAccount": row["account_id"] is not None,
@@ -86,6 +92,9 @@ class AdminManager:
             "lastSignIn": last_login.isoformat() if last_login else None,
             "isDefault": self._is_default(row["email"]),
             "isYou": row["id"] == me.user_id,
+            # what Edit details may change for this admin (the backend checks the same rules)
+            "canEditDetails": row["id"] == me.user_id or "platform_administrator" in me.roles,
+            "emailEditable": not row["has_xy_account"] and not self._is_default(row["email"]),
         }
 
     async def _rows(self, user_id: UUID | None = None) -> list[dict]:
@@ -255,3 +264,65 @@ class AdminManager:
         await self._log(user_id, me, "Admin password reset")
         await self.db.commit()
         return {"admin": await self._one(user_id, me), "temporaryPassword": temporary}
+
+    # ------------------------------------------------------------------ details
+    async def update_details(self, me: AdminContext, user_id: UUID, changes: dict) -> dict:
+        """Name, phone and (admin-only accounts) sign-in email. Administrators can edit any admin;
+        every admin can edit their own details. Returns {admin, clerkSync, changed}."""
+        rows = await self._rows(user_id)
+        if not rows:
+            raise HTTPException(404, "Admin not found")
+        row = rows[0]
+        target = self._view(row, me)
+        if not target["canEditDetails"]:
+            raise HTTPException(403, "Only administrators can edit other admins' details.")
+        changes = {k: v for k, v in changes.items() if v is not None}
+        if "firstName" in changes and not changes["firstName"].strip():
+            raise HTTPException(422, "First name is required.")
+        new = {"first_name": changes.get("firstName", row["first_name"]),
+               "last_name": (changes["lastName"] or None) if "lastName" in changes else row["last_name"],
+               "phone": (changes["phone"] or None) if "phone" in changes else row["phone"],
+               "email": changes.get("email", row["email"])}
+        changed = [label for key, label in (("first_name", "first name"), ("last_name", "last name"),
+                                             ("phone", "phone"), ("email", "email"))
+                   if (new[key] or None) != (row[key] or None)
+                   and not (key == "email" and new[key].lower() == row[key].lower())]
+        email_changed = "email" in changed
+        if email_changed:
+            if row["has_xy_account"]:
+                raise HTTPException(422, "This admin signs in with an X!Y account; their email is managed in "
+                                         "their X!Y account, not here.")
+            if self._is_default(row["email"]) or self._is_default(new["email"]):
+                raise HTTPException(422, "The built-in administrator's email cannot be changed here.")
+            taken = await self.db.scalar(text("""
+                SELECT EXISTS (SELECT 1 FROM users WHERE email=CAST(:e AS citext) AND id<>:u)
+                    OR EXISTS (SELECT 1 FROM admin_accounts WHERE email=CAST(:e AS citext) AND user_id<>:u)
+            """), {"e": new["email"], "u": user_id})
+            if taken:
+                raise HTTPException(409, f"{new['email']} is already used by another account.")
+        if not changed:
+            return {"admin": target, "clerkSync": "not_needed", "changed": []}
+        first, last = (new["first_name"] or "").strip(), (new["last_name"] or "").strip()
+        await self.db.execute(text("""
+            UPDATE users SET first_name=NULLIF(:f, ''), last_name=NULLIF(:l, ''),
+                   display_name=coalesce(NULLIF(btrim(concat_ws(' ', NULLIF(:f, ''), NULLIF(:l, ''))), ''), :e),
+                   phone=:p, email=CAST(:e AS citext), updated_at=now()
+            WHERE id=:u
+        """), {"u": user_id, "f": first, "l": last, "p": new["phone"], "e": new["email"]})
+        if email_changed:
+            await self.db.execute(text("""
+                UPDATE admin_accounts SET email=CAST(:e AS citext), updated_at=now() WHERE user_id=:u
+            """), {"u": user_id, "e": new["email"]})
+        await self._log(user_id, me, "Admin details updated (" + ", ".join(changed) + ")")
+        await self.db.commit()
+        # An X!Y (Clerk) account also stores the name; keep it equal so the next X!Y sign-in
+        # does not bring back the old name. The database already has the new name either way.
+        sync = "not_needed"
+        if row["has_xy_account"] and ({"first name", "last name"} & set(changed)):
+            try:
+                await ClerkManagement(self.settings).update_user_name(row["clerk_user_id"], first, last)
+                sync = "updated"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Saved the admin's new name, but could not update it in Clerk: %s", exc)
+                sync = "failed"
+        return {"admin": await self._one(user_id, me), "clerkSync": sync, "changed": changed}

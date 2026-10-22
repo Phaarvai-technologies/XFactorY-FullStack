@@ -6,6 +6,7 @@ import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import {
   AccountBadge,
   Completeness,
+  DataScopeFilter,
   DetailsRow,
   DetailsToggle,
   EmailStatusBadge,
@@ -19,6 +20,7 @@ import {
   RoleBadges,
   SearchInput,
   Truncate,
+  type DataScope,
 } from "@/components/admin/ui";
 import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
 import {
@@ -48,7 +50,10 @@ function LinkedCompanies({ user, go }: { user: UserRow; go: (path: string) => vo
             <button type="button" className="adm-link adm-truncate" title={c.name ?? ""} onClick={() => go(`/admin/manufacturers/${c.id}`)}>
               {c.name || "Unnamed company"}
             </button>
-            {c.id === user.manufacturerId && user.recordType && user.recordType !== "REAL" && <RecordBadge type={user.recordType} />}
+            {(() => {
+              const type = c.recordType ?? (c.id === user.manufacturerId ? user.recordType : null);
+              return type && type !== "REAL" ? <RecordBadge type={type} /> : null;
+            })()}
           </div>
           <div className="adm-cell-sub" title={c.sourceNote ?? undefined}>
             Source: {sourceText(c.onboardingSource, c.stagedSource)}
@@ -72,10 +77,12 @@ export function Users() {
     account_status: f.get("account_status"),
     onboarding_status: f.get("onboarding_status"),
     role: f.get("role"),
+    // Real / Demo / Real + demo (default). Demo = linked company marked Demo or Test.
+    data: (["real", "demo"].includes(f.get("data")) ? f.get("data") : "all") as DataScope,
     page: f.get("page") || "1",
     page_size: "25",
   };
-  const { data, error, loading, reload } = useResource<UserList>(`/users${toQuery(params)}`);
+  const { data, error, loading, reload } = useResource<UserList>(`/users${toQuery({ ...params, data: params.data === "all" ? null : params.data })}`);
   const setFilters = f.set;
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
   const [open, setOpen] = useState<string | null>(null);
@@ -125,6 +132,16 @@ export function Users() {
             ))}
           </select>
         </div>
+        <div className="adm-toolbar-row">
+          <DataScopeFilter
+            value={params.data}
+            counts={data?.dataCounts}
+            onChange={(v) => f.set({ data: v === "all" ? null : v })}
+          />
+          <span className="adm-seg-hint">
+            Demo = the person (Visionaries → Mark as demo) or their company (Manufacturers → Mark as demo) is marked Demo or Test.
+          </span>
+        </div>
       </div>
 
       {error && <ErrorBox message={error.message} onRetry={reload} />}
@@ -172,9 +189,12 @@ export function Users() {
                           <DetailsToggle open={isOpen} onToggle={() => setOpen(isOpen ? null : u.id)} controls={detailsId} label={u.name || u.email} />
                         </td>
                         <td>
-                          <button type="button" className="adm-link adm-truncate" title={u.name || u.email} onClick={() => go(`/admin/users/${u.id}`)}>
-                            {u.name || u.email}
-                          </button>
+                          <div className="adm-name-line">
+                            <button type="button" className="adm-link adm-truncate" title={u.name || u.email} onClick={() => go(`/admin/users/${u.id}`)}>
+                              {u.name || u.email}
+                            </button>
+                            {u.userRecordType && <RecordBadge type={u.userRecordType} hideReal />}
+                          </div>
                           <div className="adm-cell-sub"><Truncate text={u.email} /></div>
                         </td>
                         <td>

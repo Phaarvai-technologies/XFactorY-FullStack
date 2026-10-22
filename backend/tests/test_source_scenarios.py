@@ -89,7 +89,8 @@ async def test_new_company_retry_change_corrections_and_approval(client):  # noq
     # corrections requested -> resubmitted -> approved; source never changes
     first_at = (await client.sql("SELECT submitted_at FROM manufacturer_submissions WHERE target_organization_id="
                                  "CAST(:o AS uuid)", o=org))[0][0]
-    assert (await approve_company(client, org, decision="NEEDS_CORRECTION", reason="Add phone")).status_code == 200
+    assert (await approve_company(client, org, decision="NEEDS_CORRECTION", reason="Add phone",
+                                 correction_fields=["companyPhone", "capacity"])).status_code == 200
     assert (await client.post("/manufacturer/account", headers=h, json={**body, "phone": "+91 90000 22222"})).status_code == 201
     row = (await client.sql("SELECT status, submitted_at FROM manufacturer_submissions WHERE target_organization_id="
                             "CAST(:o AS uuid)", o=org))[0]

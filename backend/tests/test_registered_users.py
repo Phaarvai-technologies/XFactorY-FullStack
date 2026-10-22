@@ -48,7 +48,8 @@ async def test_registered_users_requests_counts_and_contact(client):  # noqa: F8
     name = f"RU Works {t}"
     owner, org = await _company(client, t, name)
     contact_before = await _contact(client, org)
-    assert contact_before == ("contact@company.example", "+91 90000 33333")
+    # the form's email is the person's own: the company keeps no personal email as its contact
+    assert contact_before == (None, "+919000033333")
 
     # two more users linked by membership (one active, one removed)
     member, removed = f"user_ru_mem_{t}", f"user_ru_rem_{t}"
@@ -79,18 +80,28 @@ async def test_registered_users_requests_counts_and_contact(client):  # noqa: F8
     p = await _people(client, admin, org)
     users = p["registeredUsers"]
     ids = [u["id"] for u in users]
-    assert len(ids) == len(set(ids)) == 3                       # each user once
+    # each user once: owner, member, removed member and the APPROVED applicant (now a member)
+    assert len(ids) == len(set(ids)) == 4
     by_id = {u["id"]: u for u in users}
     own = by_id[await _user_id(client, owner)]
     assert (own["role"], own["membershipStatus"], own["email"]) == ("owner", "active", f"{owner}@example.com")
     assert own["linkedAt"] and own["registeredAt"] and own["name"]
     assert by_id[await _user_id(client, removed)]["membershipStatus"] == "removed"
-    assert p["counts"] == {"linkedUsers": 2, "openRequests": 1}   # active members only; requests not counted
-    # requesters: listed with their real status, never as members
+    assert p["counts"] == {"linkedUsers": 3, "openRequests": 1,   # active members only; requests not counted
+                           "confirmedUsers": 3, "pendingRequests": 1}
+    approved_user = by_id[await _user_id(client, reqs["approved"])]
+    assert (approved_user["role"], approved_user["membershipStatus"], approved_user["applicationStatus"]) == \
+        ("member", "active", "approved")
+    assert approved_user["registeredAt"] and p["primaryProposed"] is False
+    # the primary user (owner) apart from the Other Users; each user once, with a personal email
+    assert p["primaryUser"]["role"] == "owner" and p["primaryUser"]["email"] == f"{owner}@example.com"
+    assert owner not in [u["email"].split("@")[0] for u in p["otherUsers"]]
+    assert all(u.get("personalEmail") for u in p["otherUsers"])
+    # requesters: listed with their real status; only an approved one became a member
     by_req = {r["requester"]["email"]: r for r in p["requests"] if r["kind"] == "update_request"}
     assert {e: (r["status"], r["statusLabel"], r["requesterIsMember"]) for e, r in by_req.items()} == {
         f"{reqs['pending']}@example.com": ("pending", "Awaiting review", False),
-        f"{reqs['approved']}@example.com": ("approved", "Approved", False),
+        f"{reqs['approved']}@example.com": ("approved", "Approved", True),
         f"{reqs['rejected']}@example.com": ("rejected", "Rejected", False)}
     assert by_req[f"{reqs['rejected']}@example.com"]["feedback"] == "Not verified"
     assert by_req[f"{reqs['approved']}@example.com"]["reviewer"]
@@ -101,15 +112,15 @@ async def test_registered_users_requests_counts_and_contact(client):  # noqa: F8
     # listing and detail agree on the distinct active count
     row = next(r for r in (await client.get("/admin/manufacturers", headers=admin, params={"q": name})).json()["rows"]
                if r["id"] == org)
-    assert row["linkedUsers"] == 2
+    assert row["linkedUsers"] == 3
     # company contact is the company's own: unchanged by sign-ups, memberships and requests
     assert await _contact(client, org) == contact_before
     assert (row["contactEmail"], row["contactPhone"]) == contact_before
     assert row["primaryUser"]["email"] == f"{owner}@example.com"   # the person, shown separately
     d = (await client.get(f"/admin/manufacturers/{org}", headers=admin)).json()
-    assert (d["contacts"]["email"], d["contacts"]["phone"]) == contact_before
-    # a listed requester got no access
-    for label in ("pending", "approved", "rejected"):
+    assert ((d["contacts"]["email"] or None), d["contacts"]["phone"]) == contact_before
+    # a pending or rejected requester got no access (only approval grants membership)
+    for label in ("pending", "rejected"):
         assert (await client.sql("""SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id
                                     WHERE u.clerk_user_id=:s AND m.organization_id=CAST(:o AS uuid)""",
                                  s=reqs[label], o=org))[0][0] == 0
@@ -129,7 +140,12 @@ async def test_other_company_shows_only_its_own_people_and_no_user_email_as_cont
     assert (await client.post("/manufacturer/account", headers=hdr(client, claimer),
                               json=account(f"RU Second {t}", companyId=second))).status_code == 201
     p2 = await _people(client, admin, second)
-    assert p2["registeredUsers"] == [] and p2["counts"] == {"linkedUsers": 0, "openRequests": 1}
+    assert p2["registeredUsers"] == [] and p2["counts"] == {"linkedUsers": 0, "openRequests": 1,
+                                                            "confirmedUsers": 0, "pendingRequests": 1}
+    assert p2["primaryUser"] is None and len(p2["pendingRequests"]) == 1
+    # the claimant is listed under this company as an applicant awaiting approval
+    assert [(u["email"], u["membershipStatus"], u["applicationStatus"]) for u in p2["otherUsers"]] == [
+        (f"{claimer}@example.com", "pending", "pending")]
     assert [(r["kind"], r["status"], r["requester"]["email"], r["requesterIsMember"]) for r in p2["requests"]] == [
         ("claim", "pending", f"{claimer}@example.com", False)]
     p1 = await _people(client, admin, first)

@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import company_update_requests as update_requests
+from app import manufacturer_access as access
 from app import manufacturer_approval as approval
 from app.core.auth import Actor
 from app.storage.supabase import DecodedImage, UploadedObject
@@ -91,6 +92,36 @@ def normalize_company_name(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip().lower()
 
 
+def _present(value: Any) -> bool:
+    """None, "" and whitespace-only are missing; numbers (also 0) are values."""
+    if value is None:
+        return False
+    return str(value).strip() != "" if isinstance(value, str) else True
+
+
+def saved_company_values(r) -> dict:
+    """An existing company's saved category, country, phone and capacity ("" = missing)."""
+    def keep(value):
+        return str(value).strip() if _present(value) else ""
+    capacity = keep(r.get("production_capacity_label"))
+    if not capacity and r.get("stated_production_capacity") is not None:
+        number = float(r["stated_production_capacity"])
+        capacity = str(int(number)) if number.is_integer() else f"{number:g}"
+    return {"companyType": keep(r.get("company_category")),
+            "country": keep(r.get("country_name")) or keep(r.get("facility_country")),
+            "phone": keep(r.get("contact_phone")), "capacity": capacity}
+
+
+def _same(key: str, sent: str, saved: str) -> bool:
+    if key == "phone":
+        from app.schemas.manufacturer import normalize_indian_phone
+        try:
+            return normalize_indian_phone(sent) == normalize_indian_phone(saved)
+        except ValueError:
+            return re.sub(r"\D", "", sent) == re.sub(r"\D", "", saved)
+    return re.sub(r"\s+", " ", sent).strip().lower() == re.sub(r"\s+", " ", saved).strip().lower()
+
+
 def _like_escape(value: str) -> str:
     """User text inside LIKE: % and _ are literal characters, not wildcards."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -102,12 +133,11 @@ def _like_escape(value: str) -> str:
 # set) that is not an approved company yet: the empty per-user placeholder, or one whose
 # details are still awaiting admin approval. Visionary visibility is a different rule
 # (app/core/eligibility.py).
-LISTED_COMPANY_SQL = """
-    o.organization_type = 'manufacturer'
-    AND o.status IN ('active', 'claim_pending')
-    AND NOT o.is_archived
-    AND o.record_type <> 'TEST'
-    AND NOT (o.created_by_user_id IS NOT NULL
+# A company the app created for a user (sign-up -> manufacturer onboarding) that an admin has not
+# approved yet: the per-user placeholder, or details awaiting review / corrections / rejected.
+# Imported and admin-added companies (no created_by_user_id) are never "awaiting approval".
+# Also used by the admin Manufacturers list (app/admin/repository.py).
+AWAITING_APPROVAL_SQL = """(o.created_by_user_id IS NOT NULL
              AND o.entry_source = 'MANUFACTURER'
              AND NOT EXISTS (SELECT 1 FROM manufacturer_onboarding mo
                              WHERE mo.organization_id = o.id
@@ -116,7 +146,16 @@ LISTED_COMPANY_SQL = """
                                     OR (mo.personal_information_completed
                                         AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
                                                         WHERE s.organization_id = o.id
-                                                          AND s.kind <> 'update_request')))))
+                                                          AND s.kind <> 'update_request')))))"""
+
+LISTED_COMPANY_SQL = f"""
+    o.organization_type = 'manufacturer'
+    AND o.status IN ('active', 'claim_pending')
+    AND NOT o.is_archived
+    AND o.record_type <> 'TEST'
+    AND NOT {AWAITING_APPROVAL_SQL}
+    -- a user's placeholder for an application to another company is never a company itself
+    AND NOT {access.applicant_workspace_sql("o")}
 """
 
 # Who may update an organization through the onboarding form: its active owner / admin.
@@ -205,7 +244,7 @@ class ManufacturerRepository:
     async def context(self, actor: Actor) -> dict:
         base = """
             SELECT u.id user_id, u.first_name, u.last_name, u.date_of_birth, u.email, u.phone,
-                   u.status user_status,
+                   u.personal_email::text AS personal_email, u.status user_status,
                    o.id organization_id, o.display_name, o.organization_type, m.id membership_id
             FROM users u
             JOIN memberships m ON m.user_id=u.id AND m.status='active'
@@ -217,8 +256,13 @@ class ManufacturerRepository:
         else:
             # The company whose details form was submitted wins over an empty placeholder
             # (matters when the user saved details to a company they own but did not create).
-            sql = base + """ AND o.organization_type='manufacturer' AND o.status<>'closed'
-                ORDER BY EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id=o.id
+            # An approved company the user belongs to (e.g. joined after admin approval) wins next.
+            # A placeholder kept only for an application to another company comes last.
+            sql = base + f""" AND o.organization_type='manufacturer' AND o.status<>'closed'
+                ORDER BY {access.applicant_workspace_sql("o")} ASC,
+                         EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id=o.id
+                                 AND mo.status='approved') DESC,
+                         EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id=o.id
                                  AND mo.personal_information_completed) DESC,
                          (o.created_by_user_id=u.id) DESC, m.created_at LIMIT 1"""
         row = (await self.db.execute(text(sql), {"user": actor.clerk_user_id, "org": actor.clerk_org_id})).first()
@@ -267,7 +311,7 @@ class ManufacturerRepository:
         return None
 
     # ------------------------------------------------------------------ account
-    async def create_account(self, actor: Actor, data: dict) -> dict:
+    async def create_account(self, actor: Actor, data: dict, settings=None) -> dict:
         """Manufacturer onboarding form. The user is identified by the Clerk user id
         (via `context`); the existing user / organization rows are updated in place.
 
@@ -279,12 +323,31 @@ class ManufacturerRepository:
         await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
                               {"k": f"xy-account:{ctx['user_id']}"})
         workspace = ctx["organization_id"]
+        # Approval-first: a rejected applicant may apply again only after the waiting period
+        # (app/manufacturer_access.py). Approved users are not affected.
+        current = await access.state(self.db, ctx, settings)
+        if not current["unlocked"]:
+            await access.check_reapply(self.db, ctx["user_id"], settings)
+        previous_app = await access.latest_application(self.db, ctx["user_id"])
         target = await self._account_target(ctx, data)
-        contact = data["contact"].strip()
-        email = contact if "@" in contact else None
-        contact_phone = data.get("phone") or (None if email else contact)
-        country = await self._country_code(data["country"])
+        # Personal email of the registering user (validated by AccountPayload): saved on the user
+        # only, never as the company's contact email.
+        personal_email = (data.get("email") or "").strip()
+        # Company information: an existing company's saved values are kept as they are (a value
+        # that differs is refused); only fields it does not have yet may be supplied.
+        company = await self._company_values(target, data)
+        contact_phone = company["phone"]
+        country = await self._country_code(company["country"])
         first, last = data["firstName"].strip(), data["lastName"].strip()
+        dob = data.get("dob") or None  # optional
+        applicant = {"firstName": first, "lastName": last, "personalEmail": personal_email,
+                     "dob": access.dob_text(dob)}
+        # Corrections requested: only the fields the admin listed may change.
+        await access.check_corrections(self.db, ctx["user_id"], {
+            **applicant, "company": str(target["organization_id"]) if target["selected"] else "",
+            "companyName": target["name"] if target["selected"] else data["companyName"].strip(),
+            "companyType": company["companyType"], "country": company["country"],
+            "companyPhone": contact_phone, "capacity": company["capacity"]})
         # Personal details belong to the user and are saved directly (not company data).
         names_changed = (await self.db.execute(text("""
             UPDATE users SET first_name=:first, last_name=:last, display_name=:display, updated_at=now()
@@ -292,20 +355,24 @@ class ManufacturerRepository:
                                    OR last_name IS DISTINCT FROM CAST(:last AS text))
             RETURNING id
         """), {**ctx, "first": first, "last": last, "display": f"{first} {last}"})).first() is not None
-        # users.email stays the Clerk sign-in email; the form's email is the company contact email.
+        # users.email stays the Clerk sign-in email; the form's email is the user's PERSONAL email.
+        # The company phone belongs to the company and is never written to the user.
         await self.db.execute(text("""
-            UPDATE users SET date_of_birth=CAST(:dob AS date), phone=COALESCE(CAST(:phone AS text),phone),
+            UPDATE users SET date_of_birth=CAST(:dob AS date), personal_email=CAST(:pemail AS citext),
               updated_at=now()
             WHERE id=:user_id
               AND (date_of_birth IS DISTINCT FROM CAST(:dob AS date)
-                   OR (CAST(:phone AS text) IS NOT NULL AND phone IS DISTINCT FROM CAST(:phone AS text)))
-        """), {**ctx, "dob": date.fromisoformat(str(data["dob"])), "phone": contact_phone})
+                   OR personal_email IS DISTINCT FROM CAST(:pemail AS citext))
+        """), {**ctx, "dob": date.fromisoformat(str(dob)) if dob else None, "pemail": personal_email})
         # Company details go to staging until an admin approves them (app/manufacturer_approval.py).
         payload = {
             "companyName": (target["name"] if target["selected"] else data["companyName"].strip()),
-            "companyType": data["companyType"], "country": data["country"], "countryCode": country,
-            "capacity": data.get("capacity") or "", "capacityNumber": capacity_number(data.get("capacity")),
-            "contactEmail": email, "contactPhone": contact_phone,
+            "companyType": company["companyType"], "country": company["country"], "countryCode": country,
+            "capacity": company["capacity"], "capacityNumber": capacity_number(company["capacity"]),
+            # the company's contact email is never taken from the registering user's personal email
+            "contactEmail": None, "contactPhone": contact_phone,
+            # the applicant's own personal information (shown to admins; corrections compare it)
+            "applicant": applicant,
         }
         if target["kind"] == "update_request":
             try:
@@ -347,8 +414,52 @@ class ManufacturerRepository:
         await self.db.commit()
         submitted = {"kind": target["kind"], "companyId": str(target["organization_id"]),
                      "companyName": target["name"] or payload["companyName"],
-                     "requestId": str(request["id"]) if request else None}
+                     "requestId": str(request["id"]) if request else None,
+                     # for the admin notice: an application sent again (corrections / retry)
+                     "resubmitted": bool(previous_app and previous_app["status"] in approval.OPEN),
+                     "applicant": f"{first} {last}".strip()}
         return {"names_changed": names_changed, "submitted": submitted}
+
+    async def _company_values(self, target: dict, data: dict) -> dict:
+        """Company information for the submission.
+
+        * New company: the form's values (validated by AccountPayload; phone normalized to +91).
+        * Existing company (selected by database id): its SAVED values are shown read-only on the
+          form and are never overwritten by the registering user:
+            - claim of an unowned company: saved values are used as they are; only fields the
+              company does not have (null / empty / whitespace - a saved 0 is a value) take the
+              submitted value, and on approval only missing fields are filled;
+            - a company managed by someone else / the owner's own company: the existing
+              admin-reviewed update process - nothing changes unless an X!Y admin approves.
+          The company phone is required: the saved one, or a valid Indian number."""
+        from app.schemas.manufacturer import normalize_indian_phone
+
+        sent = {"companyType": (data.get("companyType") or "").strip(), "country": (data.get("country") or "").strip(),
+                "phone": (data.get("phone") or "").strip(), "capacity": (data.get("capacity") or "").strip()}
+        if not target["selected"]:
+            return sent
+        r = (await self.db.execute(text("""
+            SELECT op.company_category, op.country_name, op.contact_phone, op.production_capacity_label,
+                   op.stated_production_capacity,
+                   (SELECT f.country_name FROM facilities f WHERE f.organization_id = o.id AND f.is_headquarters
+                      AND f.status <> 'suspended' LIMIT 1) AS facility_country
+            FROM organizations o LEFT JOIN organization_profiles op ON op.organization_id = o.id
+            WHERE o.id = :id
+        """), {"id": target["organization_id"]})).mappings().first() or {}
+        saved = saved_company_values(r)
+        if target["kind"] == "claim":
+            out = {k: (saved[k] or sent[k]) for k in sent}
+        else:
+            out = dict(sent)
+        if out["phone"] and saved["phone"] and _same("phone", out["phone"], saved["phone"]):
+            out["phone"] = saved["phone"]  # the saved number, as stored
+        elif out["phone"]:
+            out["phone"] = normalize_indian_phone(out["phone"])  # a supplied / proposed number: Indian
+        elif not out["phone"]:
+            if not saved["phone"]:
+                raise ValueError("Company phone number is required")
+            out["phone"] = saved["phone"]
+        return out
 
     async def _account_target(self, ctx: dict, data: dict) -> dict:
         """Which organization the Manufacturer details form may write to, checked BEFORE any
@@ -489,6 +600,7 @@ class ManufacturerRepository:
         Contact details are returned only to the company's own owner / admin."""
         r = (await self.db.execute(text(f"""
             SELECT o.id, o.display_name, op.company_category, op.country_name, op.production_capacity_label,
+                   op.stated_production_capacity,
                    op.contact_phone, f.city, f.state_province, f.country_name AS facility_country,
                    EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=o.id AND m.status='active'
                            AND m.membership_role IN {OWNER_ROLES_SQL}) AS claimed,
@@ -504,17 +616,21 @@ class ManufacturerRepository:
         if r is None:
             raise LookupError("Company not found")
         access = "owner" if r.mine else ("claimed" if r.claimed else "unclaimed")
+        saved = saved_company_values(dict(r._mapping))
         return {
             "id": str(r.id),
             "companyName": r.display_name,
-            "companyType": r.company_category or "",
-            "country": r.country_name or r.facility_country or "",
+            "companyType": saved["companyType"],
+            "country": saved["country"],
             "city": r.city or "",
             "state": r.state_province or "",
-            "capacity": r.production_capacity_label or "",
-            "phone": (r.contact_phone or "") if r.mine else "",
+            "capacity": saved["capacity"],
+            # the company's own phone (business information), shown read-only on the onboarding form
+            "phone": saved["phone"],
+            # saved fields are read-only on the onboarding form; these may be supplied (missing on record)
+            "missing": [k for k, v in saved.items() if not v],
             "access": access,
-            # owner: may update; unclaimed: may complete missing details (saved values are kept)
+            # owner: may update (admin-reviewed); unclaimed: may complete missing details
             "canUpdate": bool(r.mine) or not r.claimed,
         }
 
@@ -1093,6 +1209,8 @@ class ManufacturerRepository:
                    mo.personal_information_completed,mo.company_information_completed,mo.location_completed,
                    mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage,
                    mo.status approval_status,
+                   -- approval-first access of this user (app/manufacturer_access.py), same query
+                   (SELECT row_to_json(x) FROM (__ACCESS_ROW__) x) AS access_row,
                    (SELECT ov.completeness FROM admin_manufacturer_overview ov
                      WHERE ov.organization_id=o.id) AS completeness,
                    (SELECT row_to_json(x) FROM (
@@ -1155,7 +1273,8 @@ class ManufacturerRepository:
             LEFT JOIN files cover ON cover.id=op.cover_file_id
             LEFT JOIN manufacturer_onboarding mo ON mo.organization_id=o.id
             WHERE o.id=:organization_id
-        """), ctx)).first()
+        """.replace("__ACCESS_ROW__", access.STATE_SQL.format(u="CAST(:user_id AS uuid)", o="o.id"))),
+            ctx)).first()
         data = dict(row._mapping) if row else {}
         lists = {k: _json_value(data.pop(k, None)) for k in self._SNAPSHOT_LISTS}
         for booking in lists["bookings"] or []:

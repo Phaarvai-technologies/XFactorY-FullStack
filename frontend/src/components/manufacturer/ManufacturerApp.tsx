@@ -53,6 +53,8 @@ type Screen = "landing" | "account" | "dashboard";
  */
 type ServerSnapshot = {
   accountExists: boolean;
+  /** The signed-in user's own saved record (from registration): prefills the details form. */
+  user?: { firstName: string; lastName: string; email: string; personalEmail: string };
   state: Omit<ManufacturerState, "machinery" | "bookings"> & {
     machinery: (Omit<MachineryListing, "id"> & { id: string })[];
     bookings: (Omit<BookingRequest, "id"> & { id: string })[];
@@ -70,9 +72,37 @@ type ServerSnapshot = {
     feedback: string | null;
     /** The user's own update requests for companies managed by someone else (status + feedback). */
     updateRequests?: CompanyUpdateRequest[];
+    /** Approval first: what the user may use until X!Y approves their manufacturer application. */
+    access?: ApplicationAccess;
   };
   /** What the account form submission became (set on POST /manufacturer/account). */
   submitted?: { kind: string; companyId: string; companyName: string; requestId: string | null } | null;
+};
+
+/** The user's manufacturer application and what it unlocks (backend app/manufacturer_access.py). */
+export type ApplicationAccess = {
+  unlocked: boolean;
+  status: "not_submitted" | "pending" | "changes_requested" | "approved" | "rejected";
+  role: string | null;
+  /** Approved members may not edit the shared company profile (owner / admin only). */
+  canEditProfile: boolean;
+  /** Shown to the user while locked, e.g. "Your manufacturer application is awaiting admin approval." */
+  message: string | null;
+  application: {
+    id: string;
+    kind: string;
+    status: string;
+    companyId: string;
+    companyName: string | null;
+    /** X!Y's applicant-facing explanation (never internal notes). */
+    feedback: string | null;
+    reviewedAt: string | null;
+    submittedAt: string | null;
+    correctionFields: string[];
+  } | null;
+  /** Rejected: when a new application may be sent. */
+  reapplyAt: string | null;
+  canReapply: boolean;
 };
 
 export type CompanyUpdateRequest = {
@@ -138,13 +168,12 @@ function applyAccountSubmission(
       companyName: submission.companyName,
       companyType: submission.companyType,
       country: submission.country,
-      dob: submission.dob,
+      dob: submission.dob ?? "",
       phone: submission.phone,
       capacity: submission.capacity,
+      // the registering user's personal email; the company's contact details come from the server
+      personalEmail: submission.email,
     },
-    ccontact: isValidEmail(submission.email)
-  ? { email: submission.email, phone: "" }
-  : { email: "", phone: submission.email },
   }));
   setProfileData((current) => ({
     ...current,
@@ -192,7 +221,12 @@ export function ManufacturerApp() {
   /** The admin asked for corrections to the submitted company details: the form may be reopened. */
   /** X!Y asked for corrections to one of the user's update requests for another company. */
   const requestToCorrect = server?.approval?.updateRequests?.find((r) => r.status === "changes_requested") ?? null;
-  const canResubmit = server?.approval?.status === "changes_requested" || requestToCorrect !== null;
+  /** Approval first: remaining sections stay locked until X!Y approves the application. */
+  const access = server?.approval?.access ?? null;
+  const locked = access !== null && !access.unlocked;
+  /** Rejected: a fresh application may be sent once the waiting period has passed. */
+  const canReapply = access?.status === "rejected" && access.canReapply;
+  const canResubmit = server?.approval?.status === "changes_requested" || requestToCorrect !== null || canReapply;
   /** UI components use numeric ids; the database uses UUIDs. */
   const ids = useRef({ toServer: new Map<number, string>(), toLocal: new Map<string, number>(), next: 1 });
   const profileSaveTimer = useRef<number | null>(null);
@@ -201,6 +235,8 @@ export function ManufacturerApp() {
   const savedProfile = useRef<ProfileWizardData | null>(null);
   /** Profile saves run one after another, in order. */
   const profileSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  /** The user's own registration details (names, emails) for prefilling the details form. */
+  const [registered, setRegistered] = useState<ServerSnapshot["user"] | null>(null);
   /** Progress numbers from the backend (dashboard checklist, percentage, resume step). */
   const [profileProgress, setProfileProgress] = useState<ProfileProgress | null>(null);
   /** Machinery wizard: saved-but-unfinished draft, and the open wizard's session. */
@@ -297,6 +333,7 @@ export function ManufacturerApp() {
       savedProfile.current = snapshot.profileData;
       setProfileProgress(snapshot.profileProgress);
       setMachineryDraft(snapshot.machineryDraft);
+      if (snapshot.user) setRegistered(snapshot.user);
     },
     [toLocalBookings, toLocalMachinery],
   );
@@ -424,13 +461,29 @@ export function ManufacturerApp() {
     markManufacturerProfileComplete();
     router.push(MANUFACTURER_DASHBOARD_PATH);
     showToast(
-      snapshot.submitted?.kind === "update_request"
-        ? `Your update request for ${snapshot.submitted.companyName} was submitted for admin review.`
-        : "Details sent to X!Y for approval — you can keep building your profile.",
+      snapshot.approval?.access && !snapshot.approval.access.unlocked
+        ? "Your manufacturer application is awaiting admin approval."
+        : snapshot.submitted?.kind === "update_request"
+          ? `Your update request for ${snapshot.submitted.companyName} was submitted for admin review.`
+          : "Details sent to X!Y for approval.",
     );
   }
 
+  /** Approval first: the remaining sections open only after X!Y approves (the backend refuses too). */
+  function lockedMessage(profile: boolean): string | null {
+    if (locked) return access?.message || "Your manufacturer application is awaiting admin approval.";
+    if (profile && access && !access.canEditProfile) {
+      return "Only the company's primary user can edit the shared company profile.";
+    }
+    return null;
+  }
+
   function handleOpenProfileWizard(jumpToNextIncomplete: boolean) {
+    const blocked = lockedMessage(true);
+    if (blocked) {
+      showToast(blocked);
+      return;
+    }
     // Continue from the last incomplete step saved in the backend.
     setProfileWizardStep(jumpToNextIncomplete ? (profileProgress?.resumeStep ?? 1) : 1);
     // The wizard starts from exactly these values, so changes are measured from them.
@@ -521,6 +574,11 @@ export function ManufacturerApp() {
   }
 
   function openMachineryWizard() {
+    const blocked = lockedMessage(false);
+    if (blocked) {
+      showToast(blocked);
+      return;
+    }
     // Continue an unfinished draft from the backend, or start a new one.
     const resume = machineryDraft;
     machinerySession.current = {
@@ -785,21 +843,28 @@ export function ManufacturerApp() {
     onAccountCreated={handleAccountCreated}
     onSearchCompanies={handleSearchCompanies}
     onLoadCompany={handleLoadCompany}
-    initial={server?.approval?.status === "changes_requested" ? {
+    correctionFields={access?.status === "changes_requested" ? access.application?.correctionFields : undefined}
+    initial={server?.approval?.status === "changes_requested" || canReapply ? {
       ...state.account,
-       email: state.contact.email || "",
+      // the user's own personal email; the phone is the company's
+      email: state.account.personalEmail || "",
       phone: state.contact.phone || "",
       companyId: server?.approval?.kind === "new_company" ? null : server?.approval?.selectedCompanyId ?? null,
     } : requestToCorrect ? {
       // Correcting an update request: the user's own submitted values for that company.
       ...state.account,
-      email: String(requestToCorrect.proposed.contactEmail ?? ""),
+      email: state.account.personalEmail || "",
       companyName: requestToCorrect.companyName,
       companyType: String(requestToCorrect.proposed.companyType ?? ""),
       country: String(requestToCorrect.proposed.country ?? ""),
       capacity: String(requestToCorrect.proposed.capacity ?? ""),
       phone: String(requestToCorrect.proposed.contactPhone ?? ""),
       companyId: requestToCorrect.companyId,
+    } : registered ? {
+      // New application: the user's own registration details (never another member's).
+      firstName: registered.firstName,
+      lastName: registered.lastName,
+      email: registered.personalEmail || registered.email,
     } : undefined}
   />
 ) : null}
@@ -812,6 +877,21 @@ export function ManufacturerApp() {
             flags={flags}
             onOpenProfileWizard={handleOpenProfileWizard}
             onFixCompanyDetails={canResubmit ? () => router.push(MANUFACTURER_ACCOUNT_PATH) : undefined}
+            lock={
+              locked
+                ? {
+                    message: access?.message || "Your manufacturer application is awaiting admin approval.",
+                    detail: access?.application?.feedback ? `X!Y: ${access.application.feedback}` : null,
+                    actionLabel:
+                      access?.status === "changes_requested"
+                        ? "Correct details"
+                        : canReapply
+                          ? "Apply again"
+                          : null,
+                  }
+                : null
+            }
+            profileLockedMessage={access && access.unlocked && !access.canEditProfile ? lockedMessage(true) : null}
             updateRequests={server?.approval?.updateRequests ?? []}
             onOpenMachineryWizard={openMachineryWizard}
             onEditMachinery={handleEditMachinery}
@@ -889,6 +969,3 @@ function ManufacturerLoading() {
   );
 }
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}

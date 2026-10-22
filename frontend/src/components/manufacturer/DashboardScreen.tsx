@@ -27,6 +27,13 @@ type DashboardScreenProps = {
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
   /** Set when X!Y asked for corrections to the submitted company details. */
   onFixCompanyDetails?: () => void;
+    lock?: {
+    message: string;
+    detail: string | null;
+    actionLabel: string | null;
+  } | null;
+
+  profileLockedMessage?: string | null;
   /** The user's update requests for companies managed by someone else (status and feedback). */
   updateRequests?: CompanyUpdateRequest[];
   onOpenMachineryWizard: () => void;
@@ -74,6 +81,8 @@ export function DashboardScreen({
   flags,
   onOpenProfileWizard,
   onFixCompanyDetails,
+  lock,
+  profileLockedMessage,
   updateRequests = [],
   onOpenMachineryWizard,
   onEditMachinery,
@@ -136,6 +145,30 @@ export function DashboardScreen({
       </div>
 
       <div className="dash-main">
+        {lock ? (
+  <div className="card" role="status" style={{ marginBottom: 20 }}>
+    <h3>Manufacturer Application Status</h3>
+    <p>{lock.message}</p>
+
+    {lock.detail ? <p>{lock.detail}</p> : null}
+
+    {lock.actionLabel && onFixCompanyDetails ? (
+      <button
+        className="btn-primary"
+        type="button"
+        onClick={onFixCompanyDetails}
+      >
+        {lock.actionLabel}
+      </button>
+    ) : null}
+  </div>
+) : null}
+
+{profileLockedMessage ? (
+  <div className="card" role="status" style={{ marginBottom: 20 }}>
+    <p>{profileLockedMessage}</p>
+  </div>
+) : null}
         {panel === "home" ? (
           <div>
             <button
@@ -716,21 +749,20 @@ function CapacityForm({
         <label htmlFor="cap-machine">Machine Name</label>
         {/* The signed-in manufacturer's own machinery (loaded from the database with the
             dashboard). A plan saved earlier for a machine no longer listed stays selectable. */}
-        <select
-          id="cap-machine"
-          className={machine ? "" : "placeholder-shown"}
-          value={machine}
-          onChange={(e) => setMachine(e.target.value)}
-        >
-          <option value="" disabled>
-            {machineOptions.length ? "Select a machine" : "Add machinery first"}
-          </option>
-          {machineOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <input
+  id="cap-machine"
+  type="text"
+  className={machine ? "" : "placeholder-shown"}
+  placeholder={
+    machineOptions.length
+      ? "Type or enter machine name"
+      : "Enter machine name"
+  }
+  value={machine}
+  
+  onChange={(e) => setMachine(e.target.value)}
+/>
+
       </div>
         <div>
           <label htmlFor="cap-count">No. of Machines</label>

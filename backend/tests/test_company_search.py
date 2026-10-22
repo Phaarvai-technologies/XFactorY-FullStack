@@ -70,7 +70,7 @@ async def test_selection_cannot_create_duplicate_or_grant_ownership(client):
     orgs=(await client.sql('SELECT count(*) FROM organizations'))[0][0]
     body={'firstName':'Jordan','lastName':'Lee','contact':'jordan@example.com','dob':'1992-06-20',
       'companyName':'Selected Company','companyType':'Automotive & Machinery','country':'India',
-      'selectedCompanyId':selected}
+      'phone':'9876543210','selectedCompanyId':selected}
     r=await client.post('/manufacturer/account',json=body)
     assert r.status_code==409,r.text
     assert (await client.sql('SELECT count(*) FROM organizations'))[0][0]==orgs

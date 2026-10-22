@@ -51,21 +51,51 @@ function serve(byPath: Record<string, () => [unknown, number]>) {
 }
 
 describe("Registered Users section", () => {
+  it("lists an applicant awaiting approval under the company's associated users (not counted)", async () => {
+    const applicant = user("jhansi", { name: "Jhansi Rani", personalEmail: "jhansi@gmail.com", role: "applicant",
+                                       membershipStatus: "pending", linkedAt: null, applicationStatus: "pending" });
+    const people = { ...PEOPLE_A, primaryUser: user("owner-1", { role: "owner" }),
+                     otherUsers: [user("mem-2"), applicant], counts: { linkedUsers: 2, openRequests: 1 } };
+    serve({ "/admin/manufacturers/o1/people": () => [people, 200] });
+    render(<AdminHostContext.Provider value={host()}><RegisteredUsers orgId="o1" /></AdminHostContext.Provider>);
+    const others = await screen.findByRole("table", { name: "Other Users" });
+    const row = within(others).getByText("Jhansi Rani").closest("tr")!;
+    expect(within(row).getByText("jhansi@gmail.com")).toBeInTheDocument();
+    expect(within(row).getByText("Pending approval")).toBeInTheDocument();
+    expect(within(row).getByText("Application awaiting review")).toBeInTheDocument();
+    expect(row).not.toHaveClass("adm-row-archived");
+    expect(screen.getByTitle("Distinct users with an active membership")).toHaveTextContent("2");
+  });
+
+  it("shows personal emails (not sign-in emails) and no primary user when the company has no owner", async () => {
+    const people = { ...PEOPLE_B, registeredUsers: [{ ...PEOPLE_B.registeredUsers[0], personalEmail: "b.only@gmail.com" }] };
+    serve({ "/admin/manufacturers/o1/people": () => [people, 200] });
+    render(<AdminHostContext.Provider value={host()}><RegisteredUsers orgId="o1" /></AdminHostContext.Provider>);
+    expect(await screen.findByText("No primary user (owner) yet.")).toBeInTheDocument();
+    const others = screen.getByRole("table", { name: "Other Users" });
+    expect(within(others).getByText("b.only@gmail.com")).toBeInTheDocument();
+    expect(within(others).queryByText("b-only@example.com")).not.toBeInTheDocument();
+  });
+
   it("lists each user once with name, email, user id, role, membership and linked date; count = active", async () => {
     const urls = serve({ "/admin/manufacturers/o1/people": () => [PEOPLE_A, 200] });
     const h = host();
     render(<AdminHostContext.Provider value={h}><RegisteredUsers orgId="o1" /></AdminHostContext.Provider>);
     const section = (await screen.findByRole("heading", { name: /Registered Users/ })).closest("section")!;
     expect(urls[0]).toContain("/admin/manufacturers/o1/people");
-    const rows = within(section).getAllByRole("row").slice(1);
-    expect(rows).toHaveLength(3);
+    // the primary user (owner) and the Other Users are listed separately, each once
+    const primaryRows = within(within(section).getByRole("table", { name: "Primary user" })).getAllByRole("row").slice(1);
+    const otherRows = within(within(section).getByRole("table", { name: "Other Users" })).getAllByRole("row").slice(1);
+    expect(primaryRows).toHaveLength(1);
+    expect(otherRows).toHaveLength(2);
+    const rows = [...primaryRows, ...otherRows];
     const owner = within(rows[0]);
     expect(owner.getByText("User owner-1")).toBeInTheDocument();
     expect(owner.getByText("owner-1@example.com")).toBeInTheDocument();
     expect(owner.getByText("owner-1")).toBeInTheDocument();          // application user id
     expect(owner.getByText("owner")).toBeInTheDocument();
     expect(owner.getByText("Active")).toBeInTheDocument();
-    expect(owner.getByText("1 Oct 2026")).toBeInTheDocument();
+    expect(owner.getByText("30 Sept 2026")).toBeInTheDocument();     // registration date
     expect(within(rows[2]).getByText("Removed")).toBeInTheDocument();
     expect(rows[2]).toHaveClass("adm-row-archived");
     expect(within(section).getByTitle("Distinct users with an active membership")).toHaveTextContent("2");

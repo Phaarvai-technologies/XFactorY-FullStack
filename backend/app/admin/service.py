@@ -1,15 +1,17 @@
 import json
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import ValidationError
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import company_update_requests as update_requests
+from app import manufacturer_access as access
 from app import manufacturer_approval as approval
 from app import notifications
 from app.admin import accounts
@@ -69,7 +71,8 @@ PHONE_RE = re.compile(r"^[0-9+\-\s()]{7,15}$")
 REVIEW_LABELS = {"NOT_STARTED": "Not started", "IN_PROGRESS": "In progress", "SUBMITTED": "Submitted",
                  "NEEDS_CORRECTION": "Needs correction", "REVIEWED": "Approved", "REJECTED": "Rejected"}
 REQUEST_KIND_LABELS = {"new_company": "New company account", "claim": "Claim of existing company",
-                       "update": "Owner's change to details", "update_request": "Update request from another user"}
+                       "update": "Owner's change to details",
+                       "update_request": "Registration under this company (another user)"}
 
 
 def _json_obj(value):
@@ -192,7 +195,26 @@ class AdminService:
         return {"rows": rows, "admins": await self.admins()}
 
     # ------------------------------------------------------------------ XY-ADMIN-05
+    async def _applied_elsewhere(self, org_id: str) -> str | None:
+        """For a user's placeholder kept only for an application to another (existing) company:
+        that company's name. Such a placeholder is not a company and is never reviewed itself."""
+        return await self.repo.db.scalar(text(f"""
+            SELECT (SELECT t.display_name FROM manufacturer_submissions s JOIN organizations t
+                    ON t.id = s.target_organization_id
+                    WHERE s.organization_id = o.id AND s.kind IN ('claim', 'update_request')
+                    ORDER BY s.updated_at DESC LIMIT 1)
+            FROM organizations o
+            WHERE o.id = CAST(:o AS uuid) AND {access.applicant_workspace_sql("o")}
+        """), {"o": org_id})
+
+    async def _company_only(self, org_id: str) -> None:
+        target = await self._applied_elsewhere(org_id)
+        if target:
+            raise HTTPException(404, f"This is not a company. The user applied to join {target}: "
+                                     f"review the application on {target}'s page (Associated users).")
+
     async def detail(self, org_id: str) -> dict:
+        await self._company_only(org_id)
         ctx = await self._ctx(org_id)
         raw, view = await self._view(ctx)
         row = await self.repo.overview_row(org_id)
@@ -226,6 +248,8 @@ class AdminService:
                          if x["status"] in approval.OPEN and x["kind"] != "update_request"), None)
         pending = None
         if open_sub:
+            applicant = open_sub["payload"].get("applicant") or {}
+            previous, changed = await self._previous_version(open_sub)
             submitter = next((u for u in await self.repo.linked_users(str(open_sub["organization_id"]))
                               if str(u["id"]) == str(open_sub["submitted_by_user_id"])), None)
             # main record values (the list shows a pending new company under its submitted name)
@@ -239,10 +263,21 @@ class AdminService:
                                  "email": submitter.get("email") or ""} if submitter else None),
                 "feedback": open_sub["review_feedback"],
                 "fields": [{"key": k, "label": label, "submitted": open_sub["payload"].get(k) or "",
-                            "current": current.get(k) or ""}
+                            "current": current.get(k) or "",
+                            # changed by the applicant's latest resubmission (corrections)
+                            "changed": k in changed, "previous": previous.get(k) or ""}
                            for k, label in (("companyName", "Company name"), ("companyType", "Category"),
                                             ("country", "Country"), ("capacity", "Production capacity"),
                                             ("contactEmail", "Contact email"), ("contactPhone", "Contact phone"))],
+                # the applicant's personal information (admins only; never company contact details)
+                "applicant": [{"key": k, "label": label, "submitted": str(applicant.get(k) or ""),
+                               "changed": f"applicant.{k}" in changed,
+                               "previous": str((previous.get("applicant") or {}).get(k) or "")}
+                              for k, label in (("firstName", "First name"), ("lastName", "Last name"),
+                                               ("personalEmail", "Personal email"), ("dob", "Date of birth"))]
+                             if applicant else [],
+                "correctionFields": list(open_sub.get("correction_fields") or []),
+                "correctable": access.CORRECTABLE,
             }
         if row.get("last_updated"):
             timeline.append({"at": row["last_updated"], "event": "Last profile update"})
@@ -271,6 +306,35 @@ class AdminService:
             "editable": {"profile": PROFILE_FIELDS, "account": ACCOUNT_FIELDS, "machinery": MACHINE_FIELDS,
                          "required": sorted(REQUIRED_KEYS)},
         }
+
+    async def _is_empty_placeholder(self, org_id: str) -> bool:
+        """A user's own empty organization: created by the app at sign-in, details never sent."""
+        return bool(await self.repo.db.scalar(text("""
+            SELECT o.created_by_user_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM manufacturer_submissions s
+                                   WHERE s.target_organization_id = o.id OR s.organization_id = o.id)
+                   AND NOT COALESCE((SELECT mo.personal_information_completed FROM manufacturer_onboarding mo
+                                     WHERE mo.organization_id = o.id), false)
+            FROM organizations o WHERE o.id = CAST(:o AS uuid)
+        """), {"o": org_id}))
+
+    async def _previous_version(self, sub: dict) -> tuple[dict, set[str]]:
+        """The applicant's resubmission: the version before it and the fields that changed."""
+        rows = await self.repo.rows("""
+            SELECT e.details FROM manufacturer_submission_events e
+            WHERE e.submission_id = CAST(:s AS uuid) AND e.event IN ('submitted', 'resubmitted')
+            ORDER BY e.created_at DESC LIMIT 2
+        """, {"s": str(sub["id"])})
+        if len(rows) < 2 or sub["status"] != "pending":
+            return {}, set()
+        older = (_json_obj(rows[1]["details"]) or {}).get("proposed") or {}
+        newer = sub["payload"]
+        changed = {k for k in ("companyName", "companyType", "country", "capacity", "contactEmail", "contactPhone")
+                   if str(older.get(k) or "") != str(newer.get(k) or "")}
+        old_a, new_a = older.get("applicant") or {}, newer.get("applicant") or {}
+        changed |= {f"applicant.{k}" for k in ("firstName", "lastName", "personalEmail", "dob")
+                    if old_a and str(old_a.get(k) or "") != str(new_a.get(k) or "")}
+        return older, changed
 
     HISTORY_LABELS = {"imported": "Imported", "submitted": "Submitted for review", "resubmitted": "Resubmitted",
                       "edited": "Proposed values edited by admin", "note": "Admin note on request",
@@ -319,10 +383,16 @@ class AdminService:
         users = []
         for u in members:
             name = " ".join(x for x in (u["first_name"], u["last_name"]) if x) or u.get("display_name")
-            users.append({"id": str(u["id"]), "name": name, "email": u["email"], "role": u["membership_role"],
+            users.append({"id": str(u["id"]), "name": name, "email": u["email"],
+                          # the person's own email from onboarding (falls back to the sign-in email);
+                          # never the company's contact details
+                          "personalEmail": u.get("personal_email") or u["email"], "role": u["membership_role"],
                           "membershipStatus": u["membership_status"], "accountStatus": u["account_status"],
                           "linkedAt": u.get("accepted_at") or u["linked_at"],
-                          "registeredAt": u.get("registration_completed_at"), "roles": list(u["roles"] or [])})
+                          "registeredAt": u.get("registration_completed_at") or u.get("user_created_at"),
+                          # latest manufacturer application for this company (None = none sent)
+                          "applicationStatus": u.get("application_status"),
+                          "roles": list(u["roles"] or [])})
         requests = []
         for r in await self.repo.company_requests(org_id):
             name = " ".join(x for x in (r["first_name"], r["last_name"]) if x) or r.get("display_name")
@@ -331,12 +401,41 @@ class AdminService:
                              "status": r["status"], "statusLabel": self.REQUEST_STATUS.get(r["status"], r["status"]),
                              "source": r["source"], "submittedAt": r["submitted_at"] or r["created_at"],
                              "reviewedAt": r["reviewed_at"], "reviewer": r["reviewer"], "feedback": r["review_feedback"],
-                             "requester": ({"id": str(r["user_id"]), "name": name, "email": r["email"]}
+                             "requester": ({"id": str(r["user_id"]), "name": name, "email": r["email"],
+                                            "personalEmail": r.get("personal_email") or r["email"],
+                                            "accountStatus": r.get("account_status") or "active"}
                                            if r.get("user_id") else None),
                              "requesterIsMember": bool(r["is_member"])})
         active_ids = {u["id"] for u in users if u["membershipStatus"] == "active"}
+        # Primary user: the company's active owner (by membership - never by name or email domain).
+        # Another user registering under the company never replaces it.
+        primary = next((u for u in users if u["role"] == "owner" and u["membershipStatus"] == "active"), None)
+        seen: set[str] = {primary["id"]} if primary else set()
+        other = []
+        for u in users:  # each associated user once, with their membership status
+            if u["id"] not in seen:
+                seen.add(u["id"])
+                other.append(u)
+        # Pending onboarding / change requests from people who are not confirmed users of the company.
+        pending = [r for r in requests if r["status"] in ("pending", "changes_requested") and not r["requesterIsMember"]]
+        # Associated users also list applicants waiting for review (not members yet, not counted),
+        # each once, with their own application status.
+        for r in pending:
+            person = r.get("requester")
+            if person and person["id"] not in seen:
+                seen.add(person["id"])
+                other.append({"id": person["id"], "name": person["name"], "email": person["email"],
+                              "personalEmail": person.get("personalEmail") or person["email"],
+                              "role": "applicant", "membershipStatus": "pending",
+                              "accountStatus": person.get("accountStatus") or "active",
+                              "linkedAt": None, "registeredAt": r.get("submittedAt"),
+                              "applicationStatus": r["status"], "roles": []})
+        # A new company's first registering user is its PROPOSED primary owner until X!Y approves it.
+        proposed = bool(primary) and (await approval.approval_status(self.db, UUID(org_id))) != "approved"
         return {"registeredUsers": users, "requests": requests,
-                "counts": {"linkedUsers": len(active_ids),
+                "primaryUser": primary, "primaryProposed": proposed, "otherUsers": other, "pendingRequests": pending,
+                "counts": {"linkedUsers": len(active_ids), "confirmedUsers": len(active_ids),
+                           "pendingRequests": len(pending),
                            "openRequests": sum(1 for r in requests if r["status"] in ("pending", "changes_requested"))}}
 
     # ------------------------------------------------------------------ XY-ADMIN-06
@@ -468,6 +567,7 @@ class AdminService:
 
     # ------------------------------------------------------------------ XY-ADMIN-07 / 08
     async def admin_fields(self, admin: AdminContext, org_id: str, body: dict) -> dict:
+        await self._company_only(org_id)
         meta = await self.repo.org_meta(org_id)
         if not meta:
             raise HTTPException(404, "Manufacturer not found")
@@ -504,6 +604,12 @@ class AdminService:
                 if new in ("NEEDS_CORRECTION", "REJECTED") and not (reason or "").strip():
                     raise HTTPException(422, "Add a short note explaining what needs correcting."
                                         if new == "NEEDS_CORRECTION" else "Add a short note explaining the rejection.")
+                try:
+                    fix = access.correction_fields(body.get("correction_fields")) if new == "NEEDS_CORRECTION" else []
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+                if new == "NEEDS_CORRECTION" and not fix and await approval.open_submission_for_target(self.db, org_id):
+                    raise HTTPException(422, "Choose the fields the applicant needs to correct.")
                 # A submission awaiting review: the decision applies to it (approval merges it
                 # into the main record). Otherwise the company's own status changes as before.
                 decision = {"REVIEWED": "approved", "NEEDS_CORRECTION": "changes_requested",
@@ -511,34 +617,45 @@ class AdminService:
                 sub = None
                 if decision:
                     try:
-                        sub = await approval.decide(self.db, org_id, decision, admin.user_id, reason)
+                        sub = await approval.decide(self.db, org_id, decision, admin.user_id, reason, fix)
                     except approval.DecisionError as exc:
                         await self.db.rollback()
                         raise HTTPException(409, str(exc)) from exc
                 if sub is None:
+                    if new == "REVIEWED" and await self._is_empty_placeholder(org_id):
+                        # The organization the app creates for every signed-in user: approving it
+                        # before the user sent an application would unlock the manufacturer
+                        # sections without any review.
+                        raise HTTPException(422, "This user has not sent their manufacturer application yet. "
+                                                 "There is nothing to approve.")
                     await self.repo.set_review_status(org_id, new, admin.user_id, reason)
                 # Messages go to the submitter's own organization (for a claim that is not this company).
                 notify_org = str(sub["organization_id"]) if sub else org_id
                 await self.repo.add_history(org_id, "Review status", REVIEW_LABELS[old], REVIEW_LABELS[new],
                                             admin.user_id, reason)
+                fix_text = ("\nFields to correct: " + ", ".join(access.CORRECTABLE[k] for k in fix)) if fix else ""
                 if new == "NEEDS_CORRECTION" and (reason or "").strip():
                     # The correction note is always shown to the manufacturer.
-                    await self.repo.add_note(notify_org, admin.user_id, f"Correction requested: {reason.strip()}",
-                                             shared=True)
+                    await self.repo.add_note(notify_org, admin.user_id,
+                                             f"Correction requested: {reason.strip()}{fix_text}", shared=True)
                     await notifications.notify_company(
-                        self.db, notify_org, "needs_correction", "Your profile needs a few corrections",
-                        reason.strip(), admin.user_id)
+                        self.db, notify_org, "needs_correction", "Your manufacturer application needs corrections",
+                        reason.strip() + fix_text, admin.user_id)
                 if new == "REJECTED":
+                    again = access.fmt_time(datetime.now(timezone.utc) + timedelta(
+                        hours=self.settings.manufacturer_reapply_after_hours))
                     await notifications.notify_company(
-                        self.db, notify_org, "admin_note", "Your company details were not approved",
-                        reason.strip(), admin.user_id)
+                        self.db, notify_org, "admin_note", "Your manufacturer application was not approved",
+                        f"{reason.strip()}\nYou can apply again from {again}.", admin.user_id)
+                    review_email = ("REJECTED", reason.strip(), notify_org)
                 if new == "REVIEWED" and sub:
                     await notifications.notify_company(
-                        self.db, org_id, "admin_note", "Your company details were approved",
-                        (reason or "").strip() or "You can now complete your profile to become visible to Visionaries.",
+                        self.db, org_id, "admin_note", "Your manufacturer application has been approved",
+                        (reason or "").strip() or "Your company access is now open. Complete your profile to become "
+                                                   "visible to Visionaries.",
                         admin.user_id)
                 if new in ("NEEDS_CORRECTION", "REVIEWED"):
-                    review_email = (new, (reason or "").strip(), org_id if new == "REVIEWED" else notify_org)
+                    review_email = (new, (reason or "").strip() + fix_text, org_id if new == "REVIEWED" else notify_org)
                 changed = True
         if not changed:
             raise HTTPException(422, "Nothing to change.")
@@ -567,7 +684,7 @@ class AdminService:
     async def decide_update_request(self, admin: AdminContext, org_id: str, request_id: str, body: dict) -> dict:
         result = await self._update_request_call(update_requests.decide(
             self.db, org_id, request_id, admin.user_id, body["decision"], body.get("fields"),
-            body.get("feedback"), body.get("fingerprint")))
+            body.get("feedback"), body.get("fingerprint"), body.get("correction_fields")))
         sub, status = result["submission"], result["status"]
         requester = await self.repo.row(
             "SELECT first_name, last_name, email::text AS email FROM users WHERE id = :u",
@@ -581,20 +698,37 @@ class AdminService:
         company = (await update_requests.current_values(self.db, org_id))["companyName"]
         # The requester hears about it in their own dashboard (their workspace), never the company's.
         workspace = str(sub["organization_id"])
+        rejected_email = None
         if status == "approved":
+            # Approved: the requester is now a member of the company; the message is shown there,
+            # to them only (the company's other members are not notified).
             fields = ", ".join(update_requests.LABELS[k] for k in result["applied"])
-            await notifications.notify_company(
-                self.db, workspace, "admin_note", f"Your update request for {company} was approved",
-                f"Updated: {fields}." + (f"\n{result['feedback']}" if result["feedback"] else ""), admin.user_id)
+            await notifications.notify_user(
+                self.db, sub["submitted_by_user_id"], org_id, "admin_note",
+                f"Your manufacturer application for {company} has been approved",
+                (f"Updated: {fields}. " if fields else "") + "You are now a member of this company."
+                + (f"\n{result['feedback']}" if result["feedback"] else ""), admin.user_id)
         elif status == "changes_requested":
+            fix = sub.get("correction_fields") or body.get("correction_fields") or []
+            fix_text = ("\nFields to correct: " + ", ".join(access.CORRECTABLE.get(k, k) for k in fix)) if fix else ""
             await notifications.notify_company(
-                self.db, workspace, "needs_correction", f"Your update request for {company} needs corrections",
-                result["feedback"] or "", admin.user_id)
+                self.db, workspace, "needs_correction", f"Your manufacturer application for {company} needs corrections",
+                (result["feedback"] or "") + fix_text, admin.user_id)
         else:
+            again = access.fmt_time(datetime.now(timezone.utc) + timedelta(
+                hours=self.settings.manufacturer_reapply_after_hours))
             await notifications.notify_company(
-                self.db, workspace, "admin_note", f"Your update request for {company} was declined",
-                result["feedback"] or "", admin.user_id)
+                self.db, workspace, "admin_note", f"Your manufacturer application for {company} was not approved",
+                f"{result['feedback'] or ''}\nYou can apply again from {again}.", admin.user_id)
+            rejected_email = (requester, company, result["feedback"] or "", again)
         await self.db.commit()
+        if rejected_email and requester.get("email"):
+            name, company_name, note, again = rejected_email
+            subject, text_body, html = tpl.application_rejected(
+                name.get("first_name") or "", company_name, note, again,
+                f"{self.settings.app_base_url.rstrip('/')}/manufacturer/dashboard")
+            await self.mailer.send(requester["email"], "application_rejected", subject, text_body, html,
+                                   user_id=sub["submitted_by_user_id"], organization_id=workspace)
         return await self.detail(org_id)
 
     async def _review_email(self, org_id: str, status: str, note: str) -> dict | None:
@@ -609,6 +743,11 @@ class AdminService:
         if status == "NEEDS_CORRECTION":
             subject, text_body, html = tpl.needs_correction(name, company, note, url)
             template = "review_needs_correction"
+        elif status == "REJECTED":
+            again = access.fmt_time(datetime.now(timezone.utc) + timedelta(
+                hours=self.settings.manufacturer_reapply_after_hours))
+            subject, text_body, html = tpl.application_rejected(name, company, note, again, url)
+            template = "application_rejected"
         else:
             subject, text_body, html = tpl.reviewed(name, company, url)
             template = "review_reviewed"
@@ -653,6 +792,8 @@ class AdminService:
                 "manufacturerId": str(u["organization_id"]) if u.get("organization_id") else None,
                 "companyName": u.get("company_name"), "completeness": u.get("completeness"),
                 "recordType": u.get("record_type"),
+                # the person's own Real / Demo / Test mark (e.g. a demo Visionary), separate from the company's
+                "userRecordType": u.get("user_record_type") or "REAL",
                 # every linked manufacturer company with its own onboarding source (None = unknown);
                 # an empty list = not applicable. Approval status is a separate field.
                 # how the person registered (channel) and with which method - not a company source
@@ -661,7 +802,8 @@ class AdminService:
                 "companies": [{"id": str(c["id"]), "name": c["name"], "onboardingSource": c["source"],
                                "sourceNote": c.get("sourceNote") if not c["source"] else None,
                                "stagedSource": c.get("stagedSource") if not c["source"] else None,
-                               "reviewStatus": c["reviewStatus"], "membershipRole": c["membershipRole"],
+                               "reviewStatus": c["reviewStatus"], "recordType": c.get("recordType"),
+                               "membershipRole": c["membershipRole"],
                                "isArchived": c["isArchived"]}
                               for c in (json.loads(u["companies"]) if isinstance(u.get("companies"), str)
                                         else (u.get("companies") or []))],
@@ -673,7 +815,7 @@ class AdminService:
     async def users(self, filters: dict, page: int, page_size: int) -> dict:
         data = await self._run(self.repo.users(filters, page, page_size))
         return {"total": data["total"], "page": page, "pageSize": page_size,
-                "rows": [self._user_row(u) for u in data["rows"]]}
+                "dataCounts": data["data_counts"], "rows": [self._user_row(u) for u in data["rows"]]}
 
     # ------------------------------------------------------------------ Visionaries (read-only)
     @staticmethod
@@ -685,12 +827,22 @@ class AdminService:
                 "profileSaved": v.get("full_name") is not None,
                 "roleTitle": v.get("role_title"), "organizationName": v.get("organization_name"),
                 "location": v.get("location"), "projectCount": int(v.get("project_count") or 0),
-                "requestCount": int(v.get("request_count") or 0), "lastSavedAt": v.get("last_saved_at")}
+                "requestCount": int(v.get("request_count") or 0), "lastSavedAt": v.get("last_saved_at"),
+                "recordType": v.get("record_type") or "REAL"}
 
     async def visionaries(self, filters: dict, page: int, page_size: int) -> dict:
         data = await self._run(self.repo.visionaries(filters, page, page_size))
-        return {"total": data["total"], "page": page, "pageSize": page_size,
+        return {"total": data["total"], "page": page, "pageSize": page_size, "dataCounts": data["data_counts"],
                 "rows": [self._visionary_row(v) for v in data["rows"]]}
+
+    async def set_visionary_record_type(self, admin: AdminContext, user_id: str, record_type: str,
+                                        reason: str | None) -> dict:
+        """Mark a Visionary as real / demo / test data. Recorded in the person's activity log."""
+        if not await self._run(self.repo.visionary(user_id)):
+            raise HTTPException(404, "Visionary not found")
+        await self.repo.set_user_record_type(user_id, record_type, admin.user_id, reason)
+        await self.db.commit()
+        return await self.visionary_detail(user_id)
 
     async def visionary_detail(self, user_id: str) -> dict:
         v = await self._run(self.repo.visionary(user_id))

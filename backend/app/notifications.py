@@ -46,6 +46,20 @@ async def notify_company(db: AsyncSession, org_id: str | UUID, kind: str, title:
     return result.rowcount or 0
 
 
+async def notify_user(db: AsyncSession, user_id: UUID | str, org_id: str | UUID, kind: str, title: str,
+                      body: str, by_user_id: UUID | None) -> None:
+    """One notification for one user, shown in their dashboard for `org_id` (e.g. the company an
+    approved applicant just joined; the company's other members are not notified). Caller commits."""
+    assert kind in KINDS
+    await db.execute(text("""
+        INSERT INTO notifications (user_id, notification_type, channel, related_type, related_id, status,
+                                   organization_id, title, body, created_by_user_id)
+        VALUES (CAST(:u AS uuid), :k, 'in_app', 'organization', CAST(:o AS uuid), 'delivered', CAST(:o AS uuid),
+                :t, :b, :by)
+    """), {"u": str(user_id), "o": str(org_id), "k": kind, "t": title[:200], "b": (body or "")[:MAX_BODY],
+           "by": by_user_id})
+
+
 async def for_user(db: AsyncSession, user_id: UUID, org_id: UUID, limit: int = 50) -> dict:
     # One database round trip: the messages, the review state and the shared notes together.
     row = (await db.execute(text("""

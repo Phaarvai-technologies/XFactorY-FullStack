@@ -60,8 +60,10 @@ describe("admin: update request review", () => {
     const section = await pendingSection();
     expect(within(section).getByText(/Existing company update · from Ravi Kumar/)).toBeInTheDocument();
     expect(within(section).getByText(/source: web_dashboard/)).toBeInTheDocument();
-    expect(within(section).getByText(/does not give them access/)).toBeInTheDocument();
-    const cap = within(section).getByText("Production capacity").closest("tr")!;
+    // approval links the applicant as a member, never as the owner
+    expect(within(section).getByText(/makes them a member of the company \(never its owner\)/)).toBeInTheDocument();
+    // (the label also appears in the "Fields to correct" choices; the table row is the one in a <tr>)
+    const cap = within(section).getAllByText("Production capacity").map((el) => el.closest("tr")).find(Boolean)!;
     expect(cap.querySelectorAll("td")[2].textContent).toContain(PENDING.fields.find((f) => f.key === "capacity")!.current);
     expect((within(cap).getByLabelText("Proposed Production capacity") as HTMLInputElement).value).toBe("7,800 units/month");
     expect(cap.textContent).toContain("(requester: 7800)"); // admin edit is visible
@@ -73,7 +75,7 @@ describe("admin: update request review", () => {
     const done = screen.getAllByText("Update request").map((t) => t.closest("section")!)
       .find((s) => within(s).queryByText("Approved"))!;
     expect(within(done).getByText(/Applied: Production capacity: 10 units → 500 units/)).toBeInTheDocument();
-    expect(within(done).queryByRole("button", { name: "Approve selected changes" })).toBeNull();
+    expect(within(done).queryByRole("button", { name: "Approve with selected changes" })).toBeNull();
   });
 
   it("approves only the ticked fields with the fingerprint it showed", async () => {
@@ -81,7 +83,7 @@ describe("admin: update request review", () => {
     const section = await pendingSection();
     fireEvent.click(within(section).getByLabelText("Apply Contact email"));   // untick
     fireEvent.click(within(section).getByLabelText("Apply Contact phone"));   // untick
-    await act(async () => fireEvent.click(within(section).getByRole("button", { name: "Approve selected changes" })));
+    await act(async () => fireEvent.click(within(section).getByRole("button", { name: "Approve with selected changes" })));
     const decision = calls.find((c) => c.url.endsWith("/decision"))!;
     expect(decision.url).toContain(`/admin/manufacturers/${ORG}/update-requests/${PENDING.id}/decision`);
     expect(decision.body).toEqual({ decision: "approve", fingerprint: PENDING.fingerprint, feedback: null,
@@ -95,7 +97,7 @@ describe("admin: update request review", () => {
                             () => new Response(JSON.stringify(edited), { status: 200 }));
     const section = await pendingSection();
     fireEvent.change(within(section).getByLabelText("Proposed Category"), { target: { value: "Automotive & Machinery" } });
-    await act(async () => fireEvent.click(within(section).getByRole("button", { name: "Approve selected changes" })));
+    await act(async () => fireEvent.click(within(section).getByRole("button", { name: "Approve with selected changes" })));
     const patch = calls.find((c) => c.method === "PATCH")!;
     expect(patch.body).toEqual({ values: { companyType: "Automotive & Machinery" } });
     expect(calls.find((c) => c.url.endsWith("/decision"))!.body).toMatchObject({ fingerprint: "after-edit-fp" });

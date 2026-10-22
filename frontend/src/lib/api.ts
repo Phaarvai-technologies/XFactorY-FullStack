@@ -78,8 +78,10 @@ export interface CompanyDetails {
   city: string;
   state: string;
   capacity: string;
-  /** Only returned to the company's own owner. */
+  /** The company's own phone number (business information). */
   phone: string;
+  /** Company details not on record (they stay editable); saved ones are read-only. */
+  missing?: string[];
   access: "owner" | "claimed" | "unclaimed";
   canUpdate: boolean;
 }

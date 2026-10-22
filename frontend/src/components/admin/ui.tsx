@@ -189,6 +189,44 @@ export function Modal({
   );
 }
 
+export type DataScope = "real" | "demo" | "all";
+const DATA_SCOPE_OPTIONS: { value: DataScope; label: string; title: string }[] = [
+  { value: "real", label: "Real", title: "Real data only (no demo or test records)" },
+  { value: "demo", label: "Demo", title: "Demo and test records only" },
+  { value: "all", label: "Real + demo", title: "Real and demo data together" },
+];
+
+/** Data filter: Real / Demo / Real + demo, as one segmented control. `value` null = a custom
+ * record-type combination (nothing highlighted). Counts are shown when given. */
+export function DataScopeFilter({
+  value,
+  onChange,
+  counts,
+}: {
+  value: DataScope | null;
+  onChange: (value: DataScope) => void;
+  counts?: Partial<Record<DataScope, number>> | null;
+}) {
+  return (
+    <div className="adm-seg" role="group" aria-label="Data">
+      <span className="adm-seg-label" aria-hidden>Data</span>
+      {DATA_SCOPE_OPTIONS.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          className={`adm-seg-btn${value === o.value ? " on" : ""}`}
+          aria-pressed={value === o.value}
+          title={o.title}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+          {counts && typeof counts[o.value] === "number" && <span className="adm-seg-count">{counts[o.value]}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Multi-select as a row of XY pill toggles. */
 export function PillFilter<T extends string>({
   options,

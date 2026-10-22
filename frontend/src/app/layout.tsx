@@ -3,7 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
-import { BASE_PATH, withBase } from "@/lib/basePath";
+import { withBase } from "@/lib/basePath";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -30,11 +30,10 @@ export const metadata: Metadata = {
     "X!Y connects designers, manufacturers, suppliers and every partner in between — so production capacity finds demand, and good ideas find a factory floor.",
 };
 
-// Inside the Phaarvai website (/xfactory) Clerk's pages and its sign-out landing page carry the
-// prefix too. Without a base path nothing is passed and the defaults stay as they were.
-const clerkPaths = BASE_PATH
-  ? { signInUrl: withBase("/sign-in"), signUpUrl: withBase("/sign-up"), afterSignOutUrl: withBase("/") }
-  : {};
+// This app's own Sign-in / Sign-up pages, always (inside the Phaarvai website they carry the
+// prefix). Without them Clerk would use its hosted Account Portal, whose Google button creates
+// accounts from Sign-in and skips the X!Y Terms step.
+const clerkPaths = { signInUrl: withBase("/sign-in"), signUpUrl: withBase("/sign-up"), afterSignOutUrl: withBase("/") };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

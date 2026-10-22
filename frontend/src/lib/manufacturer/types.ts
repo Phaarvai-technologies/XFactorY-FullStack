@@ -84,6 +84,8 @@ export type ManufacturerState = {
     dob: string;
     phone: string;
     capacity: string;
+    /** The registering user's personal email (not the company's contact email). */
+    personalEmail?: string;
   };
   contact: {
     email: string;

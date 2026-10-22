@@ -32,7 +32,7 @@ describe("checkRegistration", () => {
 describe("notices and intent", () => {
   it("only known notice codes produce text", () => {
     expect(noticeFor("signup_required")?.message).toBe(
-      "Your account is not registered yet. Please sign up first, then sign in to continue.",
+      "Please sign up first, then sign in to continue.",
     );
     expect(noticeFor("<script>")).toBeNull();
     expect(authPageHref("/sign-up", "/", "signup_required")).toBe("/sign-up?notice=signup_required");

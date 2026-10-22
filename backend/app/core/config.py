@@ -2,7 +2,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from typing import Annotated
 
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -16,18 +18,44 @@ class Settings(BaseSettings):
     # Set DB_POOL_PRE_PING=true to bring the check back (e.g. if "connection closed" errors appear).
     db_pool_pre_ping: bool = False
     db_pool_recycle_seconds: int = 300
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # Browser origins allowed to call the API: scheme + host (+ port), no path, no trailing "/".
+    # Either a JSON list (["https://www.phaarvai.com","https://phaarvai.com"]) or a
+    # comma-separated list (https://www.phaarvai.com,https://phaarvai.com). See _origins below.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     # Clerk
     clerk_issuer: str
     clerk_jwks_url: str
     clerk_secret_key: str = ""
     clerk_webhook_signing_secret: str = ""
-    clerk_authorized_parties: list[str] = ["http://localhost:3000"]
+    clerk_authorized_parties: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     # Terms and Conditions + Privacy Policy version shown on the Sign-up page
     # ("Terms v1.2 · Privacy Policy v1.4"). Registration is refused unless the user accepted
     # exactly this version; change it together with frontend TERMS_VERSION.
     terms_version: str = "terms-1.2;privacy-1.4"
+
+    @field_validator("database_url", "clerk_issuer", "clerk_jwks_url", "clerk_secret_key",
+                     "clerk_webhook_signing_secret", mode="before")
+    @classmethod
+    def _trimmed(cls, value):
+        """Values pasted into a hosting dashboard often carry a trailing newline / space; in
+        DATABASE_URL that becomes part of the database name ('database "postgres\n" does not exist')."""
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("cors_origins", "clerk_authorized_parties", mode="before")
+    @classmethod
+    def _origins(cls, value):
+        """JSON list or comma-separated text; quotes, spaces and a trailing "/" are removed (an
+        origin never has a path, and "https://www.phaarvai.com/" would match no browser request)."""
+        import json
+        if isinstance(value, str):
+            text = value.strip()
+            try:
+                value = json.loads(text) if text.startswith("[") else text.split(",")
+            except ValueError:
+                # "[https://a.com, https://b.com]" (no quotes): never stop the server over it
+                value = text.strip("[]").split(",")
+        return [str(v).strip().strip("'\"").rstrip("/") for v in value if str(v).strip().strip("'\"")]
 
     @property
     def clerk_issuers(self) -> list[str]:
@@ -48,6 +76,10 @@ class Settings(BaseSettings):
     # The built-in administrator (created with `python -m app.admin_account setup`). It cannot
     # be revoked, disabled or have its role changed from the Admins tab.
     admin_default_email: str = "admin@phaarvai.com"
+
+    # Manufacturer applications (app/manufacturer_access.py): after an admin rejects an
+    # application, the applicant may send a fresh one this many hours after the rejection.
+    manufacturer_reapply_after_hours: int = 24
 
     # Admin email + password sign-in (`python -m app.admin_account create ...`).
     # A session ends after ADMIN_SESSION_HOURS, or earlier after ADMIN_IDLE_MINUTES

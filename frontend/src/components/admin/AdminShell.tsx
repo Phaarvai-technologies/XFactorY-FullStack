@@ -5,7 +5,6 @@ import {
   ClipboardCheck,
   Cog,
   Factory,
-  KeyRound,
   LayoutDashboard,
   LifeBuoy,
   Lightbulb,
@@ -22,6 +21,7 @@ import { AdminLogin } from "@/components/admin/AdminLogin";
 import { Admins } from "@/components/admin/Admins";
 import { Analytics } from "@/components/admin/Analytics";
 import { ChangePasswordModal } from "@/components/admin/ChangePasswordModal";
+import { EditMyDetailsModal, savedMessage } from "@/components/admin/EditAdminDetails";
 import { ManufacturerDetail } from "@/components/admin/ManufacturerDetail";
 import { Machinery } from "@/components/admin/Machinery";
 import { Manufacturers } from "@/components/admin/Manufacturers";
@@ -42,8 +42,8 @@ const NAV = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/admins", label: "Admins", icon: ShieldCheck },
   { href: "/admin/manufacturers", label: "Manufacturers", icon: Factory },
-  { href: "/admin/machinery", label: "Machinery", icon: Cog },
   { href: "/admin/visionaries", label: "Visionaries", icon: Lightbulb },
+  { href: "/admin/machinery", label: "Machinery", icon: Cog },
   { href: "/admin/review", label: "Onboarding & review", icon: ClipboardCheck },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/support", label: "Support", icon: LifeBuoy },
@@ -55,6 +55,9 @@ export const useToast = () => useContext(ToastContext);
 
 const AdminMeContext = createContext<AdminMe | null>(null);
 export const useAdminMe = () => useContext(AdminMeContext);
+/** Reloads the signed-in admin (name in the header / sidebar) after they edit their own details. */
+const AdminMeReloadContext = createContext<() => void>(() => undefined);
+export const useReloadAdminMe = () => useContext(AdminMeReloadContext);
 
 function route(path: string): { screen: string; id?: string } {
   const parts = path.replace(/\/+$/, "").split("/").filter(Boolean); // ["admin", ...]
@@ -76,6 +79,7 @@ export function AdminShell() {
   const me = meRes.loading || meRes.error ? null : (meRes.data ?? null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [editingMe, setEditingMe] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const err = meRes.error;
@@ -210,6 +214,7 @@ export function AdminShell() {
 
   return (
     <AdminMeContext.Provider value={me}>
+     <AdminMeReloadContext.Provider value={load}>
       <ToastContext.Provider value={showToast}>
         <div className="mfg-root adm-root">
           <aside className={`adm-sidebar${menuOpen ? " open" : ""}`}>
@@ -252,11 +257,6 @@ export function AdminShell() {
               <p className="adm-signin-method">
                 {me?.authMethod === "password" ? "Signed in with admin account" : "Signed in with X!Y account"}
               </p>
-              {me?.authMethod === "password" && (
-                <button type="button" className="adm-logout adm-change-pw" onClick={() => setChangingPassword(true)}>
-                  <KeyRound size={16} /> Change password
-                </button>
-              )}
               <button type="button" className="adm-logout" onClick={() => void logout()}>
                 <LogOut size={16} /> Log out
               </button>
@@ -277,10 +277,17 @@ export function AdminShell() {
                 </div>
                 <div className="topbar-actions">
                   <span className="badge badge-info adm-hide-sm">{me?.roles.includes("platform_administrator") ? "Administrator" : "Admin"}</span>
-                  <div className="avatar-chip" style={{ cursor: "default" }}>
+                  <button
+                    type="button"
+                    className="avatar-chip adm-me-chip"
+                    title="Edit my details"
+                    aria-label={`Edit my details (${me?.name || me?.email || "admin"})`}
+                    disabled={!me}
+                    onClick={() => setEditingMe(true)}
+                  >
                     <span className="avatar-circle">{initials(me?.name, me?.email)}</span>
                     <span className="adm-hide-sm">{me?.name || me?.email}</span>
-                  </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -308,11 +315,30 @@ export function AdminShell() {
               />
             )
           )}
+          {editingMe && !me?.mustChangePassword && (
+            <EditMyDetailsModal
+              onChangePassword={
+                me?.authMethod === "password"
+                  ? () => {
+                      setEditingMe(false);
+                      setChangingPassword(true);
+                    }
+                  : undefined
+              }
+              onClose={() => setEditingMe(false)}
+              onSaved={(res) => {
+                setEditingMe(false);
+                load();
+                showToast(savedMessage(res));
+              }}
+            />
+          )}
           <div className={`toast${toast ? " show" : ""}`} role="status" aria-live="polite">
             {toast}
           </div>
         </div>
       </ToastContext.Provider>
+     </AdminMeReloadContext.Provider>
     </AdminMeContext.Provider>
   );
 }

@@ -10,8 +10,12 @@
  * Works in the browser, in server components and in the proxy (plain fetch, no Clerk import).
  */
 
-export const SIGN_UP_FIRST_MESSAGE =
-  "Your account is not registered yet. Please sign up first, then sign in to continue.";
+import { withBase } from "@/lib/basePath";
+
+export const SIGN_UP_FIRST_MESSAGE = "Please sign up first, then sign in to continue.";
+
+/** Sign-up (manual or Google) with an account that is already registered. */
+export const ACCOUNT_EXISTS_MESSAGE = "You already have an account. Please sign in.";
 
 /**
  * Version of the Terms of Service + Privacy Policy shown on the Sign-up page
@@ -36,6 +40,15 @@ export type RegistrationCheck =
   | { state: "error"; message: string };
 
 type Fetch = typeof fetch;
+
+/** Every request to the X!Y backend gives up after this long: an answer or an error, never an
+ * endless "Creating account…" / "Signing you in…". */
+const REQUEST_TIMEOUT_MS = 15000;
+
+function timeoutSignal(signal?: AbortSignal): AbortSignal | undefined {
+  if (signal) return signal;
+  return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined;
+}
 
 function detailText(payload: unknown, fallback: string): string {
   const detail = (payload as { detail?: unknown } | null)?.detail;
@@ -68,7 +81,7 @@ export async function checkRegistration(
       method: "GET",
       cache: "no-store",
       headers: { Authorization: `Bearer ${token}` },
-      signal: options.signal,
+      signal: timeoutSignal(options.signal),
     });
   } catch {
     return { state: "error", message: UNAVAILABLE };
@@ -109,6 +122,7 @@ export async function startSignUpFlow(
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ method, returnPath, termsAccepted, termsVersion: TERMS_VERSION }),
+      signal: timeoutSignal(),
     });
   } catch {
     throw new SignUpFlowError(START_FAILED, null);
@@ -141,6 +155,7 @@ export async function completeRegistration(
       cache: "no-store",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ flowToken }),
+      signal: timeoutSignal(),
     });
   } catch {
     return { ok: false, code: null, message: failed, retryable: true };
@@ -154,6 +169,33 @@ export async function completeRegistration(
   return { ok: false, code, message: retryable ? failed : detailText(payload, failed), retryable };
 }
 
+/**
+ * Sign-up page, after Clerk said the email already has an account: is it a REGISTERED X!Y
+ * account? "registered" → "You already have an account. Please sign in." at once (no Clerk
+ * sign-in, no code e-mailed, nothing written). "not_registered" → a Clerk identity that never
+ * finished X!Y sign-up (the entered password then proves it and registration completes).
+ * "unknown" (server unreachable) → callers fall back to the password check.
+ */
+export async function accountStatusForEmail(
+  email: string,
+  fetchImpl: Fetch = fetch,
+): Promise<"registered" | "not_registered" | "unknown"> {
+  try {
+    const response = await fetchImpl(`${API_URL}/identity/registration/account-status`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+      signal: timeoutSignal(),
+    });
+    if (!response.ok) return "unknown";
+    const registered = ((await response.json().catch(() => null)) as { registered?: unknown } | null)?.registered;
+    return registered === true ? "registered" : registered === false ? "not_registered" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Fixed messages shown on the sign-in / sign-up pages, selected by ?notice=<code>.
 // (Codes only: no text is ever taken from the URL.)
@@ -165,9 +207,13 @@ export type NoticeCode =
   | "signup_failed"
   | "oauth_failed"
   | "suspended"
-  | "account_mismatch";
+  | "account_mismatch"
+  | "account_exists";
 
-export const NOTICES: Record<NoticeCode, { tone: "error" | "warn" | "ok"; message: string }> = {
+/** `action: "sign-in"`: the page shows a Sign-in link next to the message. */
+export type Notice = { tone: "error" | "warn" | "ok"; message: string; action?: "sign-in" };
+
+export const NOTICES: Record<NoticeCode, Notice> = {
   signup_required: { tone: "warn", message: SIGN_UP_FIRST_MESSAGE },
   registered: { tone: "ok", message: "Your account is ready. Please sign in to continue." },
   unavailable: { tone: "error", message: UNAVAILABLE },
@@ -178,9 +224,10 @@ export const NOTICES: Record<NoticeCode, { tone: "error" | "warn" | "ok"; messag
     tone: "error",
     message: "This email is linked to an existing X!Y account that uses a different sign-in. Please contact X!Y support - do not create a new account.",
   },
+  account_exists: { tone: "warn", message: ACCOUNT_EXISTS_MESSAGE, action: "sign-in" },
 };
 
-export function noticeFor(value: string | null | undefined) {
+export function noticeFor(value: string | null | undefined): Notice | null {
   return value && value in NOTICES ? NOTICES[value as NoticeCode] : null;
 }
 
@@ -200,10 +247,12 @@ export function authPageHref(
 }
 
 // ---------------------------------------------------------------------------
-// Google redirect: what the user started (kept in this tab's sessionStorage across the
-// round trip to Google). Only used to choose which Clerk resource to finish. It grants
-// nothing: completing registration needs the server-signed sign-up token, which the backend
-// verifies, and a missing / unreadable intent is always treated as a sign-in.
+// Google redirect: what the user started. It travels in the callback address Clerk returns to
+// (?intent=…&flow=…&redirect_url=…) and, as before, in this tab's sessionStorage, so it
+// survives the round trip to Google even when one of the two is lost. Only used to choose
+// which Clerk resource to finish. It grants nothing: completing registration needs the
+// server-signed sign-up token, which the backend verifies, and a missing / unreadable intent is
+// always treated as a sign-in.
 
 const INTENT_KEY = "xy-oauth-intent";
 
@@ -217,18 +266,45 @@ export function rememberOAuthIntent(intent: OAuthIntent): void {
   }
 }
 
-export function takeOAuthIntent(): OAuthIntent | null {
+function readIntent(value: { purpose?: unknown; returnPath?: unknown; flowToken?: unknown }): OAuthIntent {
+  const returnPath = typeof value.returnPath === "string" && value.returnPath ? value.returnPath : "/";
+  if (value.purpose === "sign-up" && typeof value.flowToken === "string" && value.flowToken) {
+    return { purpose: "sign-up", returnPath, flowToken: value.flowToken };
+  }
+  return { purpose: "sign-in", returnPath };
+}
+
+/**
+ * The intent of this callback: from the callback address when Clerk kept it, else from this
+ * tab's storage (always cleared, so a repeated callback cannot reuse it), else null (sign-in).
+ */
+export function takeOAuthIntent(search?: URLSearchParams | null): OAuthIntent | null {
+  let stored: OAuthIntent | null = null;
   try {
     const raw = window.sessionStorage.getItem(INTENT_KEY);
     window.sessionStorage.removeItem(INTENT_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as Partial<OAuthIntent> & { flowToken?: unknown };
-    const returnPath = typeof value.returnPath === "string" ? value.returnPath : "/";
-    if (value.purpose === "sign-up" && typeof value.flowToken === "string") {
-      return { purpose: "sign-up", returnPath, flowToken: value.flowToken };
-    }
-    return { purpose: "sign-in", returnPath };
+    if (raw) stored = readIntent(JSON.parse(raw) as Record<string, unknown>);
   } catch {
-    return null;
+    stored = null;
   }
+  const purpose = search?.get("intent");
+  if (purpose === "sign-in" || purpose === "sign-up") {
+    return readIntent({ purpose, returnPath: search?.get("redirect_url"), flowToken: search?.get("flow") });
+  }
+  return stored;
+}
+
+/**
+ * The FULL address Clerk sends the browser back to after Google, carrying the intent.
+ *
+ * In production clerk-js passes a redirect URL to Clerk's servers unchanged (only development
+ * instances turn a path into a full address), so a bare path such as "/sso-callback" was
+ * resolved by Clerk instead of by the browser - not on this site, or not under the website's
+ * /projects/xfactory prefix. Google sign-in then never came back to this app's callback.
+ */
+export function oauthCallbackUrl(intent: OAuthIntent): string {
+  const params = new URLSearchParams({ intent: intent.purpose });
+  if (intent.returnPath && intent.returnPath !== "/") params.set("redirect_url", intent.returnPath);
+  if (intent.purpose === "sign-up") params.set("flow", intent.flowToken);
+  return `${window.location.origin}${withBase("/sso-callback")}?${params.toString()}`;
 }

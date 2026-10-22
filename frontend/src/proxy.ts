@@ -25,12 +25,13 @@ const underBase = (path: string | undefined, fallback: string) => {
   const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").trim().replace(/\/+$/, "");
   return base && p.startsWith("/") && !p.startsWith(`${base}/`) ? `${base}${p}` : p;
 };
-const clerkPaths = process.env.NEXT_PUBLIC_BASE_PATH?.trim()
-  ? {
-      signInUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL, "/sign-in"),
-      signUpUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL, "/sign-up"),
-    }
-  : {};
+// Always this app's own pages. Without them (NEXT_PUBLIC_CLERK_SIGN_IN_URL empty, the standalone
+// deployment) Clerk sends signed-out visitors of protected pages to its hosted Account Portal,
+// whose Google button creates accounts from Sign-in and skips the X!Y Terms step.
+const clerkPaths = {
+  signInUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL, "/sign-in"),
+  signUpUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL, "/sign-up"),
+};
 
 // Pages that need a REGISTERED X!Y user, not just a Clerk session: every protected page plus
 // the Manufacturer profile setup (public route only so signed-out visitors reach Create Account).

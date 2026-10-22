@@ -13,11 +13,11 @@ import uuid
 
 import pytest
 
-from test_e2e_local import DB, PNG, approve_company, client  # noqa: F401  (shared fixture)
+from test_e2e_local import DB, PNG, approve_company, approve_user, client  # noqa: F401  (shared fixture)
 
 pytestmark = pytest.mark.skipif(not DB, reason="E2E_DATABASE_URL not set")
 
-ACCOUNT = {"firstName": "Meera", "lastName": "Iyer", "contact": "9876543210", "dob": "1990-01-15",
+ACCOUNT = {"firstName": "Meera", "lastName": "Iyer", "contact": "meera.iyer@gmail.com", "dob": "1990-01-15",
            "companyName": "Kaveri Moulding Works", "companyType": "Consumer Products",
            "country": "India", "phone": "+91 98765 43210", "capacity": "12,500 units/month"}
 PROFILE = {
@@ -52,6 +52,7 @@ async def make_manufacturer(client, publish=True, approve=True):
     """The fixture's own user becomes a manufacturer with a published machine: details approved
     by an admin and the profile 100% complete (both are needed to be visible to Visionaries)."""
     assert (await client.post("/manufacturer/account", json=ACCOUNT)).status_code == 201
+    await approve_user(client)
     assert (await client.put("/manufacturer/profile", json=PROFILE)).status_code == 200
     if publish:
         r = await client.post("/manufacturer/machinery", json={**MACHINE, "status": "Published"})

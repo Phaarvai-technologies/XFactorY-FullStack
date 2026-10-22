@@ -23,6 +23,7 @@ import uuid
 from sqlalchemy import text
 
 from app.core.database import SessionFactory
+from app.core.cli import run as run_cli
 
 WIDE = False
 LIMIT = 60
@@ -396,7 +397,7 @@ def main() -> int:
         pass
     run = {"user": lambda: user(a.email), "recent": lambda: recent(a.n), "company": lambda: company(a.name),
            "request": lambda: request(a.number), "errors": lambda: errors(a.n)}[a.cmd]
-    return asyncio.run(run())
+    return run_cli(run())
 
 
 if __name__ == "__main__":

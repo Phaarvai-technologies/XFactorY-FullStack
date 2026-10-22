@@ -39,7 +39,7 @@ OWNER_ROLES = "('owner', 'admin')"
 SUBMISSION_COLUMNS = """
     s.id, s.organization_id, s.target_organization_id, s.selected_company_id, s.submitted_by_user_id,
     s.kind, s.payload, s.status, s.reviewed_by_user_id, s.reviewed_at, s.review_feedback, s.applied_at,
-    s.created_at, s.updated_at, s.source, s.submitted_at
+    s.created_at, s.updated_at, s.source, s.submitted_at, s.correction_fields
 """
 
 
@@ -183,7 +183,9 @@ async def stage_name_change(db: AsyncSession, *, user_id: UUID, workspace_id: UU
     payload = {"companyName": name, "companyType": current["company_category"] or "",
                "country": current["country_name"] or "", "countryCode": current["country_code"],
                "capacity": current["production_capacity_label"] or "",
-               "capacityNumber": current["stated_production_capacity"],
+               # numeric column (Decimal) -> JSON number
+               "capacityNumber": (float(current["stated_production_capacity"])
+                                  if current["stated_production_capacity"] is not None else None),
                "contactEmail": current["contact_email"], "contactPhone": current["contact_phone"]}
     await stage(db, user_id=user_id, workspace_id=workspace_id, target_id=workspace_id, selected_id=None,
                 kind="update", payload=payload)
@@ -195,9 +197,11 @@ class DecisionError(Exception):
     """Raised when a decision cannot be applied (message is shown to the admin)."""
 
 
-async def decide(db: AsyncSession, org_id: str, decision: str, admin_id: UUID, feedback: str | None) -> dict | None:
+async def decide(db: AsyncSession, org_id: str, decision: str, admin_id: UUID, feedback: str | None,
+                 correction_fields: list[str] | None = None) -> dict | None:
     """Apply an admin decision to the open submission for `org_id`. Returns the submission
-    (as it was) or None when the company has no open submission. Caller commits."""
+    (as it was) or None when the company has no open submission. Caller commits.
+    `correction_fields` (changes_requested): the only fields the applicant may change."""
     sub = await open_submission_for_target(db, org_id, lock=True)
     if sub is None:
         return None
@@ -211,20 +215,23 @@ async def decide(db: AsyncSession, org_id: str, decision: str, admin_id: UUID, f
         new_status = "rejected"
     else:
         raise DecisionError("Unsupported decision")
+    fields = list(correction_fields or []) if new_status == "changes_requested" else None
     updated = (await db.execute(text("""
         UPDATE manufacturer_submissions
         SET status = :s, reviewed_by_user_id = :a, reviewed_at = now(), review_feedback = :f,
+            correction_fields = CASE WHEN :s = 'changes_requested' THEN CAST(:cf AS text[]) ELSE correction_fields END,
             applied_at = CASE WHEN :s = 'approved' THEN now() ELSE applied_at END, updated_at = now()
         WHERE id = :id AND status IN ('pending', 'changes_requested') AND applied_at IS NULL
         RETURNING id
-    """), {"s": new_status, "a": admin_id, "f": feedback, "id": sub["id"]})).first()
+    """), {"s": new_status, "a": admin_id, "f": feedback, "cf": fields, "id": sub["id"]})).first()
     if updated is None:  # processed concurrently
         raise DecisionError("This submission was already processed.")
     # Review actions are history of their own ('admin_review'); the company's onboarding source
     # and the submission's channel are left exactly as they are.
     await record_event(db, event="decision", role="admin", source=onboarding_source.ADMIN_REVIEW,
                        organization_id=sub["target_organization_id"], submission_id=sub["id"], actor=admin_id,
-                       details={"decision": new_status, "feedback": feedback, "kind": sub["kind"]})
+                       details={"decision": new_status, "feedback": feedback, "kind": sub["kind"],
+                                **({"correctionFields": fields} if fields else {})})
     if new_status == "approved" and sub["kind"] == "new_company":
         # Approved creation: the company's original source is the staged submission's channel.
         # Only the user's own organization (created for them by the app) and only once.
@@ -312,17 +319,21 @@ async def _write_profile(db, org_id: UUID, p: dict, keep_saved: bool) -> None:
               "category": p.get("companyType") or None, "cap": p.get("capacityNumber"),
               "cap_label": p.get("capacity") or None}
     if keep_saved:
+        # Existing company: saved values are kept; only missing ones (null / empty / whitespace) are filled.
         sets = """contact_email = COALESCE(organization_profiles.contact_email, EXCLUDED.contact_email),
-                  contact_phone = COALESCE(organization_profiles.contact_phone, EXCLUDED.contact_phone),
+                  contact_phone = COALESCE(NULLIF(btrim(organization_profiles.contact_phone), ''), EXCLUDED.contact_phone),
                   country_code = COALESCE(organization_profiles.country_code, EXCLUDED.country_code),
-                  country_name = COALESCE(NULLIF(organization_profiles.country_name, ''), EXCLUDED.country_name),
-                  company_category = COALESCE(NULLIF(organization_profiles.company_category, ''), EXCLUDED.company_category),
+                  country_name = COALESCE(NULLIF(btrim(organization_profiles.country_name), ''), EXCLUDED.country_name),
+                  company_category = COALESCE(NULLIF(btrim(organization_profiles.company_category), ''),
+                                              EXCLUDED.company_category),
                   stated_production_capacity = COALESCE(organization_profiles.stated_production_capacity,
                                                         EXCLUDED.stated_production_capacity),
-                  production_capacity_label = COALESCE(NULLIF(organization_profiles.production_capacity_label, ''),
+                  production_capacity_label = COALESCE(NULLIF(btrim(organization_profiles.production_capacity_label), ''),
                                                        EXCLUDED.production_capacity_label)"""
     else:
-        sets = """contact_email = EXCLUDED.contact_email, contact_phone = EXCLUDED.contact_phone,
+        # The company's contact email is never taken from an applicant's personal email: keep it.
+        sets = """contact_email = COALESCE(EXCLUDED.contact_email, organization_profiles.contact_email),
+                  contact_phone = EXCLUDED.contact_phone,
                   country_code = EXCLUDED.country_code, country_name = EXCLUDED.country_name,
                   company_category = EXCLUDED.company_category,
                   stated_production_capacity = EXCLUDED.stated_production_capacity,

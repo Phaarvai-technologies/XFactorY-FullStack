@@ -34,6 +34,7 @@ from app.core import email_templates as tpl
 from app.core.config import get_settings
 from app.core.database import SessionFactory
 from app.core.email import Mailer
+from app.core.cli import run as run_cli
 
 
 def read_password(email: str, from_stdin: bool) -> str:
@@ -232,18 +233,18 @@ def main() -> int:
     sub.add_parser("list")
     a = p.parse_args()
     if a.cmd == "create":
-        return asyncio.run(create(a.email.strip(), a.name, a.password_stdin, a.role))
+        return run_cli(create(a.email.strip(), a.name, a.password_stdin, a.role))
     if a.cmd == "setup":
-        return asyncio.run(setup(a.name, a.password_stdin))
+        return run_cli(setup(a.name, a.password_stdin))
     if a.cmd == "grant":
-        return asyncio.run(grant_access(a.email.strip(), a.role))
+        return run_cli(grant_access(a.email.strip(), a.role))
     if a.cmd == "revoke":
-        return asyncio.run(revoke_access(a.email.strip()))
+        return run_cli(revoke_access(a.email.strip()))
     if a.cmd == "password":
-        return asyncio.run(set_password(a.email.strip(), a.password_stdin))
+        return run_cli(set_password(a.email.strip(), a.password_stdin))
     if a.cmd in ("disable", "enable"):
-        return asyncio.run(set_status(a.email.strip(), a.cmd == "enable"))
-    return asyncio.run(list_accounts())
+        return run_cli(set_status(a.email.strip(), a.cmd == "enable"))
+    return run_cli(list_accounts())
 
 
 if __name__ == "__main__":

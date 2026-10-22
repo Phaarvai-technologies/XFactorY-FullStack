@@ -60,6 +60,33 @@ def reviewed(name, company, url):
     return subject, text, html
 
 
+def application_submitted(applicant, company, kind_label, resubmitted, url):
+    """To X!Y admins: a manufacturer application (or its corrections) is waiting for review."""
+    what = "Corrections submitted" if resubmitted else "New manufacturer application"
+    subject = f"{what}: {company or 'company'}"
+    text = (f"Hello,\n\n{what.lower() if resubmitted else what} from {applicant} for {company} "
+            f"({kind_label}). It is waiting for review in the admin portal.\n\nReview it: {url}\n\nX!Y")
+    html = _html(what, [f"{escape(applicant or 'An applicant')} sent "
+                        f"{'corrections to their application' if resubmitted else 'a manufacturer application'} for "
+                        f"<b>{escape(company or '')}</b> ({escape(kind_label)}).",
+                        "It is waiting for review in the admin portal."], ("Open the review", url))
+    return subject, text, html
+
+
+def application_rejected(name, company, note, reapply_from, url):
+    """To the applicant: the manufacturer application was not approved (applicant-facing reason only)."""
+    subject = f"Your manufacturer application for {company or 'X!Y'} was not approved"
+    text = (f"{_hello(name)}\n\nThe X!Y team reviewed your manufacturer application for {company} and could not "
+            f"approve it:\n\n{note}\n\nYou can send a new application from {reapply_from}.\n\n"
+            f"Open your dashboard: {url}\n\nThe X!Y team")
+    html = _html("Your application was not approved",
+                 [escape(_hello(name)), f"The X!Y team reviewed your manufacturer application for "
+                  f"<b>{escape(company or '')}</b> and could not approve it:",
+                  f"You can send a new application from {escape(reapply_from)}."],
+                 ("Open my dashboard", url), escape(note or ""))
+    return subject, text, html
+
+
 def account_suspended(name):
     subject = "Your X!Y account has been suspended"
     text = (f"{_hello(name)}\n\nYour X!Y account has been suspended, so you cannot sign in for now. "

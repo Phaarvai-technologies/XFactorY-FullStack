@@ -7,18 +7,21 @@
 - database/migrations/*.sql are idempotent and applied every time, in order.
 """
 import asyncio
+import re
 from pathlib import Path
 
 import asyncpg
 
 from app.core.config import get_settings
+from app.core.cli import run as run_cli
 
 
 DATABASE_DIR = Path(__file__).resolve().parents[1] / "database"
 
 
 async def main() -> None:
-    url = get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    # asyncpg wants a plain postgresql:// URL, whatever SQLAlchemy driver DATABASE_URL names
+    url = re.sub(r"^postgres(ql)?(\+\w+)?://", "postgresql://", get_settings().database_url)
     connection = await asyncpg.connect(url)
     try:
         has_schema = await connection.fetchval("SELECT to_regclass('public.users') IS NOT NULL")
@@ -41,4 +44,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_cli(main())

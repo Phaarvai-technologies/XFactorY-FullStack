@@ -1,5 +1,6 @@
 """Request bodies — field names are exactly the frontend's (src/lib/manufacturer/types.ts,
 ProfileWizardData, MachineryDraft, AccountSubmission)."""
+import re
 from datetime import date
 from uuid import UUID
 from typing import Literal
@@ -13,17 +14,51 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
 
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+
+
+def normalize_indian_phone(value: str) -> str:
+    """An Indian phone number as +91 followed by the 10-digit national number. Accepts +91 / 91 / 0
+    prefixes, spaces, dashes and brackets; raises ValueError otherwise."""
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("Company phone number is required")
+    if not re.fullmatch(r"\+?[0-9\s\-().]{7,20}", raw):
+        raise ValueError("Enter a valid Indian company phone number")
+    digits = re.sub(r"\D", "", raw)
+    if raw.startswith("+"):
+        if not digits.startswith("91"):
+            raise ValueError("Enter an Indian company phone number (+91)")
+        digits = digits[2:]
+    elif len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) != 10 or digits[0] == "0" or len(set(digits)) == 1:
+        raise ValueError("Enter a valid Indian company phone number")
+    return "+91" + digits
+
+
 # ---------------------------------------------------------------- account
 class AccountPayload(_Model):
-    """AccountScreen `AccountSubmission`."""
+    """AccountScreen `AccountSubmission`.
+
+    Personal information (the registering user's own record): firstName, lastName, email (their
+    PERSONAL email, required), dob (optional). Company information: companyName, companyType, country,
+    phone (the COMPANY's phone, required, Indian, stored as +91XXXXXXXXXX), capacity."""
     # Prefilled from the saved user record; saved only if the user changed them.
     firstName: str = Field(min_length=1, max_length=100)
     lastName: str = Field(min_length=1, max_length=100)
-    contact: str = Field(min_length=3, max_length=320)
-    dob: date
+    # The registering user's personal email (never the company's contact email).
+    email: str = Field(default="", max_length=320)
+    # Older clients sent the email as `contact`.
+    contact: str | None = Field(default=None, max_length=320)
+    # Optional (may be left empty on the form).
+    dob: date | None = None
     companyName: str = Field(min_length=1, max_length=200)
     companyType: str = Field(min_length=1, max_length=150)
     country: str = Field(min_length=1, max_length=100)
+    # The company's phone number (required).
     phone: str = Field(default="", max_length=30)
     capacity: str = Field(default="", max_length=100)
     # Database id of the company picked from the search list (None = a new company). The
@@ -39,10 +74,26 @@ class AccountPayload(_Model):
 
     @field_validator("dob")
     @classmethod
-    def dob_not_in_future(cls, value: date) -> date:
-        if value > date.today():
+    def dob_not_in_future(cls, value: date | None) -> date | None:
+        if value is not None and value > date.today():
             raise ValueError("Date of birth cannot be in the future")
         return value
+
+    @model_validator(mode="after")
+    def personal_email_and_company_phone(self):
+        email = (self.email or "").strip()
+        if not email and self.contact and "@" in self.contact:
+            email = self.contact.strip()
+        if not email:
+            raise ValueError("Personal email address is required")
+        if not EMAIL_RE.match(email):
+            raise ValueError("Enter a valid personal email address")
+        self.email = email
+        if self.companyId is None:
+            # New company: the phone is required. An existing company's saved phone is used as
+            # saved (checked against the record in the repository).
+            self.phone = normalize_indian_phone(self.phone)
+        return self
 
 
 # ---------------------------------------------------------------- profile wizard

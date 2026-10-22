@@ -36,7 +36,7 @@ from app.core.database import get_session
 
 log = logging.getLogger("xy.registration")
 
-SIGN_UP_REQUIRED_MESSAGE = "Your account is not registered yet. Please sign up first, then sign in to continue."
+SIGN_UP_REQUIRED_MESSAGE = "Please sign up first, then sign in to continue."
 TERMS_REQUIRED_MESSAGE = "Please accept the Terms of Service and Privacy Policy to continue."
 TERMS_OUTDATED_MESSAGE = "The Terms of Service or Privacy Policy changed. Please review and accept them again."
 SUSPENDED_MESSAGE = "This account has been suspended. Please contact X!Y support."

@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy import text
+from app.core.cli import run as run_cli
 
 COMPANY_FACTS_SQL = """
     SELECT o.id, o.display_name, o.created_by_user_id IS NOT NULL AS app_created,
@@ -314,4 +315,4 @@ async def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(run_cli(main()))

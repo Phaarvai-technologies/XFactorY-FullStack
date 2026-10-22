@@ -50,7 +50,8 @@ async def test_onboarding_prefill_and_updates(client, clerk_updates):
     # Signed up in Clerk -> the roles page / Manufacturer page stores the user record
     assert (await client.get("/identity/me")).status_code == 200
     body = (await client.get("/manufacturer/bootstrap")).json()
-    assert body["user"] == {"firstName": "Jordan", "lastName": "Lee", "email": f"{client.user}@example.com"}
+    assert body["user"] == {"firstName": "Jordan", "lastName": "Lee", "email": f"{client.user}@example.com",
+                            "personalEmail": ""}
     assert body["accountExists"] is False
 
     # Kept unchanged -> saved record preserved, Clerk not touched
@@ -61,7 +62,10 @@ async def test_onboarding_prefill_and_updates(client, clerk_updates):
     assert row.contact_email is None  # company contact is staged until an admin approves it
     staged = (await client.sql("""SELECT s.payload->>'contactEmail' FROM manufacturer_submissions s
                                   JOIN users u ON u.id=s.submitted_by_user_id WHERE u.clerk_user_id=:c""", c=client.user))
-    assert [r[0] for r in staged] == [f"{client.user}@example.com"]
+    # the form's email is the user's PERSONAL email: kept on the user, never the company's contact email
+    assert [r[0] for r in staged] == [None]
+    personal = await client.sql("SELECT personal_email::text FROM users WHERE clerk_user_id=:c", c=client.user)
+    assert personal[0][0] == f"{client.user}@example.com"
     assert clerk_updates == []
 
     # Edited last name -> user record updated and pushed to Clerk
@@ -72,16 +76,19 @@ async def test_onboarding_prefill_and_updates(client, clerk_updates):
     assert clerk_updates == [(client.user, "Jordan", "Lee-Smith")]
     assert r.json()["user"]["lastName"] == "Lee-Smith"
 
-    # Edited email -> manufacturer contact email; the Clerk sign-in email stays
+    # Edited email -> the user's personal email (never the company's contact email); sign-in email stays
     await client.post("/manufacturer/account", json=form(client, lastName="Lee-Smith", contact="sales@raman.in"))
     staged = (await client.sql("""SELECT s.payload->>'contactEmail' FROM manufacturer_submissions s
                                   JOIN users u ON u.id=s.submitted_by_user_id WHERE u.clerk_user_id=:c""", c=client.user))
-    assert [r[0] for r in staged] == ["sales@raman.in"]  # the same open submission, updated
+    assert [r[0] for r in staged] == [None]  # the same open submission, updated
+    assert (await client.sql("SELECT personal_email::text, email::text FROM users WHERE clerk_user_id=:c",
+                             c=client.user))[0] == ("sales@raman.in", f"{client.user}@example.com")
     org_id = (await client.sql("""SELECT o.id FROM organizations o JOIN memberships m ON m.organization_id=o.id
                                   JOIN users u ON u.id=m.user_id WHERE u.clerk_user_id=:c""", c=client.user))[0][0]
     assert (await approve_company(client, str(org_id))).status_code == 200
     row = await user_row(client)
-    assert row.contact_email == "sales@raman.in" and row.email == f"{client.user}@example.com"
+    # approval does not turn the personal email into the company's contact email
+    assert row.contact_email is None and row.email == f"{client.user}@example.com"
 
     # Sign out / sign in again, and the identity path running again: edited name kept
     client.headers["Authorization"] = f"Bearer {client.make_token()}"

@@ -5,7 +5,15 @@ import { useEffect, useRef } from "react";
 import { AccountBadge, ErrorBox, Loading } from "@/components/admin/ui";
 import { useAdminHost, useResource } from "@/lib/admin/api";
 import { MEMBERSHIP_LABELS, fmtDate, fmtDateTime } from "@/lib/admin/format";
-import type { CompanyPeople } from "@/lib/admin/types";
+import type { CompanyPeople, CompanyPerson } from "@/lib/admin/types";
+
+/** A user's manufacturer application for this company. */
+const APPLICATION_LABELS: Record<string, string> = {
+  pending: "Application awaiting review",
+  changes_requested: "Corrections requested",
+  approved: "Application approved",
+  rejected: "Application rejected",
+};
 
 const REQUEST_TONE: Record<string, string> = {
   pending: "badge-info",
@@ -51,25 +59,13 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
   }
   const users = data.registeredUsers;
   const requests = data.requests;
-
-  return (
-    <>
-      <section className={`card adm-section${loading ? " adm-stale" : ""}`} aria-labelledby="ru-title">
-        <div className="adm-section-head">
-          <h3 id="ru-title">
-            Registered Users <span className="adm-tab-count" title="Distinct users with an active membership">{data.counts.linkedUsers}</span>
-          </h3>
-          {refresh}
-        </div>
-        <p className="adm-section-hint">
-          People linked to this company by membership. Their sign-in emails are not the company&rsquo;s contact details.
-        </p>
-        {error && <ErrorBox message={error.message} onRetry={reload} />}
-        {users.length === 0 ? (
-          <p className="adm-muted">No user account is linked to this company.</p>
-        ) : (
+  /** The company's owner; the others are listed separately (each once, by membership). */
+  const primary = data.primaryUser ?? users.find((u) => u.role === "owner" && u.membershipStatus === "active") ?? null;
+  const others = data.otherUsers ?? users.filter((u) => u.id !== primary?.id);
+  const personal = (u: { email: string; personalEmail?: string }) => u.personalEmail || u.email;
+  const userTable = (list: CompanyPerson[], label: string) => (
           <div className="adm-table-wrap">
-            <table className="adm-table adm-table-fixed adm-ru-table">
+            <table className="adm-table adm-table-fixed adm-ru-table" aria-label={label}>
               <colgroup>
                 <col className="adm-w-main" />
                 <col className="adm-w-ru-id" />
@@ -84,16 +80,18 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
                   <th>User ID</th>
                   <th>Role</th>
                   <th>Membership</th>
-                  <th>Linked</th>
+                  <th>Registered</th>
                   <th aria-label="Open" />
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
-                  <tr key={u.id} className={u.membershipStatus !== "active" ? "adm-row-archived" : undefined}>
+                {list.map((u) => (
+                  <tr key={u.id} className={u.membershipStatus !== "active" && u.membershipStatus !== "pending" ? "adm-row-archived" : undefined}>
                     <td>
                       <div className="adm-cell-main adm-truncate" title={u.name ?? ""}>{u.name || "—"}</div>
-                      <div className="adm-cell-sub adm-truncate" title={u.email}>{u.email}</div>
+                      <div className="adm-cell-sub adm-truncate" title={`Personal email ${personal(u)} · signs in as ${u.email}`}>
+                        {personal(u)}
+                      </div>
                     </td>
                     <td>
                       <code className="adm-code adm-truncate adm-block" title={u.id}>{u.id}</code>
@@ -108,9 +106,14 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
                           <AccountBadge status={u.accountStatus} />
                         </div>
                       )}
+                      {u.applicationStatus && (
+                        <div className="adm-cell-sub adm-truncate" title={APPLICATION_LABELS[u.applicationStatus] ?? u.applicationStatus}>
+                          {APPLICATION_LABELS[u.applicationStatus] ?? u.applicationStatus}
+                        </div>
+                      )}
                     </td>
-                    <td className="adm-nowrap" title={u.registeredAt ? `Registered ${fmtDateTime(u.registeredAt)}` : undefined}>
-                      {fmtDate(u.linkedAt)}
+                    <td className="adm-nowrap" title={u.linkedAt ? `Linked ${fmtDateTime(u.linkedAt)}` : undefined}>
+                      {fmtDate(u.registeredAt ?? u.linkedAt)}
                     </td>
                     <td>
                       <button type="button" className="btn-text adm-nowrap" onClick={() => go(`/admin/users/${u.id}`)} aria-label={`Open user ${u.name || u.email}`}>
@@ -122,7 +125,33 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
               </tbody>
             </table>
           </div>
-        )}
+  );
+
+  return (
+    <>
+      <section className={`card adm-section${loading ? " adm-stale" : ""}`} aria-labelledby="ru-title">
+        <div className="adm-section-head">
+          <h3 id="ru-title">
+            Registered Users <span className="adm-tab-count" title="Distinct users with an active membership">{data.counts.linkedUsers}</span>
+          </h3>
+          {refresh}
+        </div>
+        <p className="adm-section-hint">
+          People linked to this company by membership, with their personal emails. These are not the company&rsquo;s
+          contact details.
+        </p>
+        {error && <ErrorBox message={error.message} onRetry={reload} />}
+        <p className="adm-section-hint">
+          <b>Primary user</b>
+          {data.primaryProposed ? " (proposed — confirmed when X!Y approves the company)" : ""}
+        </p>
+        {primary ? userTable([primary], "Primary user") : <p className="adm-muted">No primary user (owner) yet.</p>}
+        <p className="adm-section-hint">
+          <b>Other Users</b> (members, and applicants awaiting approval)
+        </p>
+        {others.length === 0 ? (
+          <p className="adm-muted">No other users are linked to this company.</p>
+        ) : userTable(others, "Other Users")}
       </section>
 
       <section className={`card adm-section${loading ? " adm-stale" : ""}`} aria-labelledby="rq-title">
@@ -164,8 +193,8 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
                         {r.requester?.name || r.requester?.email || "Automated"}
                       </div>
                       {r.requester && (
-                        <div className="adm-cell-sub adm-truncate" title={`${r.requester.email} · ${r.requester.id}`}>
-                          {r.requester.email}
+                        <div className="adm-cell-sub adm-truncate" title={`${personal(r.requester)} · ${r.requester.id}`}>
+                          {personal(r.requester)}
                         </div>
                       )}
                     </td>

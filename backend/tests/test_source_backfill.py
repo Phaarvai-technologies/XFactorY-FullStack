@@ -177,7 +177,7 @@ async def test_backfill_classifies_by_evidence_is_reviewable_and_rerunnable(clie
     # --- admin API shows the stored values and why the others are unknown
     admin = await _admin(client)
     rows = {r["id"]: r for r in (await client.get("/admin/manufacturers", headers=admin,
-                                                  params={"q": f"BF ", "page_size": 100, "archived": "all"})).json()["rows"]
+                                                  params={"q": f"BF ", "page_size": 100, "archived": "all", "listing": "all"})).json()["rows"]
             if r["id"] in companies}
     assert rows[imported]["onboardingSource"] == "database_import" and rows[imported]["reviewStatus"] == "REVIEWED"
     assert rows[placeholder]["onboardingSource"] is None and "placeholder" in rows[placeholder]["onboardingSourceNote"]
