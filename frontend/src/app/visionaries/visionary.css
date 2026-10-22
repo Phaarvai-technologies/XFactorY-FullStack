@@ -648,3 +648,318 @@
 .xy-visionary #v-mfd .bone.lg{height:22px;width:55%}
 .xy-visionary #v-mfd.active{display:flex}
 @media (max-width:860px){.xy-visionary #v-mfd .layout,.xy-visionary #v-mfd .machines,.xy-visionary #v-mfd .rows div{grid-template-columns:1fr}.xy-visionary #v-mfd .side{position:static}.xy-visionary #v-mfd .nav{display:none}}
+
+/* ===== VISIONARY AI GUIDE ===== */
+.xy-visionary #v-guide {
+  --blue: #1f5fe0;
+  --blue-d: #1749b4;
+  --navy: #0f2347;
+  --text: #5b667a;
+  --line: #d9e4f7;
+  --soft: #eaf1fd;
+  --bg: #f7faff;
+  --white: #fff;
+  font-family: var(--xy-jakarta), "Segoe UI", system-ui, sans-serif;
+  background: linear-gradient(180deg, #fff 0%, var(--bg) 100%);
+  color: var(--navy);
+  min-height: 100vh;
+}
+.xy-visionary #v-guide.active {
+  display: block;
+}
+.xy-visionary #v-guide .guide-wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 40px;
+  min-height: 100vh;
+}
+.xy-visionary #v-guide .brand {
+  grid-column: 1 / -1;
+  margin-bottom: -8px;
+}
+.xy-visionary #v-guide .logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  text-decoration: none;
+  color: var(--navy);
+}
+.xy-visionary #v-guide .logo-img {
+  display: block;
+  width: 150px;
+  height: 48px;
+  max-width: none;
+  object-fit: contain;
+}
+.xy-visionary #v-guide .left h1 {
+  font-size: 34px;
+  line-height: 1.2;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+.xy-visionary #v-guide .left p.sub {
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+.xy-visionary #v-guide .guide-card {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 8px 28px rgba(31, 95, 224, 0.07);
+}
+.xy-visionary #v-guide .proj {
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.xy-visionary #v-guide .proj h3 {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.xy-visionary #v-guide .proj dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  font-size: 14px;
+}
+.xy-visionary #v-guide .proj dt {
+  color: var(--text);
+}
+.xy-visionary #v-guide .proj dd {
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+.xy-visionary #v-guide .guide-note {
+  background: var(--soft);
+  color: #2b4a86;
+  border-radius: 14px;
+  padding: 16px 18px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.xy-visionary #v-guide .guide-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+  gap: 12px;
+}
+.xy-visionary #v-guide .btn-prev,
+.xy-visionary #v-guide .btn-next {
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  border-radius: 12px;
+  padding: 14px 26px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.xy-visionary #v-guide .btn-prev {
+  background: #fff;
+  color: var(--blue);
+  border: 1px solid var(--line);
+}
+.xy-visionary #v-guide .btn-prev:hover {
+  background: var(--soft);
+}
+.xy-visionary #v-guide .btn-next {
+  background: var(--blue);
+  color: #fff;
+  border: 0;
+  box-shadow: 0 6px 16px rgba(31, 95, 224, 0.3);
+}
+.xy-visionary #v-guide .btn-next:hover {
+  background: var(--blue-d);
+}
+.xy-visionary #v-guide .chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 130px);
+  min-height: 560px;
+  overflow: hidden;
+}
+.xy-visionary #v-guide .chat-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.xy-visionary #v-guide .avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--blue);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex: none;
+}
+.xy-visionary #v-guide .chat-head b {
+  display: block;
+  font-size: 16px;
+}
+.xy-visionary #v-guide .chat-head span {
+  font-size: 13px;
+  color: var(--text);
+}
+.xy-visionary #v-guide .badge {
+  margin-left: auto;
+  background: var(--soft);
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.xy-visionary #v-guide .chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-behavior: smooth;
+}
+.xy-visionary #v-guide .msg {
+  max-width: 82%;
+  padding: 14px 18px;
+  border-radius: 18px;
+  font-size: 15px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.xy-visionary #v-guide .msg.ai {
+  background: var(--soft);
+  border-top-left-radius: 6px;
+  align-self: flex-start;
+  color: var(--navy);
+}
+.xy-visionary #v-guide .msg.me {
+  background: var(--blue);
+  color: #fff;
+  border-top-right-radius: 6px;
+  align-self: flex-end;
+}
+.xy-visionary #v-guide .msg h4 {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.xy-visionary #v-guide .msg ul {
+  padding-left: 20px;
+  margin: 8px 0 0;
+}
+.xy-visionary #v-guide .msg li {
+  margin: 5px 0;
+}
+.xy-visionary #v-guide .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.xy-visionary #v-guide .chip {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue);
+  background: #fff;
+  border: 1px solid var(--blue);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.xy-visionary #v-guide .chip:hover {
+  background: var(--blue);
+  color: #fff;
+}
+.xy-visionary #v-guide .typing {
+  display: flex;
+  gap: 5px;
+  padding: 16px 18px;
+}
+.xy-visionary #v-guide .typing i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--blue);
+  opacity: 0.35;
+  animation: typingDot 1s infinite;
+}
+.xy-visionary #v-guide .typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.xy-visionary #v-guide .typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes typingDot {
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.xy-visionary #v-guide .chat-form {
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+.xy-visionary #v-guide .chat-input {
+  flex: 1;
+  font: inherit;
+  font-size: 15px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--navy);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.xy-visionary #v-guide .chat-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(31, 95, 224, 0.15);
+}
+.xy-visionary #v-guide .chat-send {
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  background: var(--blue);
+  border: 0;
+  border-radius: 14px;
+  padding: 0 24px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.xy-visionary #v-guide .chat-send:hover {
+  background: var(--blue-d);
+}
+@media (max-width: 900px) {
+  .xy-visionary #v-guide .guide-wrap {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .xy-visionary #v-guide .chat {
+    height: 75vh;
+  }
+  .xy-visionary #v-guide .msg {
+    max-width: 92%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .xy-visionary #v-guide * {
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+

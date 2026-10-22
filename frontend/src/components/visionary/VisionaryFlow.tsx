@@ -7,6 +7,7 @@ import { StepIdea } from "@/components/visionary/StepIdea";
 import { StepNeeds } from "@/components/visionary/StepNeeds";
 import { StepProfile } from "@/components/visionary/StepProfile";
 import { StepStage } from "@/components/visionary/StepStage";
+import { StepGuide } from "@/components/visionary/StepGuide";
 import { VisionaryToast, useVisionaryToast } from "@/components/visionary/FlowChrome";
 import { ManufacturerProfilePage } from "@/components/visionary/ManufacturerProfilePage";
 import { MyProject, RequestSubmitted } from "@/components/visionary/VisionarySlides";
@@ -87,6 +88,7 @@ export function VisionaryFlow() {
       {slide === "step1" ? <StepProfile onContinue={go} onToast={toast.show} /> : null}
       {slide === "step2" ? <StepIdea onContinue={go} onToast={toast.show} /> : null}
       {slide === "step3" ? <StepStage onContinue={go} onToast={toast.show} /> : null}
+      {slide === "guide" ? <StepGuide onContinue={go} onToast={toast.show} /> : null}
       {slide === "step4" ? <StepNeeds onContinue={go} onToast={toast.show} /> : null}
       {slide === "results" ? (
         <ManufacturerResults
