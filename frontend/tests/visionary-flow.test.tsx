@@ -28,6 +28,22 @@ const mockManufacturers = vi.fn().mockResolvedValue([
   },
 ]);
 
+const mockMatches = vi.fn(async () => ({
+  requirements: {
+    manufacturing_location: "Chennai",
+    quantity: { value: 1000, unit: "units" },
+    budget: { amount: 200000, currency: "INR" },
+    timeline: "immediately",
+    additional_requirements: "",
+    machines: ["CNC Machining", "Laser Cutting"],
+  },
+  applied: ["location", "machines"],
+  notCompared: [],
+  manufacturers: (await mockManufacturers()).map((m: object) => ({ ...m, matchedMachines: ["CNC Machining"] })),
+  listings: [],
+  listingsTotal: 0,
+}));
+
 vi.mock("@/lib/visionary/api", () => ({
   useVisionaryApi: () => ({
     load: mockLoad,
@@ -35,6 +51,7 @@ vi.mock("@/lib/visionary/api", () => ({
     saveStage: mockSaveStage,
     saveRequirements: mockSaveRequirements,
     manufacturers: mockManufacturers,
+    matches: mockMatches,
   }),
   errorMessage: (_e: unknown, fallback: string) => fallback,
 }));

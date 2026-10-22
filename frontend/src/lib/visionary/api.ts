@@ -30,6 +30,10 @@ export type ManufacturerMatches = {
   /** Requirements the database cannot compare, with the reason (shown, never used to filter). */
   notCompared: { field: "quantity" | "budget" | "timeline"; reason: string }[];
   manufacturers: (ManufacturerRecord & { matchedMachines: string[] })[];
+  /** Not-yet-verified directory listings (imported companies) in the same city: one page. */
+  listings: (ManufacturerRecord & { listing: true })[];
+  /** All listings for this city (and search), for "Show more". */
+  listingsTotal: number;
 };
 
 export function errorMessage(error: unknown, fallback: string): string {
@@ -79,7 +83,10 @@ export function useVisionaryApi() {
         put("/project/requirements", { ...requirements, complete }),
       manufacturers: () => call<ManufacturerRecord[]>("/manufacturers"),
       /** Manufacturers matching the signed-in Visionary's saved requirements (filtered on the server). */
-      matches: () => call<ManufacturerMatches>("/manufacturers/matches"),
+      matches: (q = "", listingsOffset = 0) =>
+        call<ManufacturerMatches>(
+          `/manufacturers/matches?${new URLSearchParams({ q, listings_offset: String(listingsOffset) }).toString()}`,
+        ),
       manufacturer: (id: string) =>
         call<{ record: ManufacturerRecord; profile: PublicManufacturerProfile }>(
           `/manufacturers/${encodeURIComponent(id)}`,

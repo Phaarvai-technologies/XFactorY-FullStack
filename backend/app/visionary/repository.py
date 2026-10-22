@@ -240,6 +240,39 @@ class VisionaryRepository:
         sql += " ORDER BY o.display_name, o.id"
         return [dict(r) for r in (await self.db.execute(text(sql), params)).mappings()]
 
+    async def imported_listings(self, location: str, q: str, limit: int, offset: int) -> tuple[list[dict], int]:
+        """Directory listings: companies brought in by the database import (REAL records) that are
+        NOT visible as verified manufacturers yet (not claimed / approved / complete). Matched on
+        the headquarters city only (same rule as matching_manufacturers): the import holds no
+        machines, prices or availability. Optional `q`: company name contains it. Read-only:
+        requests are still only possible to verified manufacturers (see booking / DISCOVERABLE)."""
+        where = f"""
+            FROM organizations o
+            LEFT JOIN organization_profiles op ON op.organization_id = o.id
+            LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
+            LEFT JOIN files logo ON logo.id = op.logo_file_id
+            WHERE o.organization_type = 'manufacturer' AND o.entry_source = 'IMPORTED'
+              AND o.record_type = 'REAL' AND NOT o.is_archived AND o.status IN ('claim_pending', 'active')
+              AND NOT (o.id = ANY(:verified))
+              AND ({_KEY.format("f.city")} = :loc
+                   OR {_KEY.format("concat_ws(' ', f.city, COALESCE(NULLIF(btrim(f.state_province), ''), f.country_name, op.country_name))")} = :loc)
+              AND (:q = '' OR o.display_name ILIKE :like ESCAPE '\\')
+        """
+        # Companies that ARE visible as verified manufacturers (only approved ones can be: a short
+        # list), so the listings can leave them out without evaluating the overview view per row.
+        verified = list((await self.db.execute(text(f"""
+            SELECT o.id FROM organizations o
+            JOIN manufacturer_onboarding mo ON mo.organization_id = o.id AND mo.status = 'approved'
+            WHERE o.organization_type = 'manufacturer' AND {eligibility.sql_condition("visionary_visible")}
+        """))).scalars())
+        params = {"loc": location, "q": q, "verified": verified,
+                  "like": "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"}
+        total = await self.db.scalar(text(f"SELECT count(*) {where}"), params)
+        rows = (await self.db.execute(text(f"""
+            SELECT {ORG_COLUMNS} {where} ORDER BY o.display_name, o.id LIMIT :limit OFFSET :offset
+        """), {**params, "limit": limit, "offset": offset})).mappings()
+        return [dict(r) for r in rows], int(total or 0)
+
     async def manufacturer_details(self, org_ids: list[UUID]) -> dict:
         """Published machinery, certifications and availability for the given manufacturers."""
         if not org_ids:

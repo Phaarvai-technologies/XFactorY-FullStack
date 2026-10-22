@@ -34,10 +34,21 @@ _FACT_SQL = {
 
 
 def sql_condition(capability: str, org_alias: str = "o") -> str:
-    """SQL boolean for `capability`, for an organizations row aliased `org_alias`."""
+    """SQL boolean for `capability`, for an organizations row aliased `org_alias`.
+
+    The overview view computes completeness for every company, which is slow when it is asked
+    once per row of a large list (~22,000 imported companies). When the rule needs approval,
+    an indexed look-up in manufacturer_onboarding (the view's approval source) is done first:
+    a company without an approved onboarding row is answered "false" without the view. CASE is
+    used because it guarantees that order; the result is identical."""
     facts = " AND ".join(_FACT_SQL[f] for f in RULES[capability])
-    return (f"EXISTS (SELECT 1 FROM admin_manufacturer_overview elig "
+    full = (f"EXISTS (SELECT 1 FROM admin_manufacturer_overview elig "
             f"WHERE elig.organization_id = {org_alias}.id AND {facts})")
+    if "approved" not in RULES[capability]:
+        return full
+    return (f"(CASE WHEN EXISTS (SELECT 1 FROM manufacturer_onboarding mo_ok "
+            f"WHERE mo_ok.organization_id = {org_alias}.id AND mo_ok.status = 'approved') "
+            f"THEN {full} ELSE false END)")
 
 
 def evaluate(approval_status: str | None, completeness: int | None) -> dict:

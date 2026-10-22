@@ -304,7 +304,8 @@ async def test_find_a_manufacturer_matches_saved_requirements(client):
         return r.json()
 
     # nothing saved yet: no list at all (never an unfiltered fallback)
-    assert await find() == {"requirements": None, "applied": [], "notCompared": [], "manufacturers": []}
+    assert await find() == {"requirements": None, "applied": [], "notCompared": [], "manufacturers": [],
+                            "listings": [], "listingsTotal": 0}
 
     assert (await client.put("/visionary/project/idea", headers=v, json=IDEA)).status_code == 200
     screenshot = {**NEEDS, "budget": {"amount": 2000, "currency": "INR"}, "timeline": "immediately",
@@ -356,3 +357,62 @@ async def test_find_a_manufacturer_matches_saved_requirements(client):
     assert r.status_code == 422
     r = await client.put("/visionary/project/requirements", headers=v, json={**screenshot, "machines": ["x" * 161]})
     assert r.status_code == 422
+
+
+async def _imported(client, name, city, record_type="REAL", archived=False):
+    """A company as the database import creates it: no owner, not approved, profile incomplete."""
+    org = str(uuid.uuid4())
+    await client.sql("""INSERT INTO organizations(id, display_name, organization_type, entry_source, status,
+                                                  record_type, is_archived)
+                        VALUES (CAST(:id AS uuid), :n, 'manufacturer', 'IMPORTED', 'claim_pending', :rt, :arch)""",
+                     id=org, n=name, rt=record_type, arch=archived)
+    await client.sql("""INSERT INTO organization_profiles(organization_id, country_name, company_category)
+                        VALUES (CAST(:id AS uuid), 'India', 'Automotive & Machinery')""", id=org)
+    await client.sql("""INSERT INTO facilities(organization_id, name, is_headquarters, city, state_province, country_name)
+                        VALUES (CAST(:id AS uuid), 'HQ', true, :c, 'Tamil Nadu', 'India')""", id=org, c=city)
+    return org
+
+
+async def test_not_yet_verified_listings_from_the_import(client):
+    t = uuid.uuid4().hex[:6]
+    city = f"Listcity {t}"
+    verified = await _manufacturer(client, f"lv_{t}", f"Verified Maker {t}", city, "Tamil Nadu",
+                                   [{"type": "CNC Machining"}])
+    imported = [await _imported(client, f"Imp {i:02d} {t}", city) for i in range(26)]
+    wild = await _imported(client, f"A_1% Works {t}", city)
+    ab1x = await _imported(client, f"AB1x Works {t}", city)                  # must not match "A_1%"
+    demo = await _imported(client, f"Demo Imp {t}", city, record_type="DEMO")
+    gone = await _imported(client, f"Archived Imp {t}", city, archived=True)
+    elsewhere = await _imported(client, f"Elsewhere Imp {t}", f"Othercity {t}")
+    v = auth(client, f"vis_{uuid.uuid4().hex[:10]}")
+    assert (await client.put("/visionary/project/idea", headers=v, json=IDEA)).status_code == 200
+    needs = {**NEEDS, "manufacturing_location": city, "machines": ["CNC Machining", "Welding"]}
+    assert (await client.put("/visionary/project/requirements", headers=v, json=needs)).status_code == 200
+
+    async def find(**params):
+        r = await client.get("/visionary/manufacturers/matches", headers=v, params=params)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    res = await find()
+    # verified match first and separately; listings: same city, REAL, not archived, not the verified one
+    assert [m["id"] for m in res["manufacturers"]] == [verified]
+    assert res["listingsTotal"] == 28                                        # 26 + "A_1%" + "AB1x"
+    ids = [m["id"] for m in res["listings"]]
+    assert len(ids) == 24 and verified not in ids
+    assert not {demo, gone, elsewhere} & set(ids)
+    first = res["listings"][0]
+    assert first["listing"] is True and first["verified"] is False and first["availability"] == "Not yet verified"
+    assert first["machines"] == [] and first["matchedMachines"] == [] and first["location"] == f"{city}, Tamil Nadu"
+    page2 = await find(listings_offset=24)
+    assert len(page2["listings"]) == 4 and not set(ids) & {m["id"] for m in page2["listings"]}
+    assert set(ids) | {m["id"] for m in page2["listings"]} == set(imported) | {wild, ab1x}
+    # name search (server side), wildcards are literal
+    assert [m["id"] for m in (await find(q="a_1%"))["listings"]] == [wild]
+    assert (await find(q="imp 03"))["listingsTotal"] == 1
+    # a listing is not a manufacturer profile and cannot receive requests
+    assert (await client.get(f"/visionary/manufacturers/{imported[0]}", headers=v)).status_code == 404
+    send = {"manufacturer_id": imported[0], "machine": "CNC Machining", "quantity": {"value": 10, "unit": "units"},
+            "required_duration": "1_week", "manufacturing_location": city,
+            "budget": {"amount": 1000, "currency": "INR"}, "timeline": "immediately"}
+    assert (await client.post("/visionary/requests", headers=v, json=send)).status_code == 404

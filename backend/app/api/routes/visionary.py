@@ -7,7 +7,7 @@ manufacturer data is read-only and limited to public fields.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -64,10 +64,13 @@ async def manufacturers(actor: CurrentActor, svc: Service):
 
 
 @router.get("/manufacturers/matches")
-async def manufacturer_matches(actor: CurrentActor, svc: Service):
+async def manufacturer_matches(actor: CurrentActor, svc: Service,
+                               q: str = Query("", max_length=100), listings_offset: int = Query(0, ge=0)):
     """"Find a Manufacturer": manufacturers matching the signed-in Visionary's saved requirements
-    {requirements, applied, notCompared, manufacturers}. Declared before /manufacturers/{id}."""
-    return await svc.matches(actor)
+    {requirements, applied, notCompared, manufacturers, listings, listingsTotal}. `listings`: not yet
+    verified imported companies in the same city (24 per page; `q` searches their names).
+    Declared before /manufacturers/{id}."""
+    return await svc.matches(actor, q, listings_offset)
 
 
 @router.get("/manufacturers/{manufacturer_id}")

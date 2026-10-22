@@ -217,6 +217,13 @@ class VisionaryService:
             "status": "active",
         }
 
+    def _listing(self, org: dict) -> dict:
+        """ManufacturerRecord for a not-yet-verified imported company (no machines, not bookable)."""
+        record = self._record(org, [], [], None)
+        record.update({"verified": False, "listing": True, "matchedMachines": [],
+                       "availability": "Not yet verified"})
+        return record
+
     def _public_profile(self, org: dict, machines: list, certs: list, pref: dict | None) -> dict:
         """PublicManufacturerProfile (Manufacturer Profile page). Public fields only: no contact
         details, owner details or street address."""
@@ -286,7 +293,9 @@ class VisionaryService:
                     for o in orgs]
         return await self._run(load())
 
-    async def matches(self, actor: ActorContext) -> dict:
+    LISTINGS_PAGE = 24
+
+    async def matches(self, actor: ActorContext, q: str = "", listings_offset: int = 0) -> dict:
         """"Find a Manufacturer": manufacturers matching the Visionary's SAVED requirements.
 
         Applied in the database: location (headquarters city) and required machines (at least one
@@ -296,7 +305,8 @@ class VisionaryService:
         async def load():
             requirements = self._requirements_view(await self.repo.project(actor.user_id))
             if not requirements:
-                return {"requirements": None, "applied": [], "notCompared": [], "manufacturers": []}
+                return {"requirements": None, "applied": [], "notCompared": [], "manufacturers": [],
+                        "listings": [], "listingsTotal": 0}
             wanted = {match_key(m): m for m in requirements["machines"] if match_key(m)}
             location = match_key(requirements["manufacturing_location"])
             orgs = await self.repo.matching_manufacturers(location, list(wanted))
@@ -313,10 +323,17 @@ class VisionaryService:
             applied = (["location"] if location else []) + (["machines"] if wanted else [])
             given = {"quantity": requirements["quantity"]["value"], "budget": requirements["budget"]["amount"],
                      "timeline": requirements["timeline"]}
+            # Not-yet-verified directory listings (imported companies) in the same city, after the
+            # verified matches. They carry no machines, so a machine requirement is not compared.
+            listings, listings_total = [], 0
+            if location:
+                rows, listings_total = await self.repo.imported_listings(
+                    location, " ".join(q.split())[:100], self.LISTINGS_PAGE, max(0, listings_offset))
+                listings = [self._listing(row) for row in rows]
             return {"requirements": requirements, "applied": applied,
                     "notCompared": [{"field": f, "reason": NOT_COMPARED[f]} for f in ("quantity", "budget", "timeline")
                                     if given[f]],
-                    "manufacturers": records}
+                    "manufacturers": records, "listings": listings, "listingsTotal": listings_total}
         return await self._run(load())
 
     async def _manufacturer(self, manufacturer_id: str) -> tuple[dict, list, list, dict | None]:

@@ -77,6 +77,8 @@ export type ManufacturerRecord = {
   logo: string | null;
   verified: boolean;
   status: "active";
+  /** A not-yet-verified directory listing (imported company): shown, but no requests. */
+  listing?: boolean;
 };
 
 export type SelectedManufacturer = {

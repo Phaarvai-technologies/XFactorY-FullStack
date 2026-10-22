@@ -67,13 +67,27 @@ export function ManufacturerResults({
   const saved = getVisionaryData().requirements;
   const visionaryApi = useVisionaryApi();
   /** Which saved requirements the answer belongs to; an answer for other requirements is never shown. */
+  /** The search as sent to the server (for the not-yet-verified listings), 300 ms after typing. */
+  const [searchKey, setSearchKey] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchKey(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
   const savedKey = JSON.stringify(saved ?? null);
+  const requestKey = `${savedKey}|${searchKey}`;
   const [answer, setAnswer] = useState<{ key: string; attempt: number; status: "ready" | "error"; result: ManufacturerMatches | null } | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const current = answer && answer.key === savedKey && answer.attempt === attempt ? answer : null;
+  const current = answer && answer.key === requestKey && answer.attempt === attempt ? answer : null;
   const status: "loading" | "ready" | "error" = current ? current.status : "loading";
   const result = current?.result ?? null;
-  const manufacturers: ManufacturerRecord[] = result?.manufacturers ?? [];
+  /** Further pages of listings ("Show more"), for this exact answer only. */
+  const [more, setMore] = useState<{ answer: object; items: ManufacturerRecord[] } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const extra = more && current && more.answer === current ? more.items : [];
+  const listings: ManufacturerRecord[] = [...(result?.listings ?? []), ...extra];
+  const verifiedMatches: ManufacturerRecord[] = result?.manufacturers ?? [];
+  const manufacturers: ManufacturerRecord[] = [...verifiedMatches, ...listings];
+  const listingsTotal = result?.listingsTotal ?? 0;
 
   /**
    * GET /visionary/manufacturers/matches: the backend matches the Visionary's SAVED requirements
@@ -83,28 +97,47 @@ export function ManufacturerResults({
    */
   useEffect(() => {
     let active = true;
-    visionaryApi.matches().then(
+    visionaryApi.matches(searchKey, 0).then(
       (next) => {
-        if (active) setAnswer({ key: savedKey, attempt, status: "ready", result: next });
+        if (active) setAnswer({ key: requestKey, attempt, status: "ready", result: next });
       },
       () => {
-        if (active) setAnswer({ key: savedKey, attempt, status: "error", result: null });
+        if (active) setAnswer({ key: requestKey, attempt, status: "error", result: null });
       },
     );
     return () => {
       active = false;
     };
-    // Only the requirements and Try Again start a new request (not a new API helper object).
+    // Only the requirements, the search and Try Again start a new request (not a new API helper object).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedKey, attempt]);
+  }, [requestKey, attempt]);
 
   function load() {
     setAttempt((n) => n + 1);
   }
 
+  /** "Show more": the next page of not-yet-verified listings for the same requirements and search. */
+  function showMore() {
+    if (!current || loadingMore) return;
+    const owner = current;
+    setLoadingMore(true);
+    visionaryApi.matches(searchKey, listings.length).then(
+      (next) => {
+        setMore((prev) => ({ answer: owner, items: [...(prev && prev.answer === owner ? prev.items : []), ...next.listings] }));
+        setLoadingMore(false);
+      },
+      () => setLoadingMore(false),
+    );
+  }
+
   // The chips show the requirements the backend matched with (while loading: the saved ones).
   const chips = requirementChips(status === "ready" ? result?.requirements : saved);
-  const note = status === "ready" ? matchingNote(result) : "";
+  const note = status === "ready"
+    ? [matchingNote(result),
+       listingsTotal > 0
+         ? "Companies marked “Not yet verified” come from public business records and have not joined X!Y yet: you can view them, but requests can only be sent to verified manufacturers."
+         : ""].filter(Boolean).join(" ")
+    : "";
 
   // Search: within the matching manufacturers, by company name, product or machine.
   const visible = manufacturers.filter((item) => {
@@ -114,6 +147,8 @@ export function ManufacturerResults({
   });
 
   const filtersActive = Boolean(query.trim());
+  // Verified matches on this page + every listing the server found (listings are paged).
+  const shownTotal = visible.filter((item) => !item.listing).length + (query.trim() === searchKey ? listingsTotal : visible.filter((item) => item.listing).length);
 
   return (
     <div className="view active" id="v-mf">
@@ -161,7 +196,7 @@ export function ManufacturerResults({
         {profileId || status !== "ready" ? null : (
         <div className="bar">
           <span aria-live="polite">
-            <strong>{visible.length}</strong> manufacturer{visible.length === 1 ? "" : "s"}
+            <strong>{shownTotal}</strong> manufacturer{shownTotal === 1 ? "" : "s"}
           </span>
           {filtersActive ? (
             <button
@@ -225,6 +260,14 @@ export function ManufacturerResults({
           )}
         </section>
         )}
+        {!profileId && status === "ready" && query.trim() === searchKey && listings.length < listingsTotal ? (
+          <div className="bar">
+            <span />
+            <button type="button" className="link" onClick={showMore} disabled={loadingMore}>
+              {loadingMore ? "Loading…" : `Show more (${(listingsTotal - listings.length).toLocaleString("en-IN")} more)`}
+            </button>
+          </div>
+        ) : null}
 
         <nav className="pager" aria-label="Page navigation">
           <button type="button" className="pbtn pg-prev" onClick={() => onContinue("step4")}>
@@ -271,7 +314,9 @@ function ManufacturerCard({
   return (
     <article
       className={`mcard${selected ? " selected" : ""}`}
-      onClick={() => onSelect(item.id)}
+      onClick={() => {
+        if (!item.listing) onSelect(item.id); // a not-yet-verified listing cannot be chosen
+      }}
     >
       <div className="top">
         <Mark item={item} />
@@ -319,6 +364,7 @@ function ManufacturerCard({
       </div>
       <div className="spacer" />
       <div className="btns">
+        {item.listing ? null : (
         <button
           type="button"
           className="btn"
@@ -329,6 +375,7 @@ function ManufacturerCard({
         >
           Select Manufacturer
         </button>
+        )}
         <button
           type="button"
           className="btn-ghost"
@@ -417,9 +464,11 @@ function ManufacturerProfile({
         <i />
         Availability: {item.availability}
       </div>
-      <button type="button" className="btn" onClick={() => onChoose(item.id)}>
-        Select Manufacturer
-      </button>
+      {item.listing ? null : (
+        <button type="button" className="btn" onClick={() => onChoose(item.id)}>
+          Select Manufacturer
+        </button>
+      )}
     </article>
   );
 }

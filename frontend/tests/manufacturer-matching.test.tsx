@@ -39,8 +39,14 @@ const NOT_COMPARED: ManufacturerMatches["notCompared"] = [
   { field: "quantity", reason: "q" }, { field: "budget", reason: "b" }, { field: "timeline", reason: "t" },
 ];
 
-function answer(manufacturers: ManufacturerMatches["manufacturers"], requirements: VisionaryRequirements | null = REQ): ManufacturerMatches {
-  return { requirements, applied: requirements ? ["location", "machines"] : [], notCompared: requirements ? NOT_COMPARED : [], manufacturers };
+function answer(manufacturers: ManufacturerMatches["manufacturers"], requirements: VisionaryRequirements | null = REQ,
+                listings: ManufacturerMatches["listings"] = [], listingsTotal = listings.length): ManufacturerMatches {
+  return { requirements, applied: requirements ? ["location", "machines"] : [], notCompared: requirements ? NOT_COMPARED : [],
+           manufacturers, listings, listingsTotal };
+}
+
+function listing(id: string, name: string) {
+  return { ...card(id, name, { machines: [], products: [], availability: "Not yet verified" }), listing: true as const };
 }
 
 function save(requirements: VisionaryRequirements | null) {
@@ -141,5 +147,57 @@ describe("Find a Manufacturer", () => {
     window.sessionStorage.setItem("xy-visionary-machines", JSON.stringify(["Welding"]));
     save({ ...REQ, machines: [] });
     expect(getVisionaryData().requirements?.machines).toEqual([]);
+  });
+});
+
+describe("Not-yet-verified listings (imported companies)", () => {
+  it("come after the verified matches, are marked, and cannot be selected or requested", async () => {
+    const onSelect = vi.fn();
+    const onChoose = vi.fn();
+    matches.mockResolvedValue(answer([card("v", "Verified Works")], REQ, [listing("l1", "ASHOK LEYLAND DEFENCE SYSTEMS LIMITED")], 1));
+    await act(async () => {
+      render(<ManufacturerResults onContinue={() => {}} onSelect={onSelect} onChoose={onChoose} selectedId={null} />);
+    });
+    const cards = Array.from(document.querySelectorAll("article.mcard"));
+    expect(cards.map((c) => c.querySelector("h3")?.textContent)).toEqual(["Verified Works", "ASHOK LEYLAND DEFENCE SYSTEMS LIMITED"]);
+    expect(cards[1].textContent).toContain("Not yet verified");
+    expect(cards[1].querySelector("button.btn")).toBeNull();               // no "Select Manufacturer"
+    fireEvent.click(cards[1]);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(cards[0].querySelector("button.btn")?.textContent).toBe("Select Manufacturer");
+    expect(screen.getByText(/requests can only be sent to verified manufacturers/)).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();                       // 1 verified + 1 listing
+  });
+
+  it("only listings in the city → shown instead of 'No matching manufacturers found'", async () => {
+    matches.mockResolvedValue(answer([], REQ, [listing("l1", "ASIAN INDUSTRIES")], 1));
+    await act(async () => { page(); });
+    expect(screen.getByText("ASIAN INDUSTRIES")).toBeInTheDocument();
+    expect(screen.queryByText("No matching manufacturers found")).toBeNull();
+  });
+
+  it("'Show more' loads the next page of listings with the same search", async () => {
+    matches.mockResolvedValueOnce(answer([], REQ, [listing("l1", "A One"), listing("l2", "A Two")], 3));
+    matches.mockResolvedValueOnce(answer([], REQ, [listing("l3", "A Three")], 3));
+    await act(async () => { page(); });
+    expect(matches).toHaveBeenLastCalledWith("", 0);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Show more (1 more)" })));
+    expect(matches).toHaveBeenLastCalledWith("", 2);
+    expect(Array.from(document.querySelectorAll("article.mcard h3")).map((h) => h.textContent)).toEqual(["A One", "A Two", "A Three"]);
+    expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+  });
+
+  it("the search box also searches listing names on the server", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      matches.mockResolvedValue(answer([], REQ, [listing("l1", "ASHLEY ALTEAMS INDIA LIMITED")], 1));
+      await act(async () => { page(); });
+      fireEvent.change(screen.getByPlaceholderText("Search by name, product or machine"), { target: { value: "ashley" } });
+      await act(async () => { vi.advanceTimersByTime(350); });
+      await waitFor(() => expect(matches).toHaveBeenLastCalledWith("ashley", 0));
+      await waitFor(() => expect(screen.getByText("ASHLEY ALTEAMS INDIA LIMITED")).toBeInTheDocument());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
