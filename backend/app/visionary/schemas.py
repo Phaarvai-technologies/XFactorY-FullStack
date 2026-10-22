@@ -6,7 +6,7 @@ their own objects unchanged. Strings are trimmed; limits match the form inputs
 """
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 STAGES = ("Idea Stage", "Design Stage", "Prototype Stage", "Ready for Manufacturing")
 TIMELINES = ("immediately", "within_1_month", "1_3_months", "3_6_months")
@@ -75,13 +75,29 @@ class StageIn(_Model):
 
 
 class RequirementsIn(_Model):
-    """Step 4 "Manufacturing needs". complete=true for "Find a Manufacturer"."""
+    """Step 4 "Manufacturing needs". complete=true for "Find a Manufacturer".
+    `machines`: the manufacturing capabilities the project needs (optional, any number up to 30)."""
+    machines: list[str] = Field(default_factory=list, max_length=30)
     manufacturing_location: str = Field(default="", max_length=120)
     quantity: Quantity = Quantity()
     budget: Budget = Budget()
     timeline: Timeline = ""
     additional_requirements: str = Field(default="", max_length=500)
     complete: bool = True
+
+    @field_validator("machines")
+    @classmethod
+    def _machines(cls, values: list[str]) -> list[str]:
+        """Trimmed, empty entries dropped, duplicates (ignoring case) removed, order kept."""
+        seen, clean = set(), []
+        for value in values:
+            name = " ".join(str(value or "").split())
+            if len(name) > 160:
+                raise ValueError("Machine names can be at most 160 characters.")
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                clean.append(name)
+        return clean
 
     @model_validator(mode="after")
     def _required(self):

@@ -112,7 +112,7 @@ async def test_visionary_flow_end_to_end(client):
     assert r.status_code == 422
     r = await client.put("/visionary/project/requirements", headers=v, json=NEEDS)
     assert r.status_code == 200, r.text
-    assert r.json()["requirements"] == NEEDS
+    assert r.json()["requirements"] == {**NEEDS, "machines": []}
     status = await client.sql("""SELECT op.status FROM opportunities op JOIN visionary_projects vp
                                  ON vp.opportunity_id=op.id WHERE op.title='Customized Coffee Cups'
                                  ORDER BY op.created_at DESC LIMIT 1""")
@@ -182,7 +182,7 @@ async def test_visionary_flow_end_to_end(client):
     r = await client.get("/visionary/me", headers=v)
     me = r.json()
     assert me["profile"] == VISIONARY and me["idea"] == IDEA and me["stage"] == "Prototype Stage"
-    assert me["requirements"] == NEEDS
+    assert me["requirements"] == {**NEEDS, "machines": []}
     assert [x["status"] for x in me["requests"]] == ["Accepted"]
     assert (await client.get(f"/visionary/requests/{sent['id']}", headers=v)).json()["status"] == "Accepted"
 
@@ -259,3 +259,100 @@ async def test_manufacturer_without_machines_offers_catalog(client):
     assert r.json()["visionary"] == "Jordan Lee"
     assert (await client.post("/visionary/requests", headers=v,
                               json={**send, "machine": "Teleporter"})).status_code == 422
+
+
+# ---------------------------------------------------------------- Find a Manufacturer: matching
+async def _manufacturer(client, sub, name, city, state, machines, approve=True):
+    """A manufacturer owned by `sub`: details approved, profile 100% complete, the given machines
+    ({"type", "subcategory", "status"}) saved; company approved unless approve=False."""
+    h = auth(client, sub)
+    r = await client.post("/manufacturer/account", headers=h, json={**ACCOUNT, "companyName": name,
+                                                                      "contact": f"{sub}@example.com"})
+    assert r.status_code == 201, r.text
+    org = await approve_user(client, sub)
+    profile = {**PROFILE, "company": {**PROFILE["company"], "name": name},
+               "location": {**PROFILE["location"], "city": city, "state": state}}
+    assert (await client.put("/manufacturer/profile", headers=h, json=profile)).status_code == 200
+    for m in machines:
+        r = await client.post("/manufacturer/machinery", headers=h,
+                              json={**MACHINE, "type": m["type"], "subcategory": m.get("subcategory", ""),
+                                    "status": m.get("status", "Published")})
+        assert r.status_code == 201, r.text
+    if approve:
+        assert (await approve_company(client, org)).status_code == 200
+    return org
+
+
+async def test_find_a_manufacturer_matches_saved_requirements(client):
+    t = uuid.uuid4().hex[:6]
+    chennai = await _manufacturer(client, f"m1_{t}", f"Chennai Moulders {t}", "Chennai", "Tamil Nadu",
+                                  [{"type": "Injection Moulding"}, {"type": "Lathe", "status": "Draft"}])
+    both = await _manufacturer(client, f"m2_{t}", f"Chennai Precision {t}", "chennai ", "Tamil Nadu",
+                               [{"type": "Injection Moulding"}, {"type": "5-axis mill", "subcategory": "CNC machining"}])
+    furniture = await _manufacturer(client, f"m3_{t}", f"Tec Info {t}", "KANCHIPURAM", "Tamil Nadu",
+                                    [{"type": "Wood Router", "subcategory": "Furniture"}])
+    hidden = await _manufacturer(client, f"m4_{t}", f"Archived CNC {t}", "Chennai", "Tamil Nadu",
+                                 [{"type": "CNC Machining"}])
+    # not visible to Visionaries (archived by an admin): never matched, even with the right city / machine
+    await client.sql("UPDATE organizations SET is_archived=true WHERE id=CAST(:o AS uuid)", o=hidden)
+    ours = {chennai, both, furniture, hidden}
+    v = auth(client, f"vis_{uuid.uuid4().hex[:10]}")
+
+    async def find():
+        r = await client.get("/visionary/manufacturers/matches", headers=v)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # nothing saved yet: no list at all (never an unfiltered fallback)
+    assert await find() == {"requirements": None, "applied": [], "notCompared": [], "manufacturers": []}
+
+    assert (await client.put("/visionary/project/idea", headers=v, json=IDEA)).status_code == 200
+    screenshot = {**NEEDS, "budget": {"amount": 2000, "currency": "INR"}, "timeline": "immediately",
+                  "machines": ["Injection Moulding", "CNC Machining", " injection moulding ", ""]}
+    r = await client.put("/visionary/project/requirements", headers=v, json=screenshot)
+    assert r.status_code == 200, r.text
+    assert r.json()["requirements"]["machines"] == ["Injection Moulding", "CNC Machining"]  # cleaned, saved
+
+    res = await find()
+    assert res["requirements"]["machines"] == ["Injection Moulding", "CNC Machining"]
+    assert res["requirements"]["manufacturing_location"] == "Chennai"
+    assert res["applied"] == ["location", "machines"]
+    assert [n["field"] for n in res["notCompared"]] == ["quantity", "budget", "timeline"]
+    mine = [m for m in res["manufacturers"] if m["id"] in ours]
+    # Kanchipuram furniture maker and the archived company are excluded; the maker offering both
+    # machines (one via its subcategory, case-insensitive) comes before the one offering one.
+    assert [m["id"] for m in mine] == [both, chennai]
+    assert mine[0]["matchedMachines"] == ["Injection Moulding", "CNC Machining"]
+    assert mine[1]["matchedMachines"] == ["Injection Moulding"]
+    for m in res["manufacturers"]:  # every listed manufacturer satisfies both filters
+        assert m["location"].lower().startswith("chennai") and m["matchedMachines"]
+
+    # a draft (unpublished) machine is not offered; nothing else matches → empty
+    r = await client.put("/visionary/project/requirements", headers=v, json={**screenshot, "machines": ["Lathe"]})
+    assert r.status_code == 200
+    assert chennai not in {m["id"] for m in (await find())["manufacturers"]}
+
+    # the full location as shown on the card, other case / punctuation
+    await client.put("/visionary/project/requirements", headers=v,
+                     json={**screenshot, "manufacturing_location": "  chennai,tamil nadu ", "machines": ["cnc  MACHINING"]})
+    assert [m["id"] for m in (await find())["manufacturers"] if m["id"] in ours] == [both]
+
+    # requirements changed: Kanchipuram, no machines selected → location only; old machines gone
+    await client.put("/visionary/project/requirements", headers=v,
+                     json={**screenshot, "manufacturing_location": "Kanchipuram", "machines": []})
+    res = await find()
+    assert res["applied"] == ["location"] and res["requirements"]["machines"] == []
+    assert [m["id"] for m in res["manufacturers"] if m["id"] in ours] == [furniture]
+    assert (await client.get("/visionary/me", headers=v)).json()["requirements"]["machines"] == []  # refresh
+
+    # no manufacturer in that city
+    await client.put("/visionary/project/requirements", headers=v,
+                     json={**screenshot, "manufacturing_location": f"Nowhere {t}"})
+    assert (await find())["manufacturers"] == []
+
+    # too many machines / too long a name are refused
+    r = await client.put("/visionary/project/requirements", headers=v,
+                         json={**screenshot, "machines": [f"M{i}" for i in range(31)]})
+    assert r.status_code == 422
+    r = await client.put("/visionary/project/requirements", headers=v, json={**screenshot, "machines": ["x" * 161]})
+    assert r.status_code == 422

@@ -63,6 +63,13 @@ async def manufacturers(actor: CurrentActor, svc: Service):
     return await svc.manufacturers()
 
 
+@router.get("/manufacturers/matches")
+async def manufacturer_matches(actor: CurrentActor, svc: Service):
+    """"Find a Manufacturer": manufacturers matching the signed-in Visionary's saved requirements
+    {requirements, applied, notCompared, manufacturers}. Declared before /manufacturers/{id}."""
+    return await svc.matches(actor)
+
+
 @router.get("/manufacturers/{manufacturer_id}")
 async def manufacturer(manufacturer_id: str, actor: CurrentActor, svc: Service):
     """One manufacturer: {record, profile} (card data and public profile)."""
