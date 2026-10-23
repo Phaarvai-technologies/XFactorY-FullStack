@@ -116,7 +116,7 @@ async def create_request(body: RequestIn, actor: CurrentActor, svc: Service):
 
 @router.post("/requests/{request_id}/cancel")
 async def cancel_request(request_id: UUID, actor: CurrentActor, svc: Service):
-    """Undo a request the Visionary sent. The manufacturer is not notified and no longer sees it."""
+    """Undo a request the Visionary sent. It stays as cancelled. The manufacturer is not notified and cannot accept it."""
     return await svc.cancel_request(actor, request_id)
 
 

@@ -372,7 +372,20 @@ export function RequestList({
                 key={request.id || request.request_id || String(index)}
                 request={request}
                 onToast={onToast}
-                onChanged={(data) => setRequests([...(data.requests ?? [])].reverse())}
+                onChanged={(data, cancelledId) => {
+                  const next = (data.requests ?? []).map((item) =>
+                    item.id === cancelledId ? { ...item, status: "Cancelled" } : item,
+                  );
+                  if (cancelledId && !next.some((item) => item.id === cancelledId)) {
+                    setRequests((current) =>
+                      current.map((item) =>
+                        item.id === cancelledId ? { ...item, status: "Cancelled" } : item,
+                      ),
+                    );
+                    return;
+                  }
+                  setRequests([...next].reverse());
+                }}
               />
             ))}
           </div>
@@ -389,7 +402,7 @@ function RequestCard({
 }: {
   request: ManufacturingRequest;
   onToast: (message: string) => void;
-  onChanged: (data: VisionaryData) => void;
+  onChanged: (data: VisionaryData, cancelledId: string) => void;
 }) {
   const visionaryApi = useVisionaryApi();
   const [open, setOpen] = useState(false);
@@ -404,7 +417,7 @@ function RequestCard({
     setCancelling(true);
     try {
       const data = await visionaryApi.cancelRequest(request.id);
-      onChanged(data);
+      onChanged(data, request.id);
     } catch (error) {
       onToast(errorMessage(error, "Couldn’t undo this request. Please try again."));
     } finally {
@@ -443,7 +456,7 @@ function RequestCard({
           <button type="button" className="btn btn-ghost" onClick={undo} disabled={cancelling}>
             {cancelling ? "Undoing…" : "Undo request"}
           </button>
-          <p className="hint">This cancels the request. The manufacturer is not told.</p>
+          <p className="hint">This cancels the request. It stays in this list. The manufacturer sees it as cancelled and cannot accept it.</p>
         </div>
       ) : null}
     </ExpandCard>

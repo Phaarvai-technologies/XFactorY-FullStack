@@ -475,9 +475,9 @@ class VisionaryRepository:
         await self.db.commit()
 
     async def cancel_request(self, user_id: UUID, request_id: UUID) -> None:
-        """Withdraw a request the Visionary sent. No notification is written.
+        """Cancel a request the Visionary sent. The row is kept with status cancelled.
 
-        cancellation_reason marks it so the manufacturer dashboard query leaves it out.
+        The manufacturer is not notified and cannot accept it. It stays visible as cancelled.
         """
         row = (await self.db.execute(text("""
             SELECT id, status, engagement_id FROM manufacturer_booking_requests
