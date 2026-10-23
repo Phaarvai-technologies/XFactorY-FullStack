@@ -71,6 +71,26 @@ class IdeaIn(_Model):
         return self
 
 
+class ProjectUpdateIn(_Model):
+    """View All Projects "Save": the fields on the project card. Machines are left as stored."""
+    project: str = Field(min_length=1, max_length=160)
+    idea: str = Field(default="", max_length=500)
+    product: str = Field(default="", max_length=160)
+    industry: str = Field(default="", max_length=120)
+    stage: str = Field(default="", max_length=40)
+    manufacturing_location: str = Field(default="", max_length=120)
+    quantity: int = Field(default=0, ge=0, le=MAX_QUANTITY)
+    budget: int = Field(default=0, ge=0, le=MAX_BUDGET)
+    timeline: Timeline = ""
+    additional_requirements: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def _stage(self):
+        if self.stage and self.stage not in STAGES:
+            raise ValueError("Choose a project stage.")
+        return self
+
+
 class StageIn(_Model):
     """Step 3 "Project stage"."""
     stage: Literal["Idea Stage", "Design Stage", "Prototype Stage", "Ready for Manufacturing"]

@@ -227,8 +227,8 @@ export function VisionaryFlow() {
       {slide === "project" ? (
         <MyProject key={visit} onContinue={go} onAddProject={startNewProject} onToast={toast.show} />
       ) : null}
-      {slide === "projects" ? <ProjectList key={visit} onContinue={go} /> : null}
-      {slide === "requests" ? <RequestList key={visit} onContinue={go} /> : null}
+      {slide === "projects" ? <ProjectList key={visit} onContinue={go} onToast={toast.show} /> : null}
+      {slide === "requests" ? <RequestList key={visit} onContinue={go} onToast={toast.show} /> : null}
       {slide === "manufacturer" ? <ManufacturerProfilePage key={visit} onContinue={go} /> : null}
       <VisionaryToast message={toast.message} shown={toast.shown} />
     </>

@@ -185,7 +185,17 @@ class VisionaryService:
                 "additional_requirements": project["additional_requirements"] or ""}
 
     @staticmethod
+    def _project_was_edited(row: dict) -> bool:
+        updated = row.get("project_updated_at")
+        created = row.get("created_at")
+        return bool(updated and created and updated > created)
+
+    @staticmethod
     def _request_view(row: dict) -> dict:
+        status = REQUEST_STATUS.get(row["status"], row["status"])
+        # A later edit of the project shows on the request. A withdrawn request stays Cancelled.
+        if status == "submitted" and VisionaryService._project_was_edited(row):
+            status = "Edited"
         return {
             "id": str(row["id"]), "request_id": row["request_number"],
             "manufacturer_id": str(row["manufacturer_organization_id"]),
@@ -196,7 +206,7 @@ class VisionaryService:
             "manufacturing_location": row["manufacturing_location"],
             "budget": {"amount": _int(row["budget_amount"]), "currency": "INR"},
             "timeline": row["timeline"], "additional_requirements": row["additional_requirements"] or "",
-            "status": REQUEST_STATUS.get(row["status"], row["status"]),
+            "status": status,
             "created_at": row["created_at"].isoformat(),
         }
 
@@ -397,6 +407,14 @@ class VisionaryService:
 
     async def save_requirements(self, actor: ActorContext, data: dict, complete: bool) -> dict:
         await self._run(self.repo.save_requirements(actor.user_id, data, complete))
+        return await self.overview(actor)
+
+    async def update_project(self, actor: ActorContext, project_id: UUID, data: dict) -> dict:
+        await self._run(self.repo.update_project(actor.user_id, project_id, data))
+        return await self.overview(actor)
+
+    async def cancel_request(self, actor: ActorContext, request_id: UUID) -> dict:
+        await self._run(self.repo.cancel_request(actor.user_id, request_id))
         return await self.overview(actor)
 
     async def draft(self, actor: ActorContext, manufacturer_id: str) -> dict | None:

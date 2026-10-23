@@ -403,12 +403,14 @@ class VisionaryRepository:
         """The Visionary's own requests, oldest first (the screens show the latest)."""
         sql = """
             SELECT br.id, br.request_number, br.manufacturer_organization_id, br.requested_capacity,
-                   br.status, br.created_at, o.display_name manufacturer_name, d.machine_name,
-                   d.required_duration, d.manufacturing_location, d.budget_amount, d.budget_currency,
-                   d.timeline, d.additional_requirements, d.project_name, d.visionary_name
+                   br.status, br.created_at, br.cancellation_reason, o.display_name manufacturer_name,
+                   d.machine_name, d.required_duration, d.manufacturing_location, d.budget_amount,
+                   d.budget_currency, d.timeline, d.additional_requirements, d.project_name,
+                   d.visionary_name, vp.updated_at project_updated_at
             FROM manufacturer_booking_requests br
             JOIN visionary_request_details d ON d.booking_request_id=br.id
             JOIN organizations o ON o.id=br.manufacturer_organization_id
+            LEFT JOIN visionary_projects vp ON vp.id=d.project_id
             WHERE br.requested_by_user_id=:u
         """
         params: dict = {"u": user_id}
@@ -417,3 +419,85 @@ class VisionaryRepository:
             params["id"] = request_id
         sql += " ORDER BY br.created_at, br.id"
         return [dict(r) for r in (await self.db.execute(text(sql), params)).mappings()]
+
+    async def update_project(self, user_id: UUID, project_id: UUID, data: dict) -> None:
+        """Save an edit of one project. Unchanged values are left as stored."""
+        row = (await self.db.execute(text("""
+            SELECT vp.*, op.title project_name, op.narrative idea_description
+            FROM visionary_projects vp JOIN opportunities op ON op.id=vp.opportunity_id
+            WHERE vp.id=:id AND vp.user_id=:u AND op.status NOT IN ('closed','cancelled')
+        """), {"id": project_id, "u": user_id})).mappings().first()
+        if row is None:
+            raise LookupError("Project not found")
+        current = dict(row)
+        title = data["project"].strip()
+        idea = data["idea"].strip()
+        product = data["product"].strip()
+        industry = data["industry"].strip()
+        stage = data["stage"].strip()
+        location = data["manufacturing_location"].strip()
+        additional = data["additional_requirements"].strip()
+        quantity = int(data["quantity"] or 0)
+        budget = int(data["budget"] or 0)
+        timeline = data["timeline"] or ""
+        same = (
+            (current["project_name"] or "") == title
+            and (current["idea_description"] or "") == idea
+            and (current["product"] or "") == product
+            and (current["industry"] or "") == industry
+            and (current["project_stage"] or "") == stage
+            and (current["manufacturing_location"] or "") == location
+            and (current["additional_requirements"] or "") == additional
+            and int(current["quantity"] or 0) == quantity
+            and int(current["budget_amount"] or 0) == budget
+            and (current["timeline"] or "") == timeline
+        )
+        if same:
+            await self.db.commit()
+            return
+        await self.db.execute(text("""
+            UPDATE opportunities SET title=:title, narrative=NULLIF(:idea,''), updated_at=now(), version=version+1
+            WHERE id=:op AND owner_user_id=:u
+        """), {"op": current["opportunity_id"], "u": user_id, "title": title, "idea": idea})
+        await self.db.execute(text("""
+            UPDATE visionary_projects SET product=NULLIF(:product,''), industry=NULLIF(:industry,''),
+              project_stage=NULLIF(:stage,''), manufacturing_location=NULLIF(:location,''),
+              quantity=NULLIF(:quantity,0), budget_amount=NULLIF(:budget,0), timeline=NULLIF(:timeline,''),
+              additional_requirements=NULLIF(:additional,'')
+            WHERE id=:id AND user_id=:u
+        """), {"id": project_id, "u": user_id, "product": product, "industry": industry, "stage": stage,
+               "location": location, "quantity": quantity, "budget": budget, "timeline": timeline,
+               "additional": additional})
+        if (current["project_name"] or "") != title:
+            await self.db.execute(text("""
+                UPDATE visionary_request_details SET project_name=:title WHERE project_id=:id
+            """), {"id": project_id, "title": title})
+        await self.db.commit()
+
+    async def cancel_request(self, user_id: UUID, request_id: UUID) -> None:
+        """Withdraw a request the Visionary sent. No notification is written.
+
+        cancellation_reason marks it so the manufacturer dashboard query leaves it out.
+        """
+        row = (await self.db.execute(text("""
+            SELECT id, status, engagement_id FROM manufacturer_booking_requests
+            WHERE id=:id AND requested_by_user_id=:u
+        """), {"id": request_id, "u": user_id})).mappings().first()
+        if row is None:
+            raise LookupError("Request not found")
+        if row["status"] == "cancelled":
+            await self.db.commit()
+            return
+        if row["status"] != "new":
+            raise ValueError("This request can no longer be undone")
+        await self.db.execute(text("""
+            UPDATE manufacturer_booking_requests
+            SET status='cancelled', cancelled_at=now(), cancellation_reason='Withdrawn by visionary',
+                version=version+1
+            WHERE id=:id AND requested_by_user_id=:u
+        """), {"id": request_id, "u": user_id})
+        await self.db.execute(text("""
+            UPDATE engagements SET status='closed', updated_at=now()
+            WHERE id=:e AND status='sent'
+        """), {"e": row["engagement_id"]})
+        await self.db.commit()

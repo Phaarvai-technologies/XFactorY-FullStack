@@ -631,6 +631,13 @@
 .xy-visionary #v-pj .pcard .badge{margin-top:0}
 .xy-visionary #v-pj .pcard .body{padding:0 22px 20px}
 .xy-visionary #v-pj .pcard .idea{margin:0 0 14px}
+.xy-visionary #v-pj .edit-form{display:grid;gap:12px}
+.xy-visionary #v-pj .edit-form label{display:block;font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:4px}
+.xy-visionary #v-pj .edit-form input,.xy-visionary #v-pj .edit-form textarea,.xy-visionary #v-pj .edit-form select{width:100%;font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.xy-visionary #v-pj .edit-form textarea{min-height:88px;resize:vertical}
+.xy-visionary #v-pj .edit-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px}
+.xy-visionary #v-pj .edit-actions .hint{margin:0;color:var(--muted);font-size:.85rem}
+.xy-visionary #v-pj .pcard .body>.btn{margin-top:14px}
 .xy-visionary #v-pj .empty{background:#fff;border:1px dashed var(--line);border-radius:20px;padding:28px;color:var(--muted)}
 .xy-visionary #v-pj .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
 .xy-visionary #v-pj .actions .btn{flex:1 1 140px;text-align:center}

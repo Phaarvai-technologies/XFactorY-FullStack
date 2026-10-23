@@ -82,6 +82,28 @@ export function useVisionaryApi() {
       saveStage: (stage: string) => put("/project/stage", { stage }),
       saveRequirements: (requirements: VisionaryRequirements, complete: boolean) =>
         put("/project/requirements", { ...requirements, complete }),
+      /** View All Projects "Save". Returns the refreshed overview. */
+      updateProject: (
+        id: string,
+        project: {
+          project: string;
+          idea: string;
+          product: string;
+          industry: string;
+          stage: string;
+          manufacturing_location: string;
+          quantity: number;
+          budget: number;
+          timeline: string;
+          additional_requirements: string;
+        },
+      ) => put(`/projects/${encodeURIComponent(id)}`, project),
+      /** Undo a sent request. The manufacturer is not notified. */
+      cancelRequest: (id: string) =>
+        call<VisionaryData>(`/requests/${encodeURIComponent(id)}/cancel`, { method: "POST" }).then((data) => {
+          setVisionaryData(data);
+          return data;
+        }),
       manufacturers: () => call<ManufacturerRecord[]>("/manufacturers"),
       /** Manufacturers matching the signed-in Visionary's saved requirements (filtered on the server). */
       matches: (q = "", listingsOffset = 0) =>

@@ -125,7 +125,20 @@ export function MyProject({
     status: "",
   };
 
-  const projectName = request.project_name || idea?.project || "";
+  const projectName = idea?.project || request.project_name || "";
+  const location = requirements ? requirements.manufacturing_location : request.manufacturing_location;
+  const quantityValue = requirements ? requirements.quantity?.value : request.quantity?.value;
+  const budgetAmount = requirements ? requirements.budget?.amount : request.budget?.amount;
+  const timeline = requirements ? requirements.timeline : request.timeline;
+  const requestLabel = !sent
+    ? "No Request Sent Yet"
+    : sent.status === "Edited"
+      ? "Project Edited"
+      : sent.status === "Cancelled"
+        ? "Request Cancelled"
+        : statusLabel(sent.status) === "Request Sent"
+          ? "Manufacturing Request Sent"
+          : statusLabel(sent.status);
   const created = request.created_at ? new Date(request.created_at) : null;
   const dateLabel =
     created && !Number.isNaN(created.getTime())
@@ -134,13 +147,10 @@ export function MyProject({
 
   const tiles = [
     ["Industry", idea?.industry],
-    ["Location", request.manufacturing_location],
-    [
-      "Quantity",
-      request.quantity?.value ? `${Number(request.quantity.value).toLocaleString("en-IN")} units` : "",
-    ],
-    ["Budget", request.budget?.amount ? `₹${Number(request.budget.amount).toLocaleString("en-IN")}` : ""],
-    ["Timeline", TIMELINE_LABELS[request.timeline] || ""],
+    ["Location", location],
+    ["Quantity", quantityValue ? `${Number(quantityValue).toLocaleString("en-IN")} units` : ""],
+    ["Budget", budgetAmount ? `₹${Number(budgetAmount).toLocaleString("en-IN")}` : ""],
+    ["Timeline", TIMELINE_LABELS[timeline || ""] || ""],
     ["Project Stage", stage || "Finding a manufacturer"],
   ];
 
@@ -158,10 +168,10 @@ export function MyProject({
               <small>Project</small>
               <h2>{projectName}</h2>
             </div>
-            <span className="pill">{sent ? "Manufacturing Request Sent" : "No Request Sent Yet"}</span>
+            <span className="pill">{requestLabel}</span>
           </div>
           <div className="track" aria-label="Progress">
-            <div className={sent ? "step done" : "step"}>Request sent</div>
+            <div className={sent && sent.status !== "Cancelled" ? "step done" : "step"}>Request sent</div>
             <div className="step">Manufacturer reviews</div>
             <div className="step">Manufacturer responds</div>
           </div>
@@ -209,13 +219,10 @@ export function MyProject({
             Add Project
           </button>
           <button type="button" className="btn btn-primary" onClick={() => onContinue("requests")}>
-            View Request
-          </button>
-          <button type="button" className="btn btn-primary" onClick={() => onToast("Coming soon.")}>
-            Edit Project
+            View All Requests
           </button>
           <button type="button" className="btn btn-primary" onClick={() => onContinue("projects")}>
-            View Project
+            View All Projects
           </button>
           <button type="button" className="btn btn-primary" onClick={() => onContinue("results")}>
             Explore Manufacturers

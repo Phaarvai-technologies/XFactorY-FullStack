@@ -1262,7 +1262,8 @@ class ManufacturerRepository:
                       FROM manufacturer_booking_requests br
                       JOIN organizations bo ON bo.id=br.demand_organization_id
                       LEFT JOIN manufacturer_capacity_listings cl ON cl.id=br.capacity_listing_id
-                      WHERE br.manufacturer_organization_id=o.id) x) AS bookings,
+                      WHERE br.manufacturer_organization_id=o.id
+                        AND COALESCE(br.cancellation_reason, '') <> 'Withdrawn by visionary') x) AS bookings,
                    (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
                       SELECT form_key, record_id, current_step, completed_steps, total_steps, status, updated_at
                       FROM manufacturer_form_progress WHERE organization_id=o.id) x) AS progress

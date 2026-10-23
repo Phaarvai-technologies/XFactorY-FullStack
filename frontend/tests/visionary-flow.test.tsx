@@ -11,6 +11,8 @@ import type { VisionarySlide } from "@/lib/visionary/paths";
 
 const mockSaveStage = vi.fn().mockResolvedValue({});
 const mockSaveRequirements = vi.fn().mockResolvedValue({});
+const mockUpdateProject = vi.fn();
+const mockCancelRequest = vi.fn();
 const mockSaveProfile = vi.fn().mockResolvedValue({});
 const mockLoad = vi.fn().mockResolvedValue({});
 const mockManufacturers = vi.fn().mockResolvedValue([
@@ -51,6 +53,8 @@ vi.mock("@/lib/visionary/api", () => ({
     saveProfile: mockSaveProfile,
     saveStage: mockSaveStage,
     saveRequirements: mockSaveRequirements,
+    updateProject: mockUpdateProject,
+    cancelRequest: mockCancelRequest,
     manufacturers: mockManufacturers,
     matches: mockMatches,
   }),
@@ -499,24 +503,86 @@ describe("Visionary stage and AI guide flow", () => {
       ],
     });
 
-    const { unmount } = render(<ProjectList onContinue={() => {}} />);
-    expect(screen.getByRole("heading", { name: "Your Projects" })).toBeInTheDocument();
+    const saved = {
+      profile: null,
+      idea: { project: "Renamed Bottle", idea: "A refillable bottle for cafés", product: "Bottle", industry: "Food & Beverage" },
+      stage: "Prototype Stage",
+      requirements: null,
+      projects: [
+        {
+          id: "p1",
+          project: "Renamed Bottle",
+          idea: "A refillable bottle for cafés",
+          product: "Bottle",
+          industry: "Food & Beverage",
+          stage: "Prototype Stage",
+          requirements: {
+            manufacturing_location: "Chennai",
+            quantity: { value: 1000, unit: "units" as const },
+            budget: { amount: 200000, currency: "INR" as const },
+            timeline: "immediately",
+            additional_requirements: "Food grade",
+            machines: ["Blow Moulding"],
+          },
+          created_at: "2026-10-23T00:00:00.000Z",
+        },
+      ],
+      requests: [
+        {
+          id: "r1",
+          request_id: "REQ-1",
+          manufacturer_id: "m1",
+          manufacturer_name: "Tec Info",
+          project_name: "Renamed Bottle",
+          visionary: "Priya",
+          machine: "Blow Moulding",
+          quantity: { value: 1000, unit: "units" as const },
+          required_duration: "1_month",
+          manufacturing_location: "Chennai",
+          budget: { amount: 200000, currency: "INR" as const },
+          timeline: "immediately",
+          additional_requirements: "",
+          status: "Edited",
+          created_at: "2026-10-23T00:00:00.000Z",
+        },
+      ],
+    };
+    mockUpdateProject.mockResolvedValue(saved);
+
+    const { unmount } = render(<ProjectList onContinue={() => {}} onToast={() => {}} />);
+    expect(screen.getByRole("heading", { name: "View All Projects" })).toBeInTheDocument();
     expect(screen.getByText("Paper Cups")).toBeInTheDocument();
     expect(screen.queryByText("A refillable bottle for cafés")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Customized Bottle/ }));
     expect(screen.getByText("A refillable bottle for cafés")).toBeInTheDocument();
     expect(screen.getByText("Blow Moulding")).toBeInTheDocument();
-    expect(screen.getByText("Chennai")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Renamed Bottle" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    expect(mockUpdateProject).toHaveBeenCalledWith("p1", expect.objectContaining({ project: "Renamed Bottle" }));
+    expect(screen.getByRole("button", { name: /Renamed Bottle/ })).toBeInTheDocument();
     unmount();
 
-    render(<RequestList onContinue={() => {}} />);
-    expect(screen.getByRole("heading", { name: "Your Requests" })).toBeInTheDocument();
+    mockCancelRequest.mockResolvedValue({
+      ...saved,
+      requests: [{ ...saved.requests[0], status: "Cancelled" }],
+    });
+    render(<RequestList onContinue={() => {}} onToast={() => {}} />);
+    expect(screen.getByRole("heading", { name: "View All Requests" })).toBeInTheDocument();
     expect(screen.getByText("Sent to Tec Info")).toBeInTheDocument();
     expect(screen.queryByText("REQ-1")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Sent to Tec Info/ }));
     expect(screen.getByText("REQ-1")).toBeInTheDocument();
-    expect(screen.getByText("Blow Moulding")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Undo request" }));
+    });
+    expect(mockCancelRequest).toHaveBeenCalledWith("r1");
+    expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Undo request" })).not.toBeInTheDocument();
   });
 });

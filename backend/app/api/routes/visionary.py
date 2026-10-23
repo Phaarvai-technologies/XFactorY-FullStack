@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.identity.auth import CurrentActor
-from app.visionary.schemas import IdeaIn, ProfileIn, RequestDraftIn, RequestIn, RequirementsIn, StageIn
+from app.visionary.schemas import (
+    IdeaIn, ProfileIn, ProjectUpdateIn, RequestDraftIn, RequestIn, RequirementsIn, StageIn,
+)
 from app.visionary.service import VisionaryService
 
 router = APIRouter(prefix="/visionary", tags=["visionary"])
@@ -51,6 +53,12 @@ async def save_idea(body: IdeaIn, actor: CurrentActor, svc: Service):
 async def save_stage(body: StageIn, actor: CurrentActor, svc: Service):
     """Step 3 "Project stage" -> Save & Next / Previous."""
     return await svc.save_stage(actor, body.stage)
+
+
+@router.put("/projects/{project_id}")
+async def update_project(project_id: UUID, body: ProjectUpdateIn, actor: CurrentActor, svc: Service):
+    """View All Projects "Save". Writes only this project, and only when a value changed."""
+    return await svc.update_project(actor, project_id, body.model_dump())
 
 
 @router.put("/project/requirements")
@@ -104,6 +112,12 @@ async def create_request(body: RequestIn, actor: CurrentActor, svc: Service):
     """Request form "Send Request to Manufacturer". The manufacturer sees it in its
     dashboard's booking requests (status New)."""
     return await svc.create_request(actor, body.model_dump())
+
+
+@router.post("/requests/{request_id}/cancel")
+async def cancel_request(request_id: UUID, actor: CurrentActor, svc: Service):
+    """Undo a request the Visionary sent. The manufacturer is not notified and no longer sees it."""
+    return await svc.cancel_request(actor, request_id)
 
 
 @router.get("/requests/{request_id}")
