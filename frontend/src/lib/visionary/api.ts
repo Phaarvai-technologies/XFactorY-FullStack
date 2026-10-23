@@ -62,7 +62,8 @@ export function useVisionaryApi() {
           return data;
         }),
       saveProfile: (profile: VisionaryProfile) => put("/profile", profile),
-      saveIdea: (idea: VisionaryIdea, complete: boolean) => put("/project/idea", { ...idea, complete }),
+      saveIdea: (idea: VisionaryIdea, complete: boolean, createNew = false) =>
+        put("/project/idea", { ...idea, complete, create_new: createNew }),
       saveStage: (stage: string) => put("/project/stage", { stage }),
       saveRequirements: (requirements: VisionaryRequirements, complete: boolean) =>
         put("/project/requirements", { ...requirements, complete }),

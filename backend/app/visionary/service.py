@@ -304,8 +304,8 @@ class VisionaryService:
         await self._run(self.repo.save_profile(actor.user_id, data))
         return await self.overview(actor)
 
-    async def save_idea(self, actor: ActorContext, data: dict, complete: bool) -> dict:
-        await self._run(self.repo.save_idea(actor.user_id, data, complete))
+    async def save_idea(self, actor: ActorContext, data: dict, complete: bool, create_new: bool = False) -> dict:
+        await self._run(self.repo.save_idea(actor.user_id, data, complete, create_new))
         return await self.overview(actor)
 
     async def save_stage(self, actor: ActorContext, stage: str) -> dict:

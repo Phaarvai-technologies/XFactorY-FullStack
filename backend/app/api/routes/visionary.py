@@ -41,8 +41,10 @@ async def save_profile(body: ProfileIn, actor: CurrentActor, svc: Service):
 
 @router.put("/project/idea")
 async def save_idea(body: IdeaIn, actor: CurrentActor, svc: Service):
-    """Step 2 "Your idea" -> Save & Next (complete=true) or Previous (complete=false)."""
-    return await svc.save_idea(actor, body.model_dump(exclude={"complete"}), body.complete)
+    """Step 2 "Your idea" -> Save & Next (complete=true) or Previous (complete=false).
+    create_new=true starts another project instead of updating the current one."""
+    return await svc.save_idea(
+        actor, body.model_dump(exclude={"complete", "create_new"}), body.complete, body.create_new)
 
 
 @router.put("/project/stage")

@@ -59,6 +59,8 @@ class IdeaIn(_Model):
     product: str = Field(default="", max_length=160)
     industry: str = Field(default="", max_length=120)
     complete: bool = True
+    # True when "Add Project" starts a new idea. False keeps updating the current project.
+    create_new: bool = False
 
     @model_validator(mode="after")
     def _required(self):

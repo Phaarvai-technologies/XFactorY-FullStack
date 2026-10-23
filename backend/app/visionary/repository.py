@@ -136,10 +136,7 @@ class VisionaryRepository:
         """), {"u": user_id})).mappings().first()
         return dict(row) if row else None
 
-    async def _ensure_project(self, user_id: UUID, title: str) -> dict | None:
-        current = await self.project(user_id)
-        if current or not title:
-            return current
+    async def _insert_project(self, user_id: UUID, title: str) -> None:
         user = await self.user_row(user_id)
         org_id = await self.ensure_organization(user_id, user.get("display_name") or "Visionary")
         opportunity_id = await self.db.scalar(text("""
@@ -149,10 +146,25 @@ class VisionaryRepository:
         await self.db.execute(text("""
             INSERT INTO visionary_projects(opportunity_id, user_id) VALUES (:op, :u)
         """), {"op": opportunity_id, "u": user_id})
+
+    async def _ensure_project(self, user_id: UUID, title: str) -> dict | None:
+        current = await self.project(user_id)
+        if current or not title:
+            return current
+        await self._insert_project(user_id, title)
         return await self.project(user_id)
 
-    async def save_idea(self, user_id: UUID, data: dict, complete: bool) -> None:
-        project = await self._ensure_project(user_id, data["project"])
+    async def save_idea(self, user_id: UUID, data: dict, complete: bool, create_new: bool = False) -> None:
+        if create_new:
+            # "Add Project" must not overwrite the project already on the page.
+            title = (data.get("project") or "").strip()
+            if not title:
+                await self.db.commit()
+                return
+            await self._insert_project(user_id, title)
+            project = await self.project(user_id)
+        else:
+            project = await self._ensure_project(user_id, data["project"])
         if project is None:  # "Previous" before any project name was typed: nothing to keep
             await self.db.commit()
             return

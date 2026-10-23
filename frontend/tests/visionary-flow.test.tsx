@@ -387,4 +387,34 @@ describe("Visionary stage and AI guide flow", () => {
       screen.getByRole("heading", { name: /what is the idea you want to bring to life/i }),
     ).toBeInTheDocument();
   });
+
+  it("Add Project opens a blank idea flow from the project page", async () => {
+    sessionStorage.clear();
+    window.history.replaceState(null, "", "/visionaries/flow");
+
+    await act(async () => {
+      render(<VisionaryFlow />);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new PopStateEvent("popstate", {
+          state: { slide: "project", manufacturerId: null },
+        }),
+      );
+    });
+
+    expect(screen.getByRole("heading", { name: "My Project" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Eco Flask" })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add Project" }));
+    });
+
+    expect(
+      screen.getByRole("heading", { name: /what is the idea you want to bring to life/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Project / Product name")).toHaveValue("");
+    expect(screen.getByText("Step 2 of 4")).toBeInTheDocument();
+  });
 });

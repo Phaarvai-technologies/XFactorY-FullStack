@@ -100,15 +100,20 @@ export function RequestSubmitted({ onContinue }: { onContinue: (slide: Visionary
 
 export function MyProject({
   onContinue,
+  onAddProject,
   onToast,
 }: {
   onContinue: (slide: VisionarySlide) => void;
+  onAddProject: () => void;
   onToast: (message: string) => void;
 }) {
   // Project and latest request from the database. Before any request is sent, the project's
   // own requirements are shown (this replaces the former sample data).
   const { idea, requirements, stage } = getVisionaryData();
-  const sent = latestVisionaryRequest();
+  const latest = latestVisionaryRequest();
+  // A request belongs to this project when the names match. After Add Project, an older
+  // request must not be shown on the new idea.
+  const sent = latest && (!idea?.project || latest.project_name === idea.project) ? latest : null;
   const request = sent ?? {
     manufacturer_name: "",
     project_name: idea?.project ?? "",
@@ -214,6 +219,11 @@ export function MyProject({
           </button>
           <button type="button" className="btn btn-ghost" onClick={() => onContinue("results")}>
             Explore Manufacturers
+          </button>
+        </div>
+        <div className="actions">
+          <button type="button" className="btn btn-primary" onClick={onAddProject}>
+            Add Project
           </button>
         </div>
       </main>

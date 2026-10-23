@@ -56,6 +56,7 @@ export function VisionaryFlow() {
   const [slide, setSlide] = useState<VisionarySlide>("step1");
   const [manufacturerId, setManufacturerId] = useState<string | null>(null);
   const [visit, setVisit] = useState(0);
+  const [freshIdea, setFreshIdea] = useState(false);
   const toast = useVisionaryToast();
   const visionaryApi = useVisionaryApi();
   const showToast = toast.show;
@@ -118,6 +119,7 @@ export function VisionaryFlow() {
           return "step1";
         })();
 
+      setFreshIdea(false);
       setSlide(targetSlide);
       setVisit((current) => current + 1);
 
@@ -156,6 +158,7 @@ export function VisionaryFlow() {
 
   function go(next: VisionarySlide, nextManufacturerId?: string) {
     if (next === slide) return;
+    if (next !== "step2") setFreshIdea(false);
 
     const mid =
       nextManufacturerId !== undefined
@@ -178,6 +181,11 @@ export function VisionaryFlow() {
     setVisit((current) => current + 1);
   }
 
+  function startNewProject() {
+    setFreshIdea(true);
+    go("step2");
+  }
+
   function selectManufacturer(id: string) {
     setManufacturerId(id);
     writeSelectedManufacturerId(id);
@@ -188,7 +196,9 @@ export function VisionaryFlow() {
   return (
     <>
       {slide === "step1" ? <StepProfile onContinue={go} onToast={toast.show} /> : null}
-      {slide === "step2" ? <StepIdea onContinue={go} onToast={toast.show} /> : null}
+      {slide === "step2" ? (
+        <StepIdea key={freshIdea ? "new-idea" : "idea"} fresh={freshIdea} onContinue={go} onToast={toast.show} />
+      ) : null}
       {slide === "step3" ? <StepStage onContinue={go} onToast={toast.show} /> : null}
       {slide === "guide" ? <StepGuide onContinue={go} onToast={toast.show} /> : null}
       {slide === "step4" ? <StepNeeds onContinue={go} onToast={toast.show} /> : null}
@@ -214,7 +224,7 @@ export function VisionaryFlow() {
       ) : null}
       {slide === "submitted" ? <RequestSubmitted key={visit} onContinue={go} /> : null}
       {slide === "project" ? (
-        <MyProject key={visit} onContinue={go} onToast={toast.show} />
+        <MyProject key={visit} onContinue={go} onAddProject={startNewProject} onToast={toast.show} />
       ) : null}
       {slide === "manufacturer" ? <ManufacturerProfilePage key={visit} onContinue={go} /> : null}
       <VisionaryToast message={toast.message} shown={toast.shown} />

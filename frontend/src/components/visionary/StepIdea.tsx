@@ -33,13 +33,18 @@ const SECTORS = [
 export function StepIdea({
   onContinue,
   onToast,
+  fresh = false,
 }: {
   onContinue: (slide: VisionarySlide) => void;
   onToast: (message: string) => void;
+  /** Add Project: start from a blank idea instead of the project already saved. */
+  fresh?: boolean;
 }) {
   const visionaryApi = useVisionaryApi();
   const [saving, setSaving] = useState(false);
-  const [stored] = useState<Partial<VisionaryIdea>>(() => getVisionaryData().idea ?? {});
+  const [stored] = useState<Partial<VisionaryIdea>>(() =>
+    fresh ? {} : (getVisionaryData().idea ?? {}),
+  );
   const [idea, setIdea] = useState<VisionaryIdea>({
     ...EMPTY,
     ...stored,
@@ -143,7 +148,7 @@ export function StepIdea({
     }
     setSaving(true);
     try {
-      await visionaryApi.saveIdea(data, true); // PUT /visionary/project/idea
+      await visionaryApi.saveIdea(data, true, fresh); // PUT /visionary/project/idea
       onContinue("step3");
     } catch (error) {
       onToast(errorMessage(error, "Couldn’t save your idea. Please try again."));
@@ -302,8 +307,26 @@ export function StepIdea({
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
+                  const data = payload();
+                  const typed = Boolean(data.project || data.idea || data.product || data.industry);
+                  if (fresh) {
+                    // A blank Add Project must not overwrite the project already on the page.
+                    if (!typed) {
+                      onContinue("step1");
+                      return;
+                    }
+                    setSaving(true);
+                    void visionaryApi
+                      .saveIdea(data, false, true)
+                      .catch(() => undefined)
+                      .finally(() => {
+                        setSaving(false);
+                        onContinue("step1");
+                      });
+                    return;
+                  }
                   // "Previous" keeps whatever was typed (not validated), as before.
-                  void visionaryApi.saveIdea(payload(), false).catch(() => undefined);
+                  void visionaryApi.saveIdea(data, false).catch(() => undefined);
                   onContinue("step1");
                 }}
               >
