@@ -317,7 +317,7 @@ describe("validation", () => {
   });
 });
 
-describe("corrections requested by X!Y", () => {
+describe("corrections requested by XfactorY", () => {
   it("shows the message and lets only the requested fields change", async () => {
     const { submitted } = setup({
       props: {

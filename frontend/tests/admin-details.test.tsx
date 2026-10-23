@@ -135,7 +135,7 @@ describe("Admins: Edit details", () => {
     expect(screen.queryByRole("button", { name: /Revoke|Reset password/ })).toBeNull();
   });
 
-  it("X!Y account admin: email managed in the X!Y account; a failed name sync is reported", async () => {
+  it("XfactorY account admin: email managed in the XfactorY account; a failed name sync is reported", async () => {
     const xy = { ...OPS, hasXyAccount: true, emailEditable: false };
     serve([BUILT_IN, xy], () => ok({ ...xy, name: "Meera Person" }, ["first name"], "failed"));
     renderAdmins();
@@ -143,10 +143,10 @@ describe("Admins: Edit details", () => {
     const d = within(screen.getByRole("dialog"));
     expect(d.getByLabelText("Sign-in email")).toHaveAttribute("readonly");
     expect(d.getByText(/managed in that account/)).toBeInTheDocument();
-    expect(d.getByText(/also updated in the X!Y account/)).toBeInTheDocument();
+    expect(d.getByText(/also updated in the XfactorY account/)).toBeInTheDocument();
     fireEvent.change(d.getByLabelText(/First name/), { target: { value: "Meera" } });
     await act(async () => fireEvent.click(d.getByRole("button", { name: "Save changes" })));
-    await waitFor(() => expect(shell.toasts[0]).toMatch(/saved, but the name could not be updated in the X!Y account/));
+    await waitFor(() => expect(shell.toasts[0]).toMatch(/saved, but the name could not be updated in the XfactorY account/));
   });
 });
 

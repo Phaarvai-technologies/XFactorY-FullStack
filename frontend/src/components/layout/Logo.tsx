@@ -6,7 +6,7 @@ type LogoProps = {
   markClassName?: string;
 };
 
-/** Factory mark matching the official X!Y logo (icon only, for dark or light surfaces). */
+/** Factory mark matching the official XfactorY logo (icon only, for dark or light surfaces). */
 export function FactoryMark({ className = "factory-mark" }: { className?: string }) {
   return (
     <svg

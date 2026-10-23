@@ -1318,7 +1318,7 @@ function UpdateRequestReview({ orgId, req, onChange }: { orgId: string; req: Com
                 {e.event === "decision" ? `: ${String(e.details.decision ?? "")}` : ""}
               </b>
               <span>
-                {fmtDateTime(e.at)} · {e.by ?? (e.role === "admin" ? "X!Y admin" : "Requester")}
+                {fmtDateTime(e.at)} · {e.by ?? (e.role === "admin" ? "XfactorY admin" : "Requester")}
               </span>
             </li>
           ))}

@@ -64,7 +64,7 @@ class ClaimService:
         if not row:
             raise HTTPException(409, "Finish signing in first, then search for your company.")
         if row["status"] != "active":
-            raise HTTPException(403, "This account has been suspended. Please contact X!Y support.")
+            raise HTTPException(403, "This account has been suspended. Please contact XfactorY support.")
         return dict(row)
 
     async def _verified_emails(self, actor: Actor) -> list[str]:
@@ -78,7 +78,7 @@ class ClaimService:
 
     # Emails published for imported, unclaimed companies: the import contacts table and the
     # contact email of the imported profile (the plain SQL seed only fills the latter). Nobody
-    # owns these records, so the values come from the import / X!Y, never from a claimant.
+    # owns these records, so the values come from the import / XfactorY, never from a claimant.
     PUBLISHED = """
         SELECT c.organization_id, lower(c.email::text) AS email
         FROM organization_contacts c JOIN organizations o ON o.id = c.organization_id AND o.entry_source = 'IMPORTED'
@@ -140,7 +140,7 @@ class ClaimService:
                 OR EXISTS (SELECT 1 FROM memberships WHERE organization_id = CAST(:o AS uuid) AND status = 'active')
         """), {"o": org_id})
         if taken or row["status"] != "claim_pending":
-            raise HTTPException(409, "This company has already been claimed. Contact X!Y support if this is your company.")
+            raise HTTPException(409, "This company has already been claimed. Contact XfactorY support if this is your company.")
         return dict(row)
 
     # ------------------------------------------------------------------ search

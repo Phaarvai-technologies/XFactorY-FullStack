@@ -12,7 +12,7 @@ function when(iso: string) {
 }
 
 /**
- * Dashboard bell: messages from the X!Y team (needs correction with the admin's note, profile
+ * Dashboard bell: messages from the XfactorY team (needs correction with the admin's note, profile
  * edits made by an admin, notes the admin shared). Anything new opens a popup once.
  */
 export function NotificationBell({ onOpenProfile }: { onOpenProfile?: () => void }) {
@@ -63,7 +63,7 @@ export function NotificationBell({ onOpenProfile }: { onOpenProfile?: () => void
         <div className="notif-menu" role="dialog" aria-label="Notifications">
           <div className="notif-head">
             <b>Notifications</b>
-            <span>Messages from the X!Y team</span>
+            <span>Messages from the XfactorY team</span>
           </div>
 
           {n.correction ? (
@@ -72,7 +72,7 @@ export function NotificationBell({ onOpenProfile }: { onOpenProfile?: () => void
               {n.correction.reason ? <p className="notif-reason">{n.correction.reason}</p> : null}
               {n.correction.notes.length ? (
                 <>
-                  <span className="notif-sub">Notes from the X!Y team</span>
+                  <span className="notif-sub">Notes from the XfactorY team</span>
                   <ul>
                     {n.correction.notes.map((note) => (
                       <li key={note.id}>
@@ -112,7 +112,7 @@ export function NotificationBell({ onOpenProfile }: { onOpenProfile?: () => void
               ))}
             </ul>
           ) : (
-            <p className="notif-empty">No messages from the X!Y team yet.</p>
+            <p className="notif-empty">No messages from the XfactorY team yet.</p>
           )}
         </div>
       ) : null}
@@ -124,11 +124,11 @@ export function NotificationBell({ onOpenProfile }: { onOpenProfile?: () => void
               <BellIcon size={20} />
             </div>
             <h3 id="notif-popup-title">
-              {n.popup.needsCorrection ? "Your profile needs a few corrections" : "New message from the X!Y team"}
+              {n.popup.needsCorrection ? "Your profile needs a few corrections" : "New message from the XfactorY team"}
             </h3>
             <p className="notif-popup-text">
               {n.popup.needsCorrection
-                ? "The X!Y team reviewed your profile and left a note on what to change. Open your notifications to read it."
+                ? "The XfactorY team reviewed your profile and left a note on what to change. Open your notifications to read it."
                 : n.popup.count === 1
                   ? "You have 1 new notification. Open your notifications to read it."
                   : `You have ${n.popup.count} new notifications. Open your notifications to read them.`}

@@ -117,7 +117,7 @@ describe("admin: update request review", () => {
 });
 
 describe("requester", () => {
-  it("is told the details go to X!Y review when the selected company is managed by someone else", async () => {
+  it("is told the details go to XfactorY review when the selected company is managed by someone else", async () => {
     const result: CompanySearchResult = { id: "co-1", companyName: "Ashok Leyland Limited", country: "India", city: "Chennai",
                                           companyType: "Automotive & Machinery", claimed: true };
     const details: CompanyDetails = { id: "co-1", companyName: "Ashok Leyland Limited", companyType: "Automotive & Machinery",
@@ -129,12 +129,12 @@ describe("requester", () => {
     fireEvent.focus(screen.getByLabelText("Company name"));
     fireEvent.change(screen.getByLabelText("Company name"), { target: { value: "ashok" } });
     fireEvent.click((await screen.findByText("Chennai, India")).closest("button")!);
-    expect(await screen.findByText(/managed by another X!Y user/)).toBeInTheDocument();
+    expect(await screen.findByText(/managed by another XfactorY user/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Company name"), { target: { value: "Ashok Leyland Ltd" } });
-    expect(screen.queryByText(/managed by another X!Y user/)).toBeNull(); // selection dropped
+    expect(screen.queryByText(/managed by another XfactorY user/)).toBeNull(); // selection dropped
   });
 
-  it("sees the status and X!Y feedback of their own requests on the dashboard", () => {
+  it("sees the status and XfactorY feedback of their own requests on the dashboard", () => {
     const requests: CompanyUpdateRequest[] = [
       { id: "r1", status: "changes_requested", companyId: "co-1", companyName: "Ashok Leyland Limited", proposed: {},
         feedback: "Please add units to the capacity.", submittedAt: "2026-10-14T10:00:00Z", updatedAt: null, reviewedAt: null },
@@ -152,7 +152,7 @@ describe("requester", () => {
     expect(screen.getByText("Company update requests")).toBeInTheDocument();
     const row = screen.getByText("Ashok Leyland Limited").closest(".wiz-check-row")!;
     expect(within(row as HTMLElement).getByText("Corrections requested")).toBeInTheDocument();
-    expect(row.textContent).toContain("X!Y: Please add units to the capacity.");
+    expect(row.textContent).toContain("XfactorY: Please add units to the capacity.");
     fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Correct details" }));
     expect(fix).toHaveBeenCalled();
     expect(screen.getByText("Approved")).toBeInTheDocument();

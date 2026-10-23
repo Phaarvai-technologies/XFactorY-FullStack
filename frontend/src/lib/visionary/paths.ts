@@ -20,16 +20,16 @@ export type VisionarySlide =
   | "manufacturer";
 
 export const VISIONARY_SLIDE_TITLES: Record<VisionarySlide, string> = {
-  step1: "Let’s Start With You – X!Y",
-  step2: "Your Idea – X!Y",
-  step3: "Project Stage – X!Y",
-  guide: "Your AI Guide – X!Y",
-  step4: "Manufacturing Needs – X!Y",
-  results: "Find a Manufacturer – X!Y",
-  request: "Create Manufacturing Request – X!Y",
-  submitted: "Manufacturing Request Sent – X!Y",
-  project: "My Project – X!Y",
-  projects: "View All Projects – X!Y",
-  requests: "View All Requests – X!Y",
-  manufacturer: "Manufacturer Profile – X!Y",
+  step1: "Let’s Start With You – XfactorY",
+  step2: "Your Idea – XfactorY",
+  step3: "Project Stage – XfactorY",
+  guide: "Your AI Guide – XfactorY",
+  step4: "Manufacturing Needs – XfactorY",
+  results: "Find a Manufacturer – XfactorY",
+  request: "Create Manufacturing Request – XfactorY",
+  submitted: "Manufacturing Request Sent – XfactorY",
+  project: "My Project – XfactorY",
+  projects: "View All Projects – XfactorY",
+  requests: "View All Requests – XfactorY",
+  manufacturer: "Manufacturer Profile – XfactorY",
 };

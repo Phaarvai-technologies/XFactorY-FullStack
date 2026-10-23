@@ -1,8 +1,8 @@
-"""XY-ADMIN-01: only authorized X!Y staff can use /api/v1/admin.
+"""XY-ADMIN-01: only authorized XfactorY staff can use /api/v1/admin.
 
 An admin is a user with an active row in `platform_role_assignments` (existing
 schema table). Admins sign in either way:
-- X!Y (Clerk) account: `Authorization: Bearer <Clerk JWT>`. The first admins are
+- XfactorY (Clerk) account: `Authorization: Bearer <Clerk JWT>`. The first admins are
   bootstrapped from ADMIN_EMAILS; more with `python -m app.grant_admin <email>`.
 - Admin account (email + password, `python -m app.admin_account create <email>`):
   `Authorization: Bearer xya_...` session token from POST /admin/auth/login."""
@@ -71,7 +71,7 @@ async def current_admin(
         SELECT id, email, first_name, last_name, display_name, status, registration_completed_at
         FROM users WHERE clerk_user_id=:c
     """), {"c": actor.clerk_user_id})).first()
-    # The X!Y (Clerk) admin sign-in is for registered X!Y accounts only. Nothing is created
+    # The XfactorY (Clerk) admin sign-in is for registered XfactorY accounts only. Nothing is created
     # here any more: a Clerk identity that never completed sign-up is refused (403
     # registration_required). Admin email + password accounts are unaffected.
     if row is None:
@@ -86,7 +86,7 @@ async def current_admin(
         await session.commit()
         roles = await _active_roles(session, row.id)
     if not roles:
-        raise HTTPException(403, "Admin access only. Ask an X!Y administrator to grant you access.")
+        raise HTTPException(403, "Admin access only. Ask an XfactorY administrator to grant you access.")
     await _touch(session, row.id)
     name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.display_name or str(row.email)
     return AdminContext(user_id=row.id, clerk_user_id=actor.clerk_user_id, email=str(row.email),
@@ -113,7 +113,7 @@ async def _password_admin(request: Request, token: str, session: AsyncSession, s
         raise HTTPException(403, "This account has been suspended.")
     roles = await _active_roles(session, row.id)
     if not roles:
-        raise HTTPException(403, "Admin access only. Ask an X!Y administrator to grant you access.")
+        raise HTTPException(403, "Admin access only. Ask an XfactorY administrator to grant you access.")
     request.state.clerk_user_id = row.clerk_user_id
     must_change = bool(await session.scalar(text(
         "SELECT must_change_password FROM admin_accounts WHERE id=:a"), {"a": found["account_id"]}))

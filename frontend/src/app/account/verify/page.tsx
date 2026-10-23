@@ -20,7 +20,7 @@ export default async function AccountVerifyPage() {
         <h1 style={{ fontSize: 28, marginBottom: 12 }}>Verify your account</h1>
         <p style={{ color: "var(--ink-soft)", marginBottom: 28, lineHeight: 1.6 }}>
           Check your email for a verification link from Clerk. Once verified, continue
-          to role selection to set up your X!Y profile.
+          to role selection to set up your XfactorY profile.
         </p>
         <div className="role-actions" style={{ justifyContent: "center" }}>
           <Button href="/onboarding/roles" variant="primary">

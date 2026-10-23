@@ -21,9 +21,9 @@ export type AdminHost = {
   path: string; // e.g. "/admin/manufacturers/123"
   search: URLSearchParams;
   go: (href: string, options?: { replace?: boolean }) => void;
-  /** Clerk session token of the signed-in X!Y user, or null. */
+  /** Clerk session token of the signed-in XfactorY user, or null. */
   getClerkToken: () => Promise<string | null>;
-  /** Email of the signed-in X!Y (Clerk) user, or null. */
+  /** Email of the signed-in XfactorY (Clerk) user, or null. */
   clerkEmail: string | null;
   clerkSignIn: (email: string, password: string) => Promise<ClerkSignInResult>;
   /** Second step after `needsCode`: the code from the email / text / authenticator app. */

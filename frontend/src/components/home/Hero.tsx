@@ -11,7 +11,7 @@ export function Hero() {
           </div>
           <h1 className="headline">Why own it, when you can make it.</h1>
           <p className="sub">
-            X!Y connects designers, manufacturers, suppliers and every partner in
+            XfactorY connects designers, manufacturers, suppliers and every partner in
             between — so production capacity finds demand, and good ideas find a
             factory floor.
           </p>
@@ -24,7 +24,7 @@ export function Hero() {
               </Button>
             </Show>
             <a className="btn btn-ghost" href="#how-it-works">
-              Browse how X!Y works
+              Browse how XfactorY works
             </a>
           </div>
         </div>

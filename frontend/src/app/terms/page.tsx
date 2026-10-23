@@ -3,22 +3,22 @@ import Link from "next/link";
 import { PilotInfoPage } from "@/components/layout/PilotInfoPage";
 
 export const metadata: Metadata = {
-  title: "Terms of service — X!Y",
+  title: "Terms of service — XfactorY",
   description:
-    "Simple pilot-stage terms for using X!Y while the platform is still being tested.",
+    "Simple pilot-stage terms for using XfactorY while the platform is still being tested.",
 };
 
 export default function TermsPage() {
   return (
     <PilotInfoPage
       title="Terms of service"
-      description="These notes explain how to use X!Y during the pilot. They are not a finished commercial agreement."
+      description="These notes explain how to use XfactorY during the pilot. They are not a finished commercial agreement."
       sections={[
         {
           title: "Pilot phase",
           body: (
             <p>
-              X!Y is in a pilot and early-stage phase. The site is a discovery and
+              XfactorY is in a pilot and early-stage phase. The site is a discovery and
               engagement platform for people in manufacturing. It is being tried
               with a limited group and is not presented as a fully launched service.
             </p>
@@ -58,7 +58,7 @@ export default function TermsPage() {
           body: (
             <p>
               Information, matches, manufacturer details, opportunities, and other
-              content on X!Y should not automatically be treated as guaranteed
+              content on XfactorY should not automatically be treated as guaranteed
               business outcomes. A listing or suggestion is a starting point for
               your own review, not a promise of work, supply, investment, or a
               completed deal.
@@ -71,7 +71,7 @@ export default function TermsPage() {
             <p>
               You are responsible for reviewing information before you make a
               business decision. Agreements, transactions, and hiring happen
-              directly between the people you connect with. X!Y does not process
+              directly between the people you connect with. XfactorY does not process
               payments or act as a legal, investment, or employment advisor.
             </p>
           ),

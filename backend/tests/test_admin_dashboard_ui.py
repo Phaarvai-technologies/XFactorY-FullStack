@@ -123,7 +123,7 @@ async def test_machinery_tab_lists_company_machines(client):  # noqa: F811
     admin = await _admin(client)
     sub, org, name = await _manufacturer(client)
     hdr = _hdr(client, sub)
-    # approval first: machinery stays locked until X!Y approves the application
+    # approval first: machinery stays locked until XfactorY approves the application
     assert (await client.post("/manufacturer/machinery", headers=hdr, json=MACHINE)).status_code == 403
     assert (await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin,
                                json={"review_status": "REVIEWED"})).status_code == 200
@@ -175,7 +175,7 @@ async def test_review_queue_request_info_count_and_approved_label(client):  # no
     status_change = next(h for h in history if h["field_changed"] == "Review status")
     assert status_change["new_value"] == "Approved"  # a stored approval
     timeline = (await client.get(f"/admin/manufacturers/{org}", headers=admin)).json()["timeline"]
-    assert any(t["event"] == "Approved by X!Y" for t in timeline)
+    assert any(t["event"] == "Approved by XfactorY" for t in timeline)
 
     # another user's update request on the now-approved company appears as its own request type
     other = f"user_req_{_tag()}"

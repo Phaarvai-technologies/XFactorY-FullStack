@@ -3,7 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { XyMark } from "@/components/visionary/XyLogo";
+import { FactoryMark } from "@/components/layout/Logo";
 import {
   VISIONARY_FLOW_PATH,
   visionarySignInHref,
@@ -41,7 +41,7 @@ export function VisionaryOverview() {
     <div className="view active" id="v-ov">
       <header className="site-header">
         <Link className="logo" href="/" aria-label="XfactorY home">
-          <XyMark />
+          <FactoryMark className="factory-mark" />
           <span className="logo-text">XfactorY</span>
         </Link>
         <Link className="btn-back" href="/">
@@ -56,7 +56,7 @@ export function VisionaryOverview() {
             <h1>Turn your ideas into reality.</h1>
             <p>
               Bring your product idea to life by connecting with manufacturers, resources, and the
-              right ecosystem through X!Y.
+              right ecosystem through XfactorY.
             </p>
             <button
               type="button"
@@ -138,7 +138,7 @@ export function VisionaryOverview() {
           </div>
         </section>
 
-        <section className="features" aria-label="How X!Y helps Visionaries">
+        <section className="features" aria-label="How XfactorY helps Visionaries">
           {FEATURES.map((feature) => (
             <article className="card" key={feature.title}>
               <h2>{feature.title}</h2>

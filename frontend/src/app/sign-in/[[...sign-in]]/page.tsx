@@ -17,7 +17,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = await searchParams;
   const redirectTo = safeRedirectPath(params.redirect_url, requestOrigin(await headers())) ?? "/";
 
-  // Signed in already: continue only if the backend confirms a completed X!Y registration.
+  // Signed in already: continue only if the backend confirms a completed XfactorY registration.
   // Signed in but not registered (or suspended): the form ends that stale session first.
   // Backend unreachable: just show the form (an outage is never "not registered").
   // A Clerk cookie is not enough: its session may already have been ended (its token stays valid

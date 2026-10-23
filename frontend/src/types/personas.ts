@@ -1,5 +1,5 @@
 /**
- * Marketplace personas supported by X!Y.
+ * Marketplace personas supported by XfactorY.
  * Frontend-only role model — replace with backend authorization later.
  */
 export type PersonaId =

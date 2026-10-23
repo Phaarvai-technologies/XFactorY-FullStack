@@ -1,4 +1,4 @@
-/** Clerk theme aligned with the X!Y sign-in reference (SCR-02). */
+/** Clerk theme aligned with the XfactorY sign-in reference (SCR-02). */
 export const clerkAuthAppearance = {
   variables: {
     colorPrimary: "#1E4FD6",

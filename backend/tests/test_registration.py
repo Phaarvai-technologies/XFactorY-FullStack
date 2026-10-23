@@ -1,4 +1,4 @@
-"""Registration-before-access: a Clerk identity is not an X!Y user until it completed sign-up.
+"""Registration-before-access: a Clerk identity is not an XfactorY user until it completed sign-up.
 
 The first tests need no database (flow tokens). The rest run against a real Postgres when
 E2E_DATABASE_URL is set (same setup as test_e2e_local.py)."""
@@ -338,7 +338,7 @@ async def test_historical_account_terms_stay_unknown_until_genuinely_accepted(cl
 # ---------------------------------------------------------------- Sign-up with an existing email
 @needs_db
 async def test_account_status_answers_only_registered_and_writes_nothing(client, monkeypatch):  # noqa: F811
-    """Sign-up page, after Clerk said "email taken": registered X!Y account → true (the page says
+    """Sign-up page, after Clerk said "email taken": registered XfactorY account → true (the page says
     "You already have an account. Please sign in." at once); a Clerk identity whose users row came
     only from the webhook / never finished sign-up → false; unknown email → false. Read-only."""
     from app.core.config import get_settings

@@ -1,6 +1,6 @@
 /* Manufacturer website styles — converted from the uploaded HTML, scoped under .mfg-root.
    The Manufacturer site keeps its own independent design/theme; nothing here leaks
-   into the existing X!Y pages, and the X!Y theme is untouched. */
+   into the existing XfactorY pages, and the XfactorY theme is untouched. */
 .mfg-root {
   --blue-700: #1d4ed8;
   --blue-600: #2563eb;
@@ -1300,7 +1300,7 @@
 .mfg-root .account-menu-footer b { color: #5e5f6e; font-weight: 700; }
 .mfg-root .account-menu-dev { color: #f36b16; font-weight: 500; }
 
-/* notifications from the X!Y team (bell, panel, popup) */
+/* notifications from the XfactorY team (bell, panel, popup) */
 .mfg-root .notif-root { position: relative; }
 .mfg-root .notif-menu {
   position: absolute;

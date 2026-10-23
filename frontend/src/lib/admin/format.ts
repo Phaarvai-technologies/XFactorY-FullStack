@@ -21,7 +21,7 @@ export const ENTRY_LABELS: Record<EntrySource, string> = {
 };
 export const ENTRY_ORDER: EntrySource[] = ["MANUFACTURER", "ADMIN_ASSISTED", "IMPORTED"];
 
-/** Company onboarding source (how the company first came onto X!Y), read from the backend.
+/** Company onboarding source (how the company first came onto XfactorY), read from the backend.
  * Never derived from how a person signs in, and never an approval status. */
 export const ONBOARDING_SOURCE_LABELS: Record<OnboardingSource, string> = {
   database_import: "Database Import",

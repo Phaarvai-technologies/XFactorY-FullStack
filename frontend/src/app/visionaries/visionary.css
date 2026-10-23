@@ -13,8 +13,9 @@
 .xy-visionary #v-ov{--bg:#f8fafc;--ink:#0f172a;--muted:#475569;--cm:#64748b;--blue:#2563eb;--bd:#1d4ed8;--badge:#dbe8fd;--border:#e5eaf2;
   font-family:var(--xy-inter),"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
 .xy-visionary #v-ov .site-header{display:flex;align-items:center;justify-content:space-between;padding:26px 40px;position:static;border:0;background:transparent;height:auto}
-.xy-visionary #v-ov .logo{display:inline-flex;align-items:center;gap:14px}
-.xy-visionary #v-ov .logo-text{font-size:21px;font-weight:800;line-height:1}
+.xy-visionary #v-ov .logo{display:inline-flex;align-items:center;gap:8px}
+.xy-visionary #v-ov .logo svg.factory-mark{display:block;width:30px;height:auto;flex:none;color:#2563eb}
+.xy-visionary #v-ov .logo-text{font-size:22px;font-weight:800;line-height:1;letter-spacing:-.02em;color:#0f172a}
 .xy-visionary #v-ov .btn-back{display:inline-flex;align-items:center;height:48px;padding:0 22px;background:#fff;border:1px solid var(--border);border-radius:999px;font-size:17px;font-weight:500;transition:border-color .2s,box-shadow .2s}
 .xy-visionary #v-ov .btn-back:hover{border-color:#b9cdf3;box-shadow:0 4px 12px rgba(15,23,42,.06)}
 .xy-visionary #v-ov .container{width:min(1220px,calc(100% - 48px));margin:0 auto}
@@ -655,9 +656,9 @@
 @media (max-width:520px){.xy-visionary #v-pj .tiles{grid-template-columns:1fr}.xy-visionary #v-pj .actions .btn{width:100%;text-align:center}.xy-visionary #v-pj .card{padding:22px 20px}.xy-visionary #v-pj h1{font-size:1.6rem}}
 .xy-visionary #v-pj.active{display:flex}
 @media (prefers-reduced-motion:reduce){.xy-visionary #v-pj .btn{transition:none}}
-.xy-visionary .xy-logo{display:inline-flex;align-items:center;gap:14px}
-.xy-visionary .xy-logo svg{display:block;flex-shrink:0}
-.xy-visionary .xy-logo span{font:800 21px/1 var(--xy-inter),"Segoe UI",system-ui,sans-serif;color:#0f172a}
+.xy-visionary .xy-logo{display:inline-flex;align-items:center;gap:8px}
+.xy-visionary .xy-logo svg.factory-mark{display:block;width:30px;height:auto;flex:none;color:#2563eb}
+.xy-visionary .xy-logo span{font:800 22px/1 var(--xy-inter),"Segoe UI",system-ui,sans-serif;letter-spacing:-.02em;color:#0f172a}
 /* Homepage type and the factory photo stay on the homepage only. */
 .xy-visionary h1,
 .xy-visionary h2,

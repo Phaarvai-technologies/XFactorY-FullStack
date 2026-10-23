@@ -280,11 +280,11 @@ export function StepGuide({
     <div className="view active" id="v-guide">
       <div className="guide-wrap">
         <header className="brand">
-          <Link className="logo" href={VISIONARY_OVERVIEW_PATH} aria-label="X!Y home">
+          <Link className="logo" href={VISIONARY_OVERVIEW_PATH} aria-label="XfactorY home">
             <Image
               className="logo-img"
               src="/images/xy-logo.png"
-              alt="X!Y"
+              alt="XfactorY"
               width={150}
               height={48}
               priority

@@ -98,7 +98,7 @@ export function RoleSelection() {
         <div className="section-head">
           <h2>Select how you participate</h2>
           <p className="desc">
-            Choose one or more roles that describe how you will use X!Y. You can
+            Choose one or more roles that describe how you will use XfactorY. You can
             update this later.
           </p>
         </div>

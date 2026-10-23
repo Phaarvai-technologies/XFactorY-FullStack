@@ -58,9 +58,9 @@ async def account_status(
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
     """Sign-up page, only after Clerk answered that the email already has an account: is that a
-    REGISTERED X!Y account? true → the page says "You already have an account. Please sign in."
+    REGISTERED XfactorY account? true → the page says "You already have an account. Please sign in."
     straight away (no Clerk sign-in, no verification code, nothing written). false → a Clerk
-    identity that never finished X!Y sign-up; the page then proves it with the entered password
+    identity that never finished XfactorY sign-up; the page then proves it with the entered password
     and completes the registration. Read-only. It tells no more than Clerk's own "email taken"
     answer on the same page; the API gateway's rate limits apply."""
     registered = await session.scalar(text("""
@@ -77,9 +77,9 @@ async def registration_status(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ):
-    """Is the signed-in Clerk identity a registered X!Y user? Authentication only; it never
+    """Is the signed-in Clerk identity a registered XfactorY user? Authentication only; it never
     creates a user. 200 {registered: bool}; 403 if suspended; 409 identity_mismatch when this
-    sign-in's email belongs to an X!Y account under a different Clerk user (e.g. another Clerk
+    sign-in's email belongs to an XfactorY account under a different Clerk user (e.g. another Clerk
     instance) - not "unregistered"; a database / Clerk failure is a 5xx (callers retry)."""
     try:
         await registration.ensure_registered(session, settings, claims["sub"], claims.get("sid"))
@@ -108,8 +108,8 @@ async def _refuse_identity_mismatch(session: AsyncSession, settings: Settings, c
     if other:
         registration.log.warning("Sign-in by Clerk user %s matches an account with another Clerk id", clerk_user_id)
         raise HTTPException(409, {"code": "identity_mismatch", "message":
-                                  "This email is linked to an existing X!Y account that uses a different sign-in. "
-                                  "Please contact X!Y support - do not create a new account."})
+                                  "This email is linked to an existing XfactorY account that uses a different sign-in. "
+                                  "Please contact XfactorY support - do not create a new account."})
 
 
 @router.post("/registration/complete")

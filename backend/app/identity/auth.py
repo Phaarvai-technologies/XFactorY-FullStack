@@ -81,7 +81,7 @@ async def get_actor(
     session: Annotated[AsyncSession, Depends(get_session)] = None,
     settings: Annotated[Settings, Depends(get_settings)] = None,
 ) -> ActorContext:
-    """Authenticated AND registered. A valid Clerk session whose user never completed X!Y
+    """Authenticated AND registered. A valid Clerk session whose user never completed XfactorY
     sign-up gets 403 registration_required; nothing is created or promoted here (reading is
     never registration). Database errors propagate as server errors, never as "unregistered"."""
     claims = await authenticated_claims(request, authorization, settings)

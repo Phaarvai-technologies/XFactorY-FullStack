@@ -155,7 +155,7 @@ async def test_disable_suspend_and_link(client, monkeypatch, no_clerk):  # noqa:
     assert (await client.get("/admin/me", headers=bearer(token))).status_code == 401
     assert (await login(client, email, GOOD)).status_code == 403
 
-    # an existing X!Y (Clerk) user gets a password login linked to the same user: both work
+    # an existing XfactorY (Clerk) user gets a password login linked to the same user: both work
     sub = f"user_{uuid.uuid4().hex[:10]}"
     assert (await client.get("/identity/me", headers=auth(client, sub))).status_code == 200
     clerk_email = (await client.sql("SELECT email::text, id FROM users WHERE clerk_user_id=:s", s=sub))[0]
@@ -187,5 +187,5 @@ async def test_staff_account_claimed_by_verified_clerk_signup(client, monkeypatc
     assert after["id"] == str(staff_uid)
     token = (await login(client, email, GOOD)).json()["token"]
     cards = (await client.get("/admin/overview", headers=bearer(token))).json()["cards"]
-    # Linked to a real X!Y sign-in now, but still an admin: counted in the Admins tab, not in users.
+    # Linked to a real XfactorY sign-in now, but still an admin: counted in the Admins tab, not in users.
     assert cards["totalUsers"] == before

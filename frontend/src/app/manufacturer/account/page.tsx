@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { manufacturerCreateAccountHref } from "@/lib/auth/manufacturerAccess";
 
 export const metadata: Metadata = {
-  title: "X!Y — Manufacturer Profile Setup",
+  title: "XfactorY — Manufacturer Profile Setup",
 };
 
 export default async function ManufacturerAccountPage() {

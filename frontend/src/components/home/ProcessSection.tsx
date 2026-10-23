@@ -33,7 +33,7 @@ export function ProcessSection() {
         <div className="section-head">
           <h2>From idea to opportunity</h2>
           <p className="desc">
-            X!Y helps participants discover the right capabilities, connect with
+            XfactorY helps participants discover the right capabilities, connect with
             relevant participants, and move conversations forward.
           </p>
         </div>

@@ -3,16 +3,16 @@ import Link from "next/link";
 import { PilotInfoPage } from "@/components/layout/PilotInfoPage";
 
 export const metadata: Metadata = {
-  title: "Help center — X!Y",
-  description: "Simple guidance for using X!Y during the pilot.",
+  title: "Help center — XfactorY",
+  description: "Simple guidance for using XfactorY during the pilot.",
 };
 
 export default function HelpPage() {
   return (
     <PilotInfoPage
       title="Help center"
-      description="Short guides for the current X!Y pilot. These steps may be updated as testing continues."
-      notice="X!Y is currently in a pilot stage. Some features and workflows may change as we continue testing and improving the platform."
+      description="Short guides for the current XfactorY pilot. These steps may be updated as testing continues."
+      notice="XfactorY is currently in a pilot stage. Some features and workflows may change as we continue testing and improving the platform."
       sections={[
         {
           title: "Getting started",
@@ -81,11 +81,11 @@ export default function HelpPage() {
           body: (
             <>
               <p>
-                Is X!Y fully launched? No. It is in a pilot in limited regions
+                Is XfactorY fully launched? No. It is in a pilot in limited regions
                 while the first participants are onboarded.
               </p>
               <p>
-                Does X!Y handle payment or hiring? No. Those happen directly
+                Does XfactorY handle payment or hiring? No. Those happen directly
                 between the people who choose to work together.
               </p>
               <p>

@@ -2,22 +2,22 @@ import type { Metadata } from "next";
 import { PilotInfoPage } from "@/components/layout/PilotInfoPage";
 
 export const metadata: Metadata = {
-  title: "Contact us — X!Y",
-  description: "How to reach the X!Y team during the pilot.",
+  title: "Contact us — XfactorY",
+  description: "How to reach the XfactorY team during the pilot.",
 };
 
 export default function ContactPage() {
   return (
     <PilotInfoPage
       title="Contact us"
-      description="Ways to think about reaching the X!Y team while the platform is in its pilot."
+      description="Ways to think about reaching the XfactorY team while the platform is in its pilot."
       notice="A public email address, phone number, and office address are not published on this pilot site. Use the topics below to see what the team can help with. If you already have an account, keep your sign-in email ready so a question can be matched to the right account when you are in touch."
       sections={[
         {
           title: "General questions",
           body: (
             <p>
-              Ask about what X!Y is for, which roles are open in the pilot, and
+              Ask about what XfactorY is for, which roles are open in the pilot, and
               what you can try on the site today.
             </p>
           ),

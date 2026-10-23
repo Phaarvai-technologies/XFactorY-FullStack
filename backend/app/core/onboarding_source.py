@@ -1,4 +1,4 @@
-"""Company onboarding source: how a company first came onto X!Y. One place for the rules.
+"""Company onboarding source: how a company first came onto XfactorY. One place for the rules.
 
 * The source is assigned by the backend only, from the channel that handled the request:
     database_import - app.import_manufacturers (linked to an import_batches row)
@@ -77,6 +77,6 @@ def reject_client_source(data):
     if isinstance(data, dict):
         sent = sorted(CLIENT_SOURCE_KEYS.intersection(data))
         if sent:
-            raise ValueError("The onboarding source is assigned by X!Y and cannot be set by the client "
+            raise ValueError("The onboarding source is assigned by XfactorY and cannot be set by the client "
                              f"(remove: {', '.join(sent)}).")
     return data

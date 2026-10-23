@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { AdminRoot } from "@/components/admin/AdminRoot";
 
 export const metadata: Metadata = {
-  title: "X!Y — Admin Dashboard",
+  title: "XfactorY — Admin Dashboard",
   robots: { index: false, follow: false },
 };
 

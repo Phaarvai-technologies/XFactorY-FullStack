@@ -45,7 +45,7 @@ def test_labels():
 
 @pytest.mark.parametrize("key", sorted(src.CLIENT_SOURCE_KEYS))
 def test_every_client_source_key_is_rejected(key):
-    with pytest.raises(ValueError, match="assigned by X!Y"):
+    with pytest.raises(ValueError, match="assigned by XfactorY"):
         src.reject_client_source({"companyName": "A", key: "web_dashboard"})
 
 

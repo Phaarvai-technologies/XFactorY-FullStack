@@ -3,7 +3,7 @@
     PYTHONPATH=. python -m app.grant_admin someone@company.com            # grant
     PYTHONPATH=. python -m app.grant_admin someone@company.com --revoke   # revoke
 
-The person must have signed in to X!Y at least once (so their user record exists).
+The person must have signed in to XfactorY at least once (so their user record exists).
 """
 import asyncio
 import sys
@@ -19,7 +19,7 @@ async def main(email: str, revoke: bool) -> int:
     async with SessionFactory() as session:
         user_id = await session.scalar(text("SELECT id FROM users WHERE lower(email::text)=lower(:e)"), {"e": email})
         if not user_id:
-            print(f"No user with email {email}. They must sign in to X!Y once first.")
+            print(f"No user with email {email}. They must sign in to XfactorY once first.")
             return 1
         if revoke:
             await session.execute(text("""

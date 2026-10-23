@@ -32,7 +32,7 @@ def auth(c, sub):
 
 
 async def make_admin(c, sub):
-    """A signed-in X!Y staff member with the platform_administrator role."""
+    """A signed-in XfactorY staff member with the platform_administrator role."""
     assert (await c.get("/identity/me", headers=auth(c, sub))).status_code == 200
     await c.sql("""INSERT INTO platform_role_assignments (user_id, platform_role)
                    SELECT id, 'platform_administrator' FROM users WHERE clerk_user_id=:s""", s=sub)
@@ -76,7 +76,7 @@ async def test_manufacturer_list_detail_edit_history(client, no_clerk):
     sub, mh, org = await new_manufacturer(client, f"Chnnai Tools {tag}")
     profile = {"company": {"about": "Precision parts"},
                "location": {"address": "Plot 1", "city": "Chnnai", "country": "India"}}
-    # approval first: the remaining profile stays locked until X!Y approves the application
+    # approval first: the remaining profile stays locked until XfactorY approves the application
     r = await client.patch("/manufacturer/profile", headers=mh, json=profile)
     assert r.status_code == 403 and "awaiting admin approval" in r.text
 

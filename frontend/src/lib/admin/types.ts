@@ -65,7 +65,7 @@ export type ManufacturerRow = {
   reviewStatus: ReviewStatus;
   recordType: RecordType;
   entrySource: EntrySource;
-  /** How the company first came onto X!Y (null = unknown). Separate from the review status. */
+  /** How the company first came onto XfactorY (null = unknown). Separate from the review status. */
   onboardingSource?: OnboardingSource | null;
   /** Why the source is unknown (evidence backfill), when it is. */
   onboardingSourceNote?: string | null;
@@ -381,7 +381,7 @@ export type UserRow = {
   lastActivity: string | null;
   accountStatus: AccountStatus;
   onboardingStatus: ReviewStatus | "NO_PROFILE";
-  /** Admin created with an email + password only (no X!Y sign-up). */
+  /** Admin created with an email + password only (no XfactorY sign-up). */
   staffOnly: boolean;
   /** Status of the admin email + password sign-in, if the user has one. */
   adminLogin: "active" | "disabled" | null;
@@ -561,7 +561,7 @@ export type CompanyPeople = {
   }[];
   /** The company's active owner (by membership). */
   primaryUser?: CompanyPerson | null;
-  /** A new company's first registering user: the proposed primary owner until X!Y approves. */
+  /** A new company's first registering user: the proposed primary owner until XfactorY approves. */
   primaryProposed?: boolean;
   /** Every other user linked to the company by membership, each once, with their status. */
   otherUsers?: CompanyPerson[];

@@ -270,7 +270,7 @@ class ManufacturerRepository:
             raise LookupError("Clerk user/organization is not synchronized yet")
         result = dict(row._mapping)
         if result.pop("user_status") != "active":
-            raise PermissionError("This account has been suspended. Please contact X!Y support.")
+            raise PermissionError("This account has been suspended. Please contact XfactorY support.")
         if result["organization_type"] != "manufacturer":
             raise PermissionError("Active organization is not a Manufacturer")
         return result
@@ -430,7 +430,7 @@ class ManufacturerRepository:
               company does not have (null / empty / whitespace - a saved 0 is a value) take the
               submitted value, and on approval only missing fields are filled;
             - a company managed by someone else / the owner's own company: the existing
-              admin-reviewed update process - nothing changes unless an X!Y admin approves.
+              admin-reviewed update process - nothing changes unless an XfactorY admin approves.
           The company phone is required: the saved one, or a valid Indian number."""
         from app.schemas.manufacturer import normalize_indian_phone
 
@@ -500,7 +500,7 @@ class ManufacturerRepository:
                 kind = "update" if approved else ("new_company" if row.id == ctx["organization_id"] else "update")
                 return {"organization_id": row.id, "selected": True, "kind": kind, "name": row.display_name}
             if row.claimed:
-                # Managed by someone else: the details become an update request for X!Y admin
+                # Managed by someone else: the details become an update request for XfactorY admin
                 # review (app/company_update_requests.py). Nothing on the company changes now,
                 # and the request never grants ownership or membership.
                 return {"organization_id": row.id, "selected": True, "kind": "update_request",
@@ -512,7 +512,7 @@ class ManufacturerRepository:
                   AND status IN ('pending', 'changes_requested') AND submitted_by_user_id <> :u LIMIT 1
             """), {"t": row.id, "u": ctx["user_id"]})
             if other_claim:
-                raise LookupError("Another request to manage this company is already awaiting X!Y review.")
+                raise LookupError("Another request to manage this company is already awaiting XfactorY review.")
             return {"organization_id": row.id, "selected": True, "kind": "claim", "name": row.display_name}
 
         name = normalize_company_name(data["companyName"])

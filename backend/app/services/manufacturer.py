@@ -208,7 +208,7 @@ class ManufacturerService:
         return snapshot
 
     async def _require_access(self, ctx: dict, profile: bool = False) -> None:
-        """Every manufacturer write below the basic details form: refused (403) until X!Y approves
+        """Every manufacturer write below the basic details form: refused (403) until XfactorY approves
         the user's application; the shared company profile needs the company's owner / admin."""
         await self._run(access.require(self.repo.db, ctx, self.settings, profile=profile))
 
@@ -395,7 +395,7 @@ class ManufacturerService:
         return snapshot
 
     async def _notify_admins(self, submitted: dict) -> None:
-        """Email every active X!Y admin that an application (or its corrections) awaits review.
+        """Email every active XfactorY admin that an application (or its corrections) awaits review.
         Best effort: delivery is logged (email_deliveries) and never fails the submission."""
         if not submitted or submitted.get("kind") == "update":
             return
@@ -522,7 +522,7 @@ class ManufacturerService:
         await self._run(self.repo.save_availability(actor, data))
         return await self.bootstrap(actor)
 
-    # ---------------------------------------------------------------- notifications from X!Y admins
+    # ---------------------------------------------------------------- notifications from XfactorY admins
     async def notifications(self, actor: Actor) -> dict:
         ctx = await self.ensure_actor(actor)
         return await notifications.for_user(self.repo.db, ctx["user_id"], ctx["organization_id"])

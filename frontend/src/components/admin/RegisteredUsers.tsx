@@ -143,7 +143,7 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
         {error && <ErrorBox message={error.message} onRetry={reload} />}
         <p className="adm-section-hint">
           <b>Primary user</b>
-          {data.primaryProposed ? " (proposed — confirmed when X!Y approves the company)" : ""}
+          {data.primaryProposed ? " (proposed — confirmed when XfactorY approves the company)" : ""}
         </p>
         {primary ? userTable([primary], "Primary user") : <p className="adm-muted">No primary user (owner) yet.</p>}
         <p className="adm-section-hint">

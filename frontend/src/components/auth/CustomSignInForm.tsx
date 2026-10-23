@@ -120,7 +120,7 @@ export function CustomSignInForm({
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
   }
 
-  // A session left over from an identity that never completed X!Y sign-up (the page found it
+  // A session left over from an identity that never completed XfactorY sign-up (the page found it
   // signed in but not registered): end it so this form can sign in normally. Only for a session
   // that existed when the page opened, never for one this form creates.
   const endStaleSession = useRef(staleSession);
@@ -136,7 +136,7 @@ export function CustomSignInForm({
 
   /**
    * Clerk accepted the credentials and created a session. Before that session becomes
-   * active, the backend must confirm the identity completed X!Y sign-up. Registered: activate
+   * active, the backend must confirm the identity completed XfactorY sign-up. Registered: activate
    * and continue. Not registered: end the session and go to Sign-up. Backend unreachable:
    * end the session and say so (never "sign up first").
    */

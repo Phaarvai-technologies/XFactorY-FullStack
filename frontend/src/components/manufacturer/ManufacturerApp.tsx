@@ -72,7 +72,7 @@ type ServerSnapshot = {
     feedback: string | null;
     /** The user's own update requests for companies managed by someone else (status + feedback). */
     updateRequests?: CompanyUpdateRequest[];
-    /** Approval first: what the user may use until X!Y approves their manufacturer application. */
+    /** Approval first: what the user may use until XfactorY approves their manufacturer application. */
     access?: ApplicationAccess;
   };
   /** What the account form submission became (set on POST /manufacturer/account). */
@@ -94,7 +94,7 @@ export type ApplicationAccess = {
     status: string;
     companyId: string;
     companyName: string | null;
-    /** X!Y's applicant-facing explanation (never internal notes). */
+    /** XfactorY's applicant-facing explanation (never internal notes). */
     feedback: string | null;
     reviewedAt: string | null;
     submittedAt: string | null;
@@ -219,9 +219,9 @@ export function ManufacturerApp() {
   const checked =
     server !== null && server.userId === userId && (!server.failed || server.path === pathname);
   /** The admin asked for corrections to the submitted company details: the form may be reopened. */
-  /** X!Y asked for corrections to one of the user's update requests for another company. */
+  /** XfactorY asked for corrections to one of the user's update requests for another company. */
   const requestToCorrect = server?.approval?.updateRequests?.find((r) => r.status === "changes_requested") ?? null;
-  /** Approval first: remaining sections stay locked until X!Y approves the application. */
+  /** Approval first: remaining sections stay locked until XfactorY approves the application. */
   const access = server?.approval?.access ?? null;
   const locked = access !== null && !access.unlocked;
   /** Rejected: a fresh application may be sent once the waiting period has passed. */
@@ -465,11 +465,11 @@ export function ManufacturerApp() {
         ? "Your manufacturer application is awaiting admin approval."
         : snapshot.submitted?.kind === "update_request"
           ? `Your update request for ${snapshot.submitted.companyName} was submitted for admin review.`
-          : "Details sent to X!Y for approval.",
+          : "Details sent to XfactorY for approval.",
     );
   }
 
-  /** Approval first: the remaining sections open only after X!Y approves (the backend refuses too). */
+  /** Approval first: the remaining sections open only after XfactorY approves (the backend refuses too). */
   function lockedMessage(profile: boolean): string | null {
     if (locked) return access?.message || "Your manufacturer application is awaiting admin approval.";
     if (profile && access && !access.canEditProfile) {
@@ -881,7 +881,7 @@ export function ManufacturerApp() {
               locked
                 ? {
                     message: access?.message || "Your manufacturer application is awaiting admin approval.",
-                    detail: access?.application?.feedback ? `X!Y: ${access.application.feedback}` : null,
+                    detail: access?.application?.feedback ? `XfactorY: ${access.application.feedback}` : null,
                     actionLabel:
                       access?.status === "changes_requested"
                         ? "Correct details"

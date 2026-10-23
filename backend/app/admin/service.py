@@ -98,7 +98,7 @@ def list_row(r: dict) -> dict:
         "majorProcess": r.get("major_process"), "listingCount": r.get("listing_count", 0),
         "completeness": r["completeness"], "requiredDone": r["required_done"], "requiredTotal": r["required_total"],
         "reviewStatus": r["review_status"], "recordType": r["record_type"], "entrySource": r["entry_source"],
-        # how the company first came onto X!Y (None = unknown); separate from approval / review status
+        # how the company first came onto XfactorY (None = unknown); separate from approval / review status
         "onboardingSource": r.get("onboarding_source"),
         # why the source is unknown (from the evidence backfill), when it is
         "onboardingSourceNote": r.get("onboarding_source_note") if not r.get("onboarding_source") else None,
@@ -228,8 +228,8 @@ class AdminService:
         if row.get("submitted_at"):
             timeline.append({"at": row["submitted_at"], "event": "Profile completed and submitted for review"})
         if row.get("reviewed_at"):
-            decision = {"approved": "Approved by X!Y", "changes_requested": "Corrections requested by X!Y",
-                        "rejected": "Rejected by X!Y"}.get(row.get("onboarding_raw_status") or "")
+            decision = {"approved": "Approved by XfactorY", "changes_requested": "Corrections requested by XfactorY",
+                        "rejected": "Rejected by XfactorY"}.get(row.get("onboarding_raw_status") or "")
             if decision:
                 timeline.append({"at": row["reviewed_at"], "event": decision})
         submissions = await approval.submissions_for_target(self.db, org_id)
@@ -242,7 +242,7 @@ class AdminService:
                 verb = {"approved": "approved", "rejected": "rejected",
                         "changes_requested": "returned for corrections"}.get(sub["status"])
                 if verb:
-                    timeline.append({"at": sub["reviewed_at"], "event": f'{kind_label[sub["kind"]]} {verb} by X!Y'})
+                    timeline.append({"at": sub["reviewed_at"], "event": f'{kind_label[sub["kind"]]} {verb} by XfactorY'})
         # The company's own submission (update requests from other users are listed separately).
         open_sub = next((x for x in reversed(submissions)
                          if x["status"] in approval.OPEN and x["kind"] != "update_request"), None)
@@ -430,7 +430,7 @@ class AdminService:
                               "accountStatus": person.get("accountStatus") or "active",
                               "linkedAt": None, "registeredAt": r.get("submittedAt"),
                               "applicationStatus": r["status"], "roles": []})
-        # A new company's first registering user is its PROPOSED primary owner until X!Y approves it.
+        # A new company's first registering user is its PROPOSED primary owner until XfactorY approves it.
         proposed = bool(primary) and (await approval.approval_status(self.db, UUID(org_id))) != "approved"
         return {"registeredUsers": users, "requests": requests,
                 "primaryUser": primary, "primaryProposed": proposed, "otherUsers": other, "pendingRequests": pending,
@@ -540,7 +540,7 @@ class AdminService:
             label = self._label(field)
             await notifications.notify_company(
                 self.db, org_id, "profile_edit",
-                "The X!Y team updated a machinery listing" if kind == "machinery" else "The X!Y team updated your profile",
+                "The XfactorY team updated a machinery listing" if kind == "machinery" else "The XfactorY team updated your profile",
                 f"{label}: {self._shown(old)} → {self._shown(new)}\nReason: {reason.strip()}", admin.user_id)
             await self.db.commit()
         await self._run(apply())
@@ -587,7 +587,7 @@ class AdminService:
         if body.get("unassign") or body.get("assigned_admin_id"):
             new_admin = None if body.get("unassign") else str(body["assigned_admin_id"])
             if new_admin and not await self.repo.is_admin(new_admin):
-                raise HTTPException(422, "Only X!Y admins can be assigned.")
+                raise HTTPException(422, "Only XfactorY admins can be assigned.")
             old_admin = str(meta["assigned_admin_user_id"]) if meta["assigned_admin_user_id"] else None
             if new_admin != old_admin:
                 await self.repo.set_org_field(org_id, "assigned_admin_user_id", new_admin)
@@ -776,7 +776,7 @@ class AdminService:
         await self._ctx(org_id)
         await self.repo.add_note(org_id, admin.user_id, note, shared=share)
         if share:
-            await notifications.notify_company(self.db, org_id, "admin_note", "Message from the X!Y team",
+            await notifications.notify_company(self.db, org_id, "admin_note", "Message from the XfactorY team",
                                                note.strip(), admin.user_id)
         await self.db.commit()
         return {"notes": [{**n, "id": str(n["id"])} for n in await self.repo.notes(org_id)]}

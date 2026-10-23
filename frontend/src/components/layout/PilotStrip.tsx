@@ -3,7 +3,7 @@ export function PilotStrip() {
     <div className="pilot-strip">
       <div className="wrap">
         <span className="pilot-dot" />
-        Pilot program — X!Y is live in limited regions while we onboard the first
+        Pilot program — XfactorY is live in limited regions while we onboard the first
         cohort of makers and buyers.
       </div>
     </div>

@@ -20,18 +20,18 @@ import { safeRedirectPath } from "@/lib/auth/safeRedirect";
  * This replaces `clerk.handleRedirectCallback({})`. With the installed Clerk SDK
  * (@clerk/nextjs 7.9.8 → clerk-js 6) its `transferable` option defaults to `true`: an
  * unknown Google account on the Sign-in page is silently turned into a new Clerk sign-up
- * (an "opaque sign-up"), and the session is activated before X!Y is asked anything.
+ * (an "opaque sign-up"), and the session is activated before XfactorY is asked anything.
  *
  * Here, following Clerk's documented account-transfer checks:
  * - Sign-in with an unknown Google account → no transfer, no account: go to Sign-up with
  *   "Please sign up first, then sign in to continue."
- * - Sign-in with an existing account → the backend must confirm X!Y registration before the
+ * - Sign-in with an existing account → the backend must confirm XfactorY registration before the
  *   session is activated; unregistered → session ended, sent to Sign-up.
- * - Sign-up (new Google account, or an existing one Clerk transfers to sign-in) → X!Y
+ * - Sign-up (new Google account, or an existing one Clerk transfers to sign-in) → XfactorY
  *   registration is completed with the server-signed sign-up token; only once the backend
  *   confirms it is the session activated and the user sent to the dashboard (safe
  *   redirect). Not finalized → session ended, Sign-up shows the error; no access.
- * - Sign-up with a Google account that already has a REGISTERED X!Y account → nothing is created
+ * - Sign-up with a Google account that already has a REGISTERED XfactorY account → nothing is created
  *   or changed: session ended, Sign-up shows "You already have an account. Please sign in."
  * The intent (from the callback address, else this tab's storage) only picks which branch to
  * finish; it grants nothing by itself. If Clerk never answers, the page gives up after
@@ -119,20 +119,20 @@ export default function SsoCallbackPage() {
         result = await completeRegistration((await freshToken(sessionId)) ?? token, flowToken);
       }
       if (result.ok) {
-        // Registration confirmed by the backend (new, or an existing X!Y user): signed in.
+        // Registration confirmed by the backend (new, or an existing XfactorY user): signed in.
         go(await activateRegisteredSession(clerk, setActive!, sessionId, activated, returnPath));
         return;
       }
       // Not finalized: no active session, no access; Sign-up shows the existing error.
-      console.warn("[X!Y] Google sign-up not completed:", result.code ?? "unknown", result.message);
+      console.warn("[XfactorY] Google sign-up not completed:", result.code ?? "unknown", result.message);
       await endSession(clerk, sessionId);
       go(authPageHref("/sign-up", returnPath, "signup_failed"));
     }
 
     /**
      * Sign-up with a Google account Clerk already knows (transferred to a sign-in). Already a
-     * registered X!Y user: nothing is created or changed, the session is ended and Sign-up says
-     * "You already have an account. Please sign in." A Clerk identity that never finished X!Y
+     * registered XfactorY user: nothing is created or changed, the session is ended and Sign-up says
+     * "You already have an account. Please sign in." A Clerk identity that never finished XfactorY
      * sign-up: registration completes now with this sign-up's token (Terms accepted).
      */
     async function finishExistingOnSignUp(sessionId: string, flowToken: string) {
@@ -170,7 +170,7 @@ export default function SsoCallbackPage() {
           return go(authPageHref("/sign-up", returnPath, undefined, { continue: "google-details" }));
         }
         // Clerk already finished the Google sign-up and made its session the browser's session
-        // (the sign-up attempt is then no longer reported): complete X!Y registration with it.
+        // (the sign-up attempt is then no longer reported): complete XfactorY registration with it.
         const created = signUp!.createdSessionId ?? clerk.session?.id ?? null;
         if (created) return finishSignUp(created, intent.flowToken);
         return go(authPageHref("/sign-up", returnPath, "signup_failed"));
@@ -196,7 +196,7 @@ export default function SsoCallbackPage() {
       <div className="wrap" style={{ maxWidth: 520, textAlign: "center" }}>
         <h1 style={{ fontSize: 28, marginBottom: 12 }}>Signing you in…</h1>
         <p style={{ color: "var(--ink-soft)", marginBottom: 0, lineHeight: 1.6 }}>
-          Completing your authentication with X!Y.
+          Completing your authentication with XfactorY.
         </p>
       </div>
     </div>

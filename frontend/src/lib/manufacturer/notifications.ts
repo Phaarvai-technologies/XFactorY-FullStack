@@ -4,7 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
-/** A message from the X!Y team (GET /manufacturer/notifications). */
+/** A message from the XfactorY team (GET /manufacturer/notifications). */
 export type ManufacturerNotification = {
   id: string;
   kind: "needs_correction" | "profile_edit" | "admin_note";

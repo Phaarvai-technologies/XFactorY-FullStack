@@ -137,7 +137,7 @@ async def submit(db: AsyncSession, *, user_id: UUID, workspace_id: UUID, company
     current = await current_values(db, company_id)
     # A user registering under an existing company sees its saved details read-only, so the
     # request may propose no change at all: it is still recorded (pending onboarding request for
-    # X!Y review) - it never changes the company and never grants access by itself.
+    # XfactorY review) - it never changes the company and never grants access by itself.
     previous = (await db.execute(text("""
         SELECT id, payload, original_payload, status FROM manufacturer_submissions
         WHERE submitted_by_user_id = :u AND target_organization_id = :t AND kind = 'update_request'

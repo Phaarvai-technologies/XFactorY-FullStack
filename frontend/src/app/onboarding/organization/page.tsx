@@ -4,7 +4,7 @@ export default function OnboardingOrganizationPage() {
   return (
     <PlaceholderPage
       title="Organization setup"
-      description="Connect or create the organization that represents your company on X!Y."
+      description="Connect or create the organization that represents your company on XfactorY."
       primaryHref="/onboarding/profile"
       primaryLabel="Continue to profile"
     />

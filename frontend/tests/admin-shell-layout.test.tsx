@@ -67,7 +67,7 @@ describe("admin shell layout", () => {
     expect(await screen.findByLabelText(/Current password/i)).toBeInTheDocument();
   });
 
-  it("signed in with an X!Y account: no Change password (that password is managed in the X!Y account)", async () => {
+  it("signed in with an XfactorY account: no Change password (that password is managed in the XfactorY account)", async () => {
     serve({ ...ME, authMethod: "clerk" });
     const chip = await renderShell();
     await act(async () => fireEvent.click(chip));

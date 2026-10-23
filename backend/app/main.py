@@ -64,7 +64,7 @@ install_middleware(app, settings)
 
 @app.exception_handler(RegistrationRequired)
 async def registration_required(_request, _exc):
-    # Authenticated with Clerk, but X!Y sign-up was never completed. The frontend keys on `code`.
+    # Authenticated with Clerk, but XfactorY sign-up was never completed. The frontend keys on `code`.
     return JSONResponse({"detail": SIGN_UP_REQUIRED_MESSAGE, "code": "registration_required"}, status_code=403)
 
 

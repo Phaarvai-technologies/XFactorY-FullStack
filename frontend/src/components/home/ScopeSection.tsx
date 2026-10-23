@@ -9,11 +9,11 @@ const SCOPE_CARDS = [
   },
   {
     title: "Not payments",
-    body: "X!Y does not execute marketplace payments.",
+    body: "XfactorY does not execute marketplace payments.",
   },
   {
     title: "Not employment/intermediation",
-    body: "X!Y does not execute employment or regulated transactions.",
+    body: "XfactorY does not execute employment or regulated transactions.",
   },
 ] as const;
 
@@ -22,14 +22,14 @@ export function ScopeSection() {
     <section className="scope" id="scope">
       <div className="wrap">
         <div className="section-head">
-          <h2>What X!Y is — and isn&apos;t</h2>
+          <h2>What XfactorY is — and isn&apos;t</h2>
         </div>
         <p className="scope-lead">
-          X!Y is a discovery and engagement platform for the manufacturing
+          XfactorY is a discovery and engagement platform for the manufacturing
           ecosystem.
         </p>
         <p className="scope-lead scope-lead-strong">
-          X!Y is not a payment intermediary, legal intermediary, investment
+          XfactorY is not a payment intermediary, legal intermediary, investment
           intermediary, or employment intermediary.
         </p>
 

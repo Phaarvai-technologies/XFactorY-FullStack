@@ -42,11 +42,11 @@ type AccountScreenProps = {
   onLoadCompany?: (companyId: string) => Promise<CompanyDetails>;
   /** Prefill when correcting details already submitted for approval. */
   initial?: Partial<AccountSubmission>;
-  /** Corrections requested by X!Y: only these fields may be edited (the others stay as sent). */
+  /** Corrections requested by XfactorY: only these fields may be edited (the others stay as sent). */
   correctionFields?: string[];
 };
 
-/** Labels of the fields X!Y may ask to correct (keys as sent by the backend). */
+/** Labels of the fields XfactorY may ask to correct (keys as sent by the backend). */
 const CORRECTION_LABELS: Record<string, string> = {
   firstName: "First name",
   lastName: "Last name",
@@ -135,7 +135,7 @@ export function AccountScreen({
   initial,
   correctionFields,
 }: AccountScreenProps) {
-  /** Corrections requested: fields X!Y did not list are read-only. */
+  /** Corrections requested: fields XfactorY did not list are read-only. */
   const fixOnly = correctionFields && correctionFields.length > 0 ? new Set(correctionFields) : null;
   const closed = (...keys: string[]) => fixOnly !== null && !keys.some((key) => fixOnly.has(key));
   const [firstName, setFirstName] = useState(initial?.firstName ?? "");
@@ -164,7 +164,7 @@ export function AccountScreen({
   const [selectedCompany, setSelectedCompany] = useState<{ id: string; name: string } | null>(
     initial?.companyId && initial.companyName ? { id: initial.companyId, name: initial.companyName } : null);
   const [companyDetailsStatus, setCompanyDetailsStatus] = useState<"idle" | "loading" | "error">("idle");
-  /** The selected company is managed by another user: the details go to X!Y as an update request. */
+  /** The selected company is managed by another user: the details go to XfactorY as an update request. */
   const [managedElsewhere, setManagedElsewhere] = useState(false);
   /** Values copied from the selected record, so they can be removed again when it changes. */
   const prefilled = useRef<Partial<Record<PrefillKey, string>>>({});
@@ -417,7 +417,7 @@ if (locked.phone) {
             </p>
             {fixOnly ? (
               <p className="account-required-note">
-                X!Y asked you to correct:{" "}
+                XfactorY asked you to correct:{" "}
                 {[...new Set(Object.keys(CORRECTION_LABELS).filter((key) => fixOnly.has(key)).map((key) => CORRECTION_LABELS[key]))].join(", ")}. The other
                 details stay as you sent them.
               </p>
@@ -663,8 +663,8 @@ if (locked.phone) {
     <p style={{ ...MUTED, padding: "6px 0 0", margin: 0 }}>Loading company details…</p>
   ) : managedElsewhere && selectedCompany ? (
     <p style={{ ...MUTED, padding: "6px 0 0", margin: 0 }}>
-      This company is managed by another X!Y user. Your details will be sent to X!Y for review; the company’s
-      saved information stays unchanged unless X!Y approves your changes.
+      This company is managed by another XfactorY user. Your details will be sent to XfactorY for review; the company’s
+      saved information stays unchanged unless XfactorY approves your changes.
     </p>
   ) : null}
 </div>

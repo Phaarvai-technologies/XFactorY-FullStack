@@ -178,7 +178,7 @@ async def test_source_cannot_be_spoofed_and_future_channels_are_unavailable(clie
                        ("submission_source", "ground_sales"), ("importBatchId", str(uuid.uuid4()))):
         r = await client.post("/manufacturer/account", headers=h, json={**account(f"Spoof {t}"), key: value})
         assert r.status_code == 422, (key, r.text)
-        assert "assigned by X!Y" in r.text
+        assert "assigned by XfactorY" in r.text
     assert (await client.sql("""SELECT count(*) FROM manufacturer_submissions s JOIN users u
                                 ON u.id=s.submitted_by_user_id WHERE u.clerk_user_id=:s""", s=sub))[0][0] == 0
 

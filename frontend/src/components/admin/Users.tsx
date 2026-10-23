@@ -91,7 +91,7 @@ export function Users() {
     <>
       <PageHeader
         title="Users"
-        subtitle="People who registered on X!Y. Admin accounts are managed in the Admins tab; companies and their machinery in Manufacturers and Machinery."
+        subtitle="People who registered on XfactorY. Admin accounts are managed in the Admins tab; companies and their machinery in Manufacturers and Machinery."
       />
       <div className="card adm-toolbar">
         <div className="adm-toolbar-row">
@@ -394,7 +394,7 @@ export function UserDetailView({ id }: { id: string }) {
                     <div className="adm-linked-side">
                       <ReviewBadge status={m.review_status} />
                       <RecordBadge type={m.record_type} hideReal />
-                      <span className="badge badge-neutral" title="How this company first came onto X!Y">
+                      <span className="badge badge-neutral" title="How this company first came onto XfactorY">
                         Source: {m.onboarding_source ? (m.onboarding_source_label ?? sourceText(m.onboarding_source)) : sourceText(null, m.staged_source)}
                       </span>
                       <Completeness value={m.completeness} />
@@ -539,8 +539,8 @@ export function UserDetailView({ id }: { id: string }) {
         <Modal title={action === "suspend" ? "Suspend account" : "Reactivate account"} onClose={() => setAction(null)}>
           <p className="adm-modal-text">
             {action === "suspend"
-              ? `${u.name || u.email} will be signed out of X!Y and blocked from signing in until reactivated. Their data is kept.`
-              : `${u.name || u.email} will be able to sign in and use X!Y again.`}
+              ? `${u.name || u.email} will be signed out of XfactorY and blocked from signing in until reactivated. Their data is kept.`
+              : `${u.name || u.email} will be able to sign in and use XfactorY again.`}
           </p>
           <label htmlFor="acct-reason">
             Reason <span className="adm-req">*</span>

@@ -40,7 +40,7 @@ export function isManufacturerDashboardPath(pathname: string): boolean {
   );
 }
 
-/** Join Our Ecosystem → existing X!Y Create Account, then return to profile setup. */
+/** Join Our Ecosystem → existing XfactorY Create Account, then return to profile setup. */
 export function manufacturerCreateAccountHref(): string {
   return `/sign-up?redirect_url=${encodeURIComponent(MANUFACTURER_ACCOUNT_PATH)}`;
 }

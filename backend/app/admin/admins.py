@@ -2,7 +2,7 @@
 
 An admin is a `users` row with an active role in `platform_role_assignments`. Admins sign in
 to /admin with an admin account (email + password, `admin_accounts`) and, if the same email
-also has an X!Y account, with that too. Only platform administrators may change admin access.
+also has an XfactorY account, with that too. Only platform administrators may change admin access.
 
 Rules that keep the portal reachable:
 - the built-in administrator (ADMIN_DEFAULT_EMAIL, admin@phaarvai.com) cannot be revoked,
@@ -175,7 +175,7 @@ class AdminManager:
         else:
             user_id = user["id"]
             if user["status"] != "active":
-                raise HTTPException(422, "This person's X!Y account is suspended. Reactivate it in Users first.")
+                raise HTTPException(422, "This person's XfactorY account is suspended. Reactivate it in Users first.")
             existing = await self._rows(user_id)
             if existing and _status(existing[0]) == "active":
                 raise HTTPException(409, f"{email} is already an admin.")
@@ -290,8 +290,8 @@ class AdminManager:
         email_changed = "email" in changed
         if email_changed:
             if row["has_xy_account"]:
-                raise HTTPException(422, "This admin signs in with an X!Y account; their email is managed in "
-                                         "their X!Y account, not here.")
+                raise HTTPException(422, "This admin signs in with an XfactorY account; their email is managed in "
+                                         "their XfactorY account, not here.")
             if self._is_default(row["email"]) or self._is_default(new["email"]):
                 raise HTTPException(422, "The built-in administrator's email cannot be changed here.")
             taken = await self.db.scalar(text("""
@@ -315,7 +315,7 @@ class AdminManager:
             """), {"u": user_id, "e": new["email"]})
         await self._log(user_id, me, "Admin details updated (" + ", ".join(changed) + ")")
         await self.db.commit()
-        # An X!Y (Clerk) account also stores the name; keep it equal so the next X!Y sign-in
+        # An XfactorY (Clerk) account also stores the name; keep it equal so the next XfactorY sign-in
         # does not bring back the old name. The database already has the new name either way.
         sync = "not_needed"
         if row["has_xy_account"] and ({"first name", "last name"} & set(changed)):

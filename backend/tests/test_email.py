@@ -97,9 +97,9 @@ async def test_review_and_account_emails_are_sent(client, no_clerk, outbox):  # 
     await wait_for_pending()
     mails = outbox.to(owner[0])
     assert sorted(m["Subject"] for m in mails) == sorted([
-        "Welcome to X!Y", f"Action needed: please update your Mail Co {tag} profile",
+        "Welcome to XfactorY", f"Action needed: please update your Mail Co {tag} profile",
         f"Your Mail Co {tag} profile has been reviewed",
-        "Your X!Y account has been suspended", "Your X!Y account is active again"])
+        "Your XfactorY account has been suspended", "Your XfactorY account is active again"])
     first = next(m for m in mails if m["Subject"].startswith("Action needed"))
     assert "Please add at least one FAQ." in outbox.text(first)
     assert "https://app.example.com/manufacturer/dashboard" in outbox.text(first)
@@ -116,7 +116,7 @@ async def test_test_email_and_log(client, outbox):  # noqa: F811
     to = f"check_{uuid.uuid4().hex[:6]}@example.com"
     r = (await client.post("/admin/support/test-email", headers=admin, json={"to": to})).json()
     assert r["status"] == "sent" and r["smtpConfigured"] is True
-    assert [m["Subject"] for m in outbox.to(to)] == ["X!Y test email"]
+    assert [m["Subject"] for m in outbox.to(to)] == ["XfactorY test email"]
     log = (await client.get("/admin/support/emails", headers=admin)).json()
     assert any(e["to_email"] == to and e["status"] == "sent" for e in log["emails"])
     bad = (await client.post("/admin/support/test-email", headers=admin, json={"to": "nope"})).json()
@@ -141,7 +141,7 @@ async def test_new_user_gets_one_welcome_email(client, outbox):  # noqa: F811
     uid = (await client.sql("SELECT id FROM users WHERE clerk_user_id=:s", s=sub))[0][0]
     assert await send_welcome(uid) is None  # e.g. the Clerk webhook arriving later: no duplicate
     mails = outbox.to(f"{sub}@example.com")
-    assert [m["Subject"] for m in mails] == ["Welcome to X!Y"]
+    assert [m["Subject"] for m in mails] == ["Welcome to XfactorY"]
     assert "Hello Jordan," in outbox.text(mails[0]) and "https://app.example.com/" in outbox.text(mails[0])
     log = await client.sql("SELECT template, status FROM email_deliveries WHERE user_id=:u", u=uid)
     assert [tuple(r) for r in log] == [("welcome", "sent")]

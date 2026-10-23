@@ -1,4 +1,4 @@
-"""Approval-first manufacturer access: what an applicant may do while X!Y reviews them.
+"""Approval-first manufacturer access: what an applicant may do while XfactorY reviews them.
 
 An APPLICATION is the user's latest manufacturer submission of one of these kinds
 (`manufacturer_submissions`, the existing staging table):
@@ -48,7 +48,7 @@ CORRECTABLE = {
 }
 
 PENDING_MESSAGE = "Your manufacturer application is awaiting admin approval."
-CORRECTIONS_MESSAGE = ("X!Y asked you to correct your manufacturer application. "
+CORRECTIONS_MESSAGE = ("XfactorY asked you to correct your manufacturer application. "
                        "Update the requested details and send them again.")
 NOT_SUBMITTED_MESSAGE = "Send your basic manufacturer details for admin approval first."
 MEMBER_PROFILE_MESSAGE = "Only the company's primary user can edit the shared company profile."
@@ -267,7 +267,7 @@ async def check_corrections(db: AsyncSession, user_id: UUID, new: dict) -> None:
         if _norm(key, old.get(key)) != _norm(key, new.get(key)):
             locked.append(label)
     if locked:
-        raise ValueError("Only the fields X!Y asked you to correct can be changed: "
+        raise ValueError("Only the fields XfactorY asked you to correct can be changed: "
                          + ", ".join(CORRECTABLE[k] for k in CORRECTABLE if k in fields)
                          + ". Not open for correction: " + ", ".join(locked) + ".")
 

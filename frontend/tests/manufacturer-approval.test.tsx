@@ -143,7 +143,7 @@ describe("applicant: locked until approval", () => {
 
   it("pending: clear status, what was sent, remaining sections locked", () => {
     render(<ApplicationStatusScreen onboarding={pendingBoot.onboarding as OnboardingState} {...props} />);
-    expect(screen.getByRole("heading", { name: "Your application is with X!Y for review" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your application is with XfactorY for review" })).toBeInTheDocument();
     expect(screen.getByText("Pending approval")).toBeInTheDocument();
     for (const title of ["Company Profile", "Machinery", "Availability", "Booking Requests"]) {
       const card = screen.getByRole("heading", { name: title }).closest(".nav-card")!;
@@ -153,7 +153,7 @@ describe("applicant: locked until approval", () => {
     expect(screen.getAllByText("Locked until approval")).toHaveLength(4);
   });
 
-  it("corrections: X!Y's message and the fields to correct; internal notes never appear", () => {
+  it("corrections: XfactorY's message and the fields to correct; internal notes never appear", () => {
     render(<ApplicationStatusScreen onboarding={correctionsBoot.onboarding as OnboardingState} {...props} />);
     expect(screen.getByText("Please use your full last name.")).toBeInTheDocument();
     expect(screen.getByText(/Please correct:/).textContent).toContain("Last name");
@@ -176,7 +176,7 @@ describe("applicant: locked until approval", () => {
     expect(screen.getByText(/Applying again is not available yet/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Apply again" })).not.toBeInTheDocument();
     expect(screen.queryByText("Locked until approval")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Go to my X!Y dashboard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Go to my XfactorY dashboard" }));
     expect(props.onMainDashboard).toHaveBeenCalled();
   });
 });

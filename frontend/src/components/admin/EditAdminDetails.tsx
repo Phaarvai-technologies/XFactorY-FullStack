@@ -20,7 +20,7 @@ export function savedMessage(res: DetailsSaved): string {
   if (res.changed.length === 0) return "No changes to save.";
   const who = res.admin.isYou ? "Your details were" : `${res.admin.name || res.admin.email}'s details were`;
   return res.clerkSync === "failed"
-    ? `${who} saved, but the name could not be updated in the X!Y account. Save again later, or the next X!Y sign-in may bring back the old name.`
+    ? `${who} saved, but the name could not be updated in the XfactorY account. Save again later, or the next XfactorY sign-in may bring back the old name.`
     : `${who} saved.`;
 }
 
@@ -112,8 +112,8 @@ export function EditAdminModal({
             ? "Used to sign in at /admin/login. After a change, sign in with the new email."
             : admin.isDefault
               ? "The built-in administrator's email cannot be changed here."
-              : "This admin signs in with an X!Y account, so the email is managed in that account."}
-          {admin.hasXyAccount && " The name is also updated in the X!Y account."}
+              : "This admin signs in with an XfactorY account, so the email is managed in that account."}
+          {admin.hasXyAccount && " The name is also updated in the XfactorY account."}
         </p>
         {err && <p className="field-error" role="alert">{err}</p>}
         {onChangePassword && (

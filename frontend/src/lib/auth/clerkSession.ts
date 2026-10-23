@@ -1,6 +1,6 @@
 /**
  * Working with a Clerk session that a sign-in / sign-up just created, BEFORE it becomes the
- * browser's active session. The X!Y backend is asked first (registration check / completion)
+ * browser's active session. The XfactorY backend is asked first (registration check / completion)
  * with that session's own token, so an unregistered identity is never given an active app
  * session, not even for a moment. Clerk keeps the new session in `clerk.client.sessions`;
  * if it is not listed there (unexpected), the session is activated as a fallback and the
@@ -40,7 +40,7 @@ function secondsLeft(jwt: string): number {
  * The token of a session that is NOT active yet. Clerk's session.getToken() announces every
  * token it fetches as the browser's current one: Clerk then writes it into the __session
  * cookie and marks the browser signed in (__client_uat), although the session was never
- * activated. If X!Y then ends that session (already registered, not registered), those cookies
+ * activated. If XfactorY then ends that session (already registered, not registered), those cookies
  * stay behind until the token expires, the server treats the browser as signed in while Clerk
  * in the page knows it is not, and Sign-in / Sign-up redirect back and forth (a hard refresh
  * cleared it). So the token Clerk returned when it created the session is used as is - no
@@ -74,7 +74,7 @@ export async function tokenForCreatedSession(
 }
 
 /**
- * After the backend has CONFIRMED the X!Y registration: make the session the browser's active
+ * After the backend has CONFIRMED the XfactorY registration: make the session the browser's active
  * session and return where to go (the safe dashboard path). If Clerk cannot activate it, the
  * registration still stands, so the session is ended and the user is sent to Sign-in with
  * "Your account is ready" instead of being left half signed in.

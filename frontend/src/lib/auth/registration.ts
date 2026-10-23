@@ -1,8 +1,8 @@
 /**
- * X!Y registration (completed Sign-up) is separate from Clerk authentication.
+ * XfactorY registration (completed Sign-up) is separate from Clerk authentication.
  *
  * A Clerk session proves who someone is; only the backend knows whether that person
- * completed X!Y sign-up (users.registration_completed_at). Every check here asks the backend
+ * completed XfactorY sign-up (users.registration_completed_at). Every check here asks the backend
  * and maps its answer to one of four states. Only an explicit "not registered" answer ever
  * leads to "Please sign up first": a network / server failure is `error` (retry), never
  * `unregistered`.
@@ -41,7 +41,7 @@ export type RegistrationCheck =
 
 type Fetch = typeof fetch;
 
-/** Every request to the X!Y backend gives up after this long: an answer or an error, never an
+/** Every request to the XfactorY backend gives up after this long: an answer or an error, never an
  * endless "Creating account…" / "Signing you in…". */
 const REQUEST_TIMEOUT_MS = 15000;
 
@@ -95,7 +95,7 @@ export async function checkRegistration(
   }
   if (response.status === 403 && detailCode(payload) === "registration_required") return { state: "unregistered" };
   if (response.status === 403) return { state: "blocked", message: detailText(payload, "Access denied.") };
-  // The email belongs to an existing X!Y account under a different sign-in: never "sign up".
+  // The email belongs to an existing XfactorY account under a different sign-in: never "sign up".
   if (response.status === 409 && detailCode(payload) === "identity_mismatch") {
     return { state: "blocked", message: detailText(payload, UNAVAILABLE), code: "identity_mismatch" };
   }
@@ -170,10 +170,10 @@ export async function completeRegistration(
 }
 
 /**
- * Sign-up page, after Clerk said the email already has an account: is it a REGISTERED X!Y
+ * Sign-up page, after Clerk said the email already has an account: is it a REGISTERED XfactorY
  * account? "registered" → "You already have an account. Please sign in." at once (no Clerk
  * sign-in, no code e-mailed, nothing written). "not_registered" → a Clerk identity that never
- * finished X!Y sign-up (the entered password then proves it and registration completes).
+ * finished XfactorY sign-up (the entered password then proves it and registration completes).
  * "unknown" (server unreachable) → callers fall back to the password check.
  */
 export async function accountStatusForEmail(
@@ -219,10 +219,10 @@ export const NOTICES: Record<NoticeCode, Notice> = {
   unavailable: { tone: "error", message: UNAVAILABLE },
   signup_failed: { tone: "error", message: "We couldn't finish creating your account. Please try again." },
   oauth_failed: { tone: "error", message: "Google sign-in didn't complete. Please try again." },
-  suspended: { tone: "error", message: "This account has been suspended. Please contact X!Y support." },
+  suspended: { tone: "error", message: "This account has been suspended. Please contact XfactorY support." },
   account_mismatch: {
     tone: "error",
-    message: "This email is linked to an existing X!Y account that uses a different sign-in. Please contact X!Y support - do not create a new account.",
+    message: "This email is linked to an existing XfactorY account that uses a different sign-in. Please contact XfactorY support - do not create a new account.",
   },
   account_exists: { tone: "warn", message: ACCOUNT_EXISTS_MESSAGE, action: "sign-in" },
 };

@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_security: Literal["none", "starttls", "ssl"] = "none"
     smtp_timeout_seconds: int = 10
-    email_from: str = "X!Y Factory <no-reply@xyfactory.local>"
+    email_from: str = "XfactorY Factory <no-reply@xyfactory.local>"
     # Links in emails point here (the frontend), e.g. https://your-app.vercel.app
     app_base_url: str = "http://localhost:3000"
 

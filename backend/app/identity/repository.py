@@ -30,7 +30,7 @@ async def upsert_user(
 ) -> UUID:
     if email_verified:
         # A staff-only admin account (python -m app.admin_account) reserved this email before the
-        # person signed up with X!Y. Their verified X!Y sign-in takes over that same user record,
+        # person signed up with XfactorY. Their verified XfactorY sign-in takes over that same user record,
         # so both sign-in methods lead to one person.
         await session.execute(text("""
             UPDATE users SET clerk_user_id = :clerk_user_id, updated_at = now()

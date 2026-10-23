@@ -89,7 +89,7 @@ function meta(m: CompanyMatch) {
  * sources (read live from the backend on every change - nothing is cached). Choosing one
  * stores its database id and loads its public details into the form; it does NOT claim,
  * link or change the company. "Claim this company" is a separate step, and the backend
- * decides ownership (verified sign-in email / company domain / X!Y review).
+ * decides ownership (verified sign-in email / company domain / XfactorY review).
  */
 export function CompanyClaimPanel({ value, onChange, hasError, request, onSelect, onSelectionChange, onClaimed }: Props) {
   const listId = useId();
@@ -330,7 +330,7 @@ export function CompanyClaimPanel({ value, onChange, hasError, request, onSelect
             <>
               <p className="claim-text">
                 <strong>Claim for {claim.company.name} is waiting for review.</strong> We couldn’t
-                confirm it from your verified sign-in email, so the X!Y team will check it with the
+                confirm it from your verified sign-in email, so the XfactorY team will check it with the
                 company’s listed contacts. You can finish this form in the meantime.
               </p>
               <button type="button" className="btn-text" disabled={busy} onClick={cancelClaim}>
@@ -357,9 +357,9 @@ export function CompanyClaimPanel({ value, onChange, hasError, request, onSelect
             </p>
           ) : (
             <p className="account-required-note">
-              This company is listed on X!Y. Claim it to link your account to it — selecting it does
+              This company is listed on XfactorY. Claim it to link your account to it — selecting it does
               not change the listing. Signed in with your company email? We can verify you instantly;
-              otherwise the X!Y team reviews the claim.
+              otherwise the XfactorY team reviews the claim.
             </p>
           )}
           <div className="claim-actions">

@@ -5,7 +5,7 @@ import { VisionaryFlow } from "@/components/visionary/VisionaryFlow";
 import { visionarySignInHref } from "@/lib/visionary/paths";
 
 export const metadata: Metadata = {
-  title: "Let’s Start With You – X!Y",
+  title: "Let’s Start With You – XfactorY",
 };
 
 export default async function VisionaryFlowPage() {

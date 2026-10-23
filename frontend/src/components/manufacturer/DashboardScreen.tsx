@@ -25,7 +25,7 @@ type DashboardScreenProps = {
   pct: number;
   flags: ProfileCompletionFlags;
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
-  /** Set when X!Y asked for corrections to the submitted company details. */
+  /** Set when XfactorY asked for corrections to the submitted company details. */
   onFixCompanyDetails?: () => void;
     lock?: {
     message: string;
@@ -58,7 +58,7 @@ const BOOKING_STATUS_BADGE: Record<BookingRequest["status"], string> = {
 };
 
 const UPDATE_REQUEST_BADGE: Record<CompanyUpdateRequest["status"], [string, string]> = {
-  pending: ["badge-pending", "Awaiting X!Y review"],
+  pending: ["badge-pending", "Awaiting XfactorY review"],
   changes_requested: ["badge-pending", "Corrections requested"],
   approved: ["badge-verified", "Approved"],
   rejected: ["badge-rejected", "Declined"],
@@ -284,7 +284,7 @@ export function DashboardScreen({
                           <b>{r.companyName}</b>
                           <span>
                             Submitted {r.submittedAt ? new Date(r.submittedAt).toLocaleDateString() : ""}
-                            {r.feedback ? ` · X!Y: ${r.feedback}` : ""}
+                            {r.feedback ? ` · XfactorY: ${r.feedback}` : ""}
                           </span>
                         </div>
                         <span className={`badge ${badge}`}>{label}</span>

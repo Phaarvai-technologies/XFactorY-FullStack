@@ -1,6 +1,6 @@
 /**
  * Registration before sign-in: Sign-in, Sign-up and the Google callback with Clerk and the
- * X!Y backend replaced by stand-ins. Every "backend" answer goes through a fetch stub, so the
+ * XfactorY backend replaced by stand-ins. Every "backend" answer goes through a fetch stub, so the
  * tests also check which requests are (and are not) made.
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -131,7 +131,7 @@ describe("Sign-in", () => {
     expect(h.requests).toEqual([]);
   });
 
-  it("Clerk account without X!Y registration → session never activated, ended, sent to Sign-up", async () => {
+  it("Clerk account without XfactorY registration → session never activated, ended, sent to Sign-up", async () => {
     createdSession("sess_1");
     h.signIn.create = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_1" }));
     registration("unregistered");
@@ -451,7 +451,7 @@ describe("Google callback", () => {
     expect(h.replaced).toEqual(["/onboarding/roles"]);
   });
 
-  it("Google sign-up with a Clerk identity that never finished X!Y sign-up → transferred, then registered", async () => {
+  it("Google sign-up with a Clerk identity that never finished XfactorY sign-up → transferred, then registered", async () => {
     intent({ purpose: "sign-up", returnPath: "/", flowToken: "flow-google" });
     createdSession("sess_t");
     h.signUp = { verifications: { externalAccount: { status: "transferable", error: { code: "external_account_exists" } } } };
@@ -618,10 +618,10 @@ describe("Regression: registered users are not sent to Sign-up", () => {
     h.signIn.create = vi.fn(async () => ({ status: "complete", createdSessionId: "sess_m" }));
     h.backend["GET /identity/registration"] = () => ({ status: 409, json: { detail: {
       code: "identity_mismatch",
-      message: "This email is linked to an existing X!Y account that uses a different sign-in. Please contact X!Y support - do not create a new account." } } });
+      message: "This email is linked to an existing XfactorY account that uses a different sign-in. Please contact XfactorY support - do not create a new account." } } });
     render(<CustomSignInForm />);
     await fillSignIn();
-    expect(screen.getByText(/linked to an existing X!Y account that uses a different sign-in/)).toBeInTheDocument();
+    expect(screen.getByText(/linked to an existing XfactorY account that uses a different sign-in/)).toBeInTheDocument();
     expect(h.replaced).toEqual([]);
     expect(h.setActive).not.toHaveBeenCalled();
   });
@@ -749,7 +749,7 @@ describe("Sign-up signs the user in only after the backend finalizes registratio
     expect(h.replaced).toEqual(["/sign-in?notice=oauth_failed"]);
   });
 
-  it("Google sign-up already registered (existing X!Y user) → signed in, as before", async () => {
+  it("Google sign-up already registered (existing XfactorY user) → signed in, as before", async () => {
     intent({ purpose: "sign-up", returnPath: "/visionaries/flow", flowToken: "flow-google" });
     createdSession("sess_ex");
     h.signUp = { status: "complete", createdSessionId: "sess_ex", verifications: {} };
@@ -831,7 +831,7 @@ describe("existing email on Sign-up leaves no Clerk session cookie behind", () =
 
 
 // ---------------------------------------------- new-device code step after a failed check (live report)
-describe("Sign-in: new-device code step when the X!Y check fails", () => {
+describe("Sign-in: new-device code step when the XfactorY check fails", () => {
   it("returns to the password step instead of re-sending the used code to Clerk", async () => {
     createdSession("sess_dev");
     h.signIn.create = deviceStepCreate();

@@ -152,7 +152,7 @@ async def clerk_webhook(request: Request):
 
             # Keeps the users row in step with Clerk. This is NOT registration: the row stays
             # unregistered (registration_completed_at untouched) until the person completes
-            # X!Y sign-up, so no welcome email is sent from here either.
+            # XfactorY sign-up, so no welcome email is sent from here either.
             await upsert_user(
                 session,
                 clerk_user_id=clerk_user_id,

@@ -13,7 +13,7 @@ const isPublicRoute = createRouteMatcher([
   "/manufacturer",
   "/manufacturer/account(.*)",
   // Admin dashboard: has its own sign-in page (/admin/login) with two methods — admin
-  // email + password, or the X!Y (Clerk) account. The backend checks every admin API call.
+  // email + password, or the XfactorY (Clerk) account. The backend checks every admin API call.
   "/admin(.*)",
   // Public Visionary overview. The Visionary flow (/visionaries/flow) stays behind sign-in.
   "/visionaries",
@@ -27,20 +27,20 @@ const underBase = (path: string | undefined, fallback: string) => {
 };
 // Always this app's own pages. Without them (NEXT_PUBLIC_CLERK_SIGN_IN_URL empty, the standalone
 // deployment) Clerk sends signed-out visitors of protected pages to its hosted Account Portal,
-// whose Google button creates accounts from Sign-in and skips the X!Y Terms step.
+// whose Google button creates accounts from Sign-in and skips the XfactorY Terms step.
 const clerkPaths = {
   signInUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL, "/sign-in"),
   signUpUrl: underBase(process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL, "/sign-up"),
 };
 
-// Pages that need a REGISTERED X!Y user, not just a Clerk session: every protected page plus
+// Pages that need a REGISTERED XfactorY user, not just a Clerk session: every protected page plus
 // the Manufacturer profile setup (public route only so signed-out visitors reach Create Account).
 const isSignedInOnlyPage = createRouteMatcher(["/manufacturer/account(.*)"]);
 
 /*
  * Registration gate. A Clerk session (including one created before this check existed, or
  * from an unknown Google sign-in) is not enough: the backend must confirm the identity
- * completed X!Y sign-up. Not registered → Sign-up with "Please sign up first, then sign in
+ * completed XfactorY sign-up. Not registered → Sign-up with "Please sign up first, then sign in
  * to continue." Backend unreachable → the page is served (an outage is never "not
  * registered"); its data still comes only from the API, which refuses unregistered users.
  * A positive answer is remembered for a few minutes in an HMAC-signed, user-bound cookie so

@@ -130,7 +130,7 @@ async def decide_booking(booking_id: UUID, body: BookingStatusPayload, actor: Ac
 
 @router.get("/notifications")
 async def notifications(actor: Actor = Depends(registered_actor), svc: ManufacturerService = Depends(service)):
-    """Dashboard bell: messages from the X!Y team (needs correction, profile edits, shared notes),
+    """Dashboard bell: messages from the XfactorY team (needs correction, profile edits, shared notes),
     unread count, whether to show the popup, and the open correction request with shared notes."""
     return await svc.notifications(actor)
 

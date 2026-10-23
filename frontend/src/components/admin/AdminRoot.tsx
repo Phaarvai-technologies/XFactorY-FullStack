@@ -52,7 +52,7 @@ export function AdminRoot() {
         }
         return {
           ok: false,
-          message: "This account needs an extra verification step. Sign in on the X!Y sign-in page, then open /admin.",
+          message: "This account needs an extra verification step. Sign in on the XfactorY sign-in page, then open /admin.",
         };
       } catch (error) {
         const parsed = parseClerkError(error);
@@ -80,7 +80,7 @@ export function AdminRoot() {
           await setActive({ session: result.createdSessionId });
           return { ok: true };
         }
-        return { ok: false, message: "This account needs another verification step. Use the X!Y sign-in page." };
+        return { ok: false, message: "This account needs another verification step. Use the XfactorY sign-in page." };
       } catch (error) {
         const parsed = parseClerkError(error);
         if (parsed.code === "session_exists") return { ok: true };

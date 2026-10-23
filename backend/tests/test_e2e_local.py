@@ -68,7 +68,7 @@ async def client(monkeypatch):
                         "iss": os.environ["CLERK_ISSUER"], "azp": "http://localhost:3000"},
                        key, algorithm="RS256")
     transport = httpx.ASGITransport(app=app)
-    # Since migration 014 a Clerk identity must complete X!Y sign-up before any app API works.
+    # Since migration 014 a Clerk identity must complete XfactorY sign-up before any app API works.
     # These tests are about the app itself, so each Clerk user seen in a request is first
     # registered through the REAL endpoints (sign-up flow token + /registration/complete).
     # Opt out per user with `c.unregistered.add(sub)` (registration tests do).
@@ -133,7 +133,7 @@ async def client(monkeypatch):
 
 
 async def approve_user(client, sub=None):
-    """Approval-first: an X!Y admin approves this user's manufacturer application (their own
+    """Approval-first: an XfactorY admin approves this user's manufacturer application (their own
     company) so the remaining sections unlock. Returns the company id."""
     sub = sub or client.user
     org = (await client.sql("""SELECT s.target_organization_id FROM manufacturer_submissions s
@@ -146,7 +146,7 @@ async def approve_user(client, sub=None):
 
 
 async def approve_company(client, org_id, decision="REVIEWED", reason=None, correction_fields=None):
-    """An X!Y admin decides through the real admin endpoint (review-status control)."""
+    """An XfactorY admin decides through the real admin endpoint (review-status control)."""
     admin = f"admin_{uuid.uuid4().hex[:8]}"
     hdr = {"Authorization": f"Bearer {client.token_for(admin)}"}
     assert (await client.get("/identity/me", headers=hdr)).status_code == 200
@@ -190,7 +190,7 @@ async def test_full_frontend_flow(client):
     # the phone is the COMPANY's (normalized with +91); the personal email stays on the user
     assert body["state"]["contact"] == {"email": "", "phone": "+919876543210"}
     assert body["state"]["bookings"] == []
-    # approval first: pending until an X!Y admin approves; then the remaining sections open
+    # approval first: pending until an XfactorY admin approves; then the remaining sections open
     assert body["approval"]["access"]["unlocked"] is False
     assert body["approval"]["access"]["message"] == "Your manufacturer application is awaiting admin approval."
     assert (await client.put("/manufacturer/profile", json={"company": {}, "location": {}})).status_code == 403

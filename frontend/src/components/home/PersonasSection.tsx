@@ -66,7 +66,7 @@ export function PersonasSection() {
         <div className="section-head">
           <h2>One ecosystem. Eight ways to participate.</h2>
           <p className="desc">
-            Choose the role that best describes how you use X!Y. You can work across
+            Choose the role that best describes how you use XfactorY. You can work across
             multiple roles with
             <br className="desc-break" /> one account.
           </p>

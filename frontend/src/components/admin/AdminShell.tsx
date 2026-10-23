@@ -96,7 +96,7 @@ export function AdminShell() {
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }, []);
 
-  /** Signs out of the admin: ends the admin-account session, or the X!Y (Clerk) session. */
+  /** Signs out of the admin: ends the admin-account session, or the XfactorY (Clerk) session. */
   const logout = useCallback(async () => {
     const local = currentAdminToken();
     if (local) {
@@ -148,7 +148,7 @@ export function AdminShell() {
             <ShieldAlert size={26} />
           </div>
           <h2>{state === "denied" ? "Admin access only" : "Something went wrong"}</h2>
-          <p>{state === "denied" ? error || "This area is restricted to X!Y administrators." : error}</p>
+          <p>{state === "denied" ? error || "This area is restricted to XfactorY administrators." : error}</p>
           <div className="adm-denied-actions">
             {state === "error" && (
               <button type="button" className="btn-primary" onClick={load}>
@@ -156,7 +156,7 @@ export function AdminShell() {
               </button>
             )}
             <button type="button" className="btn-ghost" onClick={() => host.go("/")}>
-              Go to X!Y home
+              Go to XfactorY home
             </button>
             <button type="button" className="btn-ghost" onClick={() => void logout()}>
               Sign out
@@ -255,7 +255,7 @@ export function AdminShell() {
                 </div>
               </div>
               <p className="adm-signin-method">
-                {me?.authMethod === "password" ? "Signed in with admin account" : "Signed in with X!Y account"}
+                {me?.authMethod === "password" ? "Signed in with admin account" : "Signed in with XfactorY account"}
               </p>
               <button type="button" className="adm-logout" onClick={() => void logout()}>
                 <LogOut size={16} /> Log out

@@ -79,7 +79,7 @@ export function Visionaries() {
     <>
       <PageHeader
         title="Visionaries"
-        subtitle="People who use X!Y to get products made: their saved profile, projects and manufacturing requests."
+        subtitle="People who use XfactorY to get products made: their saved profile, projects and manufacturing requests."
       />
       <div className="card adm-toolbar">
         <div className="adm-toolbar-row">

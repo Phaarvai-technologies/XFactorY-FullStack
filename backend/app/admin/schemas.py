@@ -96,7 +96,7 @@ class AdminAddIn(_Model):
 
 class AdminDetailsIn(_Model):
     """Admins tab -> Edit details. Only the fields sent are changed. `email` is accepted only for
-    admin-only accounts (no X!Y sign-in) and never for the built-in administrator."""
+    admin-only accounts (no XfactorY sign-in) and never for the built-in administrator."""
     firstName: str | None = Field(default=None, min_length=1, max_length=80)
     lastName: str | None = Field(default=None, max_length=80)
     phone: str | None = Field(default=None, max_length=24, pattern=r"^$|^\+?[0-9][0-9 ()\-]{5,22}$")

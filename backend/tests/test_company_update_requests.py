@@ -25,7 +25,7 @@ def _hdr(c, sub):
 
 
 async def _company(c):
-    """An owner's company, approved by X!Y (like Ashok Leyland already registered by one user)."""
+    """An owner's company, approved by XfactorY (like Ashok Leyland already registered by one user)."""
     t = _tag()
     owner = f"user_own_{t}"
     name = f"Ashok Leyland {t} Limited"

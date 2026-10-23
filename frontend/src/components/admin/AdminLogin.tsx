@@ -12,8 +12,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * /admin/login — two ways in:
- * - Admin account: email + password created by an X!Y administrator (checked by the backend).
- * - X!Y account: the normal X!Y (Clerk) email + password; the account must have admin access.
+ * - Admin account: email + password created by an XfactorY administrator (checked by the backend).
+ * - XfactorY account: the normal XfactorY (Clerk) email + password; the account must have admin access.
  */
 export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
   const host = useAdminHost();
@@ -112,7 +112,7 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
         onSignedIn();
       }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 0) setError("Cannot reach the X!Y server. Check your connection and try again.");
+      if (err instanceof ApiError && err.status === 0) setError("Cannot reach the XfactorY server. Check your connection and try again.");
       else setError(err instanceof Error ? err.message : "Sign-in failed. Try again.");
     } finally {
       setBusy(false);
@@ -128,7 +128,7 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
           <span className="topbar-crumb">Admin</span>
         </div>
         <h1 className="adm-login-title">Sign in to the admin dashboard</h1>
-        <p className="adm-login-sub">For authorized X!Y staff only.</p>
+        <p className="adm-login-sub">For authorized XfactorY staff only.</p>
 
         <div className="adm-login-switch" role="tablist" aria-label="Sign-in method">
           <button
@@ -147,7 +147,7 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
             className={method === "clerk" ? "active" : ""}
             onClick={() => switchTo("clerk")}
           >
-            <UserRound size={15} /> X!Y account
+            <UserRound size={15} /> XfactorY account
           </button>
         </div>
 
@@ -160,7 +160,7 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
         {method === "clerk" && host.clerkEmail ? (
           <div className="adm-login-continue">
             <p>
-              You are signed in to X!Y as <b>{host.clerkEmail}</b>.
+              You are signed in to XfactorY as <b>{host.clerkEmail}</b>.
             </p>
             <button type="button" className="btn-primary adm-login-submit" onClick={onSignedIn}>
               Continue as {host.clerkEmail}
@@ -172,7 +172,7 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
                 await host.clerkSignOut();
               }}
             >
-              Use a different X!Y account
+              Use a different XfactorY account
             </button>
           </div>
         ) : method === "clerk" && codeStep ? (
@@ -280,8 +280,8 @@ export function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
 
         <p className="adm-login-hint">
           {method === "password"
-            ? "Use the admin email and password given to you by an X!Y administrator. Forgot it? Ask an administrator to reset it."
-            : "Use the email and password of your X!Y account. It must have admin access."}
+            ? "Use the admin email and password given to you by an XfactorY administrator. Forgot it? Ask an administrator to reset it."
+            : "Use the email and password of your XfactorY account. It must have admin access."}
         </p>
       </div>
       <p className="adm-login-foot">

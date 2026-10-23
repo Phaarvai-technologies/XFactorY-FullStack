@@ -27,7 +27,7 @@ export const PILOT_ROLES: PilotRole[] = [
     slug: "logistics-supplier",
     title: "Logistics Supplier",
     description:
-      "Logistics suppliers will support storage, movement, and delivery capabilities across the X!Y ecosystem.",
+      "Logistics suppliers will support storage, movement, and delivery capabilities across the XfactorY ecosystem.",
   },
   {
     slug: "legal-auditor",

@@ -8,9 +8,9 @@ import { pilotRoleBySlug, type PilotRole } from "@/lib/explore/pilotRoles";
 export function pilotRoleMetadata(slug: string): Metadata {
   const role = pilotRoleBySlug(slug);
   return {
-    title: role ? `${role.title} — X!Y` : "X!Y",
+    title: role ? `${role.title} — XfactorY` : "XfactorY",
     description:
-      "This participant workflow is currently being developed as part of the X!Y pilot.",
+      "This participant workflow is currently being developed as part of the XfactorY pilot.",
   };
 }
 
@@ -25,10 +25,10 @@ export function PilotRoleView({ role }: { role: PilotRole }) {
             <div className="footer-pilot-badge info-status">
               <span className="pilot-dot" /> Pilot processing
             </div>
-            <h1>Coming into the X!Y ecosystem</h1>
+            <h1>Coming into the XfactorY ecosystem</h1>
             <p className="desc">
               This participant workflow is currently being developed as part of the
-              X!Y pilot. Explore how this role will connect with the wider ecosystem
+              XfactorY pilot. Explore how this role will connect with the wider ecosystem
               as the platform evolves.
             </p>
           </div>
@@ -37,7 +37,7 @@ export function PilotRoleView({ role }: { role: PilotRole }) {
               <h3>{role.title}</h3>
               <div className="info-copy">
                 <p>{role.description}</p>
-                <p>This workflow is being prepared for a future stage of the X!Y platform.</p>
+                <p>This workflow is being prepared for a future stage of the XfactorY platform.</p>
               </div>
             </article>
           </div>

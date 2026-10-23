@@ -43,7 +43,7 @@ async def logout(db: Db, authorization: str | None = Header(default=None)):
 async def change_password(body: ChangePasswordIn, db: Db, settings: Cfg,
                           admin: Annotated[AdminContext, Depends(current_admin)]):
     if admin.auth_method != "password" or not admin.account_id:
-        raise HTTPException(422, "Your password is managed by your X!Y (Clerk) account.")
+        raise HTTPException(422, "Your password is managed by your XfactorY (Clerk) account.")
     try:
         await accounts.change_password(db, admin.account_id, admin.session_token or "", body.current_password,
                                        body.new_password)

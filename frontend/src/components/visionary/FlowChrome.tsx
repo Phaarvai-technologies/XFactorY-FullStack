@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { XyMark } from "@/components/visionary/XyLogo";
+import { FactoryMark } from "@/components/layout/Logo";
 import { VISIONARY_OVERVIEW_PATH } from "@/lib/visionary/paths";
 
 export function FlowHeader() {
@@ -10,7 +10,7 @@ export function FlowHeader() {
     <header className="header">
       <div className="wrap">
         <Link href={VISIONARY_OVERVIEW_PATH} className="xy-logo" aria-label="XfactorY home">
-          <XyMark />
+          <FactoryMark className="factory-mark" />
           <span>XfactorY</span>
         </Link>
       </div>

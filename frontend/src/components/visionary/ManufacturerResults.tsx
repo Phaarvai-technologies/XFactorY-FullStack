@@ -135,7 +135,7 @@ export function ManufacturerResults({
   const note = status === "ready"
     ? [matchingNote(result),
        listingsTotal > 0
-         ? "Companies marked “Not yet verified” come from public business records and have not joined X!Y yet: you can view them, but requests can only be sent to verified manufacturers."
+         ? "Companies marked “Not yet verified” come from public business records and have not joined XfactorY yet: you can view them, but requests can only be sent to verified manufacturers."
          : ""].filter(Boolean).join(" ")
     : "";
 

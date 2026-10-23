@@ -68,7 +68,7 @@ export function AddCompanyModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Add company" onClose={onClose} wide>
       <p className="adm-modal-text">
-        Adds a manufacturer company to X!Y. It is recorded as <b>Admin Entry</b>, has no owner, and is not approved: it
+        Adds a manufacturer company to XfactorY. It is recorded as <b>Admin Entry</b>, has no owner, and is not approved: it
         becomes visible to Visionaries only after approval and a complete profile. A user can later claim it.
       </p>
       <div className="adm-add-company-grid">

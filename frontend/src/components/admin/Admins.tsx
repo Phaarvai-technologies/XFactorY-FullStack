@@ -68,7 +68,7 @@ export function Admins() {
     <>
       <PageHeader
         title="Admins"
-        subtitle="People who can sign in to this admin portal. Registered X!Y users are listed under Users."
+        subtitle="People who can sign in to this admin portal. Registered XfactorY users are listed under Users."
         actions={
           canManage && (
             <button type="button" className="btn-primary" onClick={() => setAction({ kind: "add" })}>
@@ -144,7 +144,7 @@ export function Admins() {
                       <td>
                         <div className="adm-badge-stack">
                           {a.hasAdminAccount && <span className="badge badge-neutral">Admin account</span>}
-                          {a.hasXyAccount && <span className="badge badge-neutral">X!Y account</span>}
+                          {a.hasXyAccount && <span className="badge badge-neutral">XfactorY account</span>}
                         </div>
                       </td>
                       <td>
@@ -273,7 +273,7 @@ function AddAdminModal({ onClose, onAdded }: { onClose: () => void; onAdded: (em
     <Modal title="Add admin" onClose={onClose}>
       <p className="adm-modal-text">
         They sign in at /admin/login with this email and a temporary password, and choose their own password at the
-        first sign-in. If the email already has an X!Y account, that account gets admin access too.
+        first sign-in. If the email already has an XfactorY account, that account gets admin access too.
       </p>
       <label htmlFor="adm-new-email">
         Email <span className="adm-req">*</span>
@@ -322,7 +322,7 @@ function ConfirmModal({
   const [busy, setBusy] = useState(false);
   const who = admin.name || admin.email;
   const text = {
-    revoke: `${who} will lose access to the admin portal immediately and be signed out. Their X!Y account (if any) is not affected.`,
+    revoke: `${who} will lose access to the admin portal immediately and be signed out. Their XfactorY account (if any) is not affected.`,
     restore: `${who} will get admin access again as ${admin.roleLabel || "Administrator"}, with their existing password.`,
     reset: `${who} gets a new temporary password and is signed out. They must choose a new password at the next sign-in.`,
   }[action];

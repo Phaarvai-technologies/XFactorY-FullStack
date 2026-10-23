@@ -2,7 +2,7 @@
 
 Two separate facts about a manufacturer company (organization):
 
-* APPROVAL  - an X!Y admin approved its submitted company details
+* APPROVAL  - an XfactorY admin approved its submitted company details
               (manufacturer_onboarding.status = 'approved').
 * COMPLETE  - its profile meets every required item of the existing completeness check
               (admin_manufacturer_overview.completeness, the 14 required fields, computed by the

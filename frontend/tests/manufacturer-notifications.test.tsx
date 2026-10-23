@@ -1,4 +1,4 @@
-// Manufacturer dashboard bell: messages from the X!Y team. The popup appears once for anything
+// Manufacturer dashboard bell: messages from the XfactorY team. The popup appears once for anything
 // new; "Open notifications" shows the correction note, shared notes and edits and marks them read;
 // "Later" only hides the popup. Backend answers are shaped like GET /manufacturer/notifications.
 import { describe, it } from "vitest";
@@ -11,8 +11,8 @@ const flush = () => act(async () => { for (let i = 0; i < 4; i++) await new Prom
 const NOW = "2026-10-03T15:00:00Z";
 const withNews = {
   items: [
-    { id: "n3", kind: "profile_edit", title: "The X!Y team updated your profile", body: "About: “Old” → “Injection moulded food containers”\nReason: Typo", createdAt: NOW, read: false },
-    { id: "n2", kind: "admin_note", title: "Message from the X!Y team", body: "The certificate must show the expiry date.", createdAt: NOW, read: false },
+    { id: "n3", kind: "profile_edit", title: "The XfactorY team updated your profile", body: "About: “Old” → “Injection moulded food containers”\nReason: Typo", createdAt: NOW, read: false },
+    { id: "n2", kind: "admin_note", title: "Message from the XfactorY team", body: "The certificate must show the expiry date.", createdAt: NOW, read: false },
     { id: "n1", kind: "needs_correction", title: "Your profile needs a few corrections", body: "Upload a clearer ISO certificate", createdAt: NOW, read: true },
   ],
   unread: 2,
@@ -87,7 +87,7 @@ describe("Manufacturer notification bell", () => {
     assert(!screen.queryByRole("alertdialog") && !bell().querySelector(".dot"), "popup or dot without news");
     fireEvent.click(bell());
     await flush();
-    assert(screen.getByText("No messages from the X!Y team yet."), "empty state missing");
+    assert(screen.getByText("No messages from the XfactorY team yet."), "empty state missing");
     assert(!sent.some((s) => s.method === "POST"), "posted without anything to mark");
     fireEvent.keyDown(document, { key: "Escape" });
     assert(!screen.queryByRole("dialog", { name: "Notifications" }), "Escape did not close");

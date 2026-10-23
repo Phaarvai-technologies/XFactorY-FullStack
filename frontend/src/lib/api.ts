@@ -14,7 +14,7 @@ export class ApiError extends Error {
 }
 
 /**
- * The backend refused a Clerk session whose user never completed X!Y sign-up (403
+ * The backend refused a Clerk session whose user never completed XfactorY sign-up (403
  * registration_required), e.g. a session that predates registration checks. End it and go to
  * Sign-up with the notice. Once per page; only this explicit answer triggers it.
  */

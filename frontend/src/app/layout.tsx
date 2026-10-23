@@ -27,12 +27,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "XfactorY - Why own it when you can make it",
   description:
-    "X!Y connects designers, manufacturers, suppliers and every partner in between — so production capacity finds demand, and good ideas find a factory floor.",
+    "XfactorY connects designers, manufacturers, suppliers and every partner in between — so production capacity finds demand, and good ideas find a factory floor.",
 };
 
 // This app's own Sign-in / Sign-up pages, always (inside the Phaarvai website they carry the
 // prefix). Without them Clerk would use its hosted Account Portal, whose Google button creates
-// accounts from Sign-in and skips the X!Y Terms step.
+// accounts from Sign-in and skips the XfactorY Terms step.
 const clerkPaths = { signInUrl: withBase("/sign-in"), signUpUrl: withBase("/sign-up"), afterSignOutUrl: withBase("/") };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -16,7 +16,7 @@ Admins tab instead (Add admin, Revoke, Restore, Change role, Reset password).
 The password is asked for (hidden input), never passed on the command line.
 For scripts, add --password-stdin and pipe it in.
 
-If the email already belongs to an X!Y (Clerk) user, the admin account is linked to
+If the email already belongs to an XfactorY (Clerk) user, the admin account is linked to
 that user: they can then sign in either way. Otherwise a staff-only user record is
 created. `create` also grants the platform_administrator role.
 """
@@ -91,7 +91,7 @@ async def create(email: str, name: str | None, from_stdin: bool, role: str = "pl
                                                user_id=user_id)
     print(f"Welcome email: {sent['status']}" + (f" ({sent['error']})" if sent["error"] else ""))
     print(f"Admin account created for {email}"
-          + (" (linked to their X!Y sign-in; both work)." if linked else " (staff-only account).")
+          + (" (linked to their XfactorY sign-in; both work)." if linked else " (staff-only account).")
           + " Sign in at /admin/login.")
     return 0
 
@@ -144,7 +144,7 @@ async def list_accounts() -> int:
         print("No admin accounts yet. First time? Run: python -m app.admin_account setup")
     for r in rows:
         print(f"{r[0]:36} {r[1]:9} {(r[5] or 'no access (revoked)'):24} {'locked ' if r[3] else ''}"
-              f"{'linked to X!Y sign-in ' if r[4] else ''}last sign-in: {r[2] or 'never'}")
+              f"{'linked to XfactorY sign-in ' if r[4] else ''}last sign-in: {r[2] or 'never'}")
     return 0
 
 
@@ -182,7 +182,7 @@ async def grant_access(email: str, role: str) -> int:
             """), {"a": acct.id})
         await db.commit()
     print(f"{email} now has admin access ({role})."
-          + ("" if acct else " They sign in with their X!Y account (no admin password yet)."))
+          + ("" if acct else " They sign in with their XfactorY account (no admin password yet)."))
     return 0
 
 

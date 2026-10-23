@@ -1,6 +1,6 @@
 """Welcome email for a newly registered user.
 
-Called when a user completes X!Y registration (POST /identity/registration/complete after
+Called when a user completes XfactorY registration (POST /identity/registration/complete after
 an explicit Sign-up). A Clerk identity or a webhook-created users row is not a registration,
 so neither triggers it. It runs in the background, so a slow or
 unreachable mail server never delays sign-up, and it is sent at most once per user:

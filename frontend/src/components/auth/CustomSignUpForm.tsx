@@ -166,7 +166,7 @@ export function CustomSignUpForm({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   /** Server-signed token that marks this attempt as an explicit sign-up (needed to register). */
   const flowToken = useRef<string | null>(null);
-  /** Clerk finished, X!Y registration did not (e.g. server unreachable): "Verify" retries it. */
+  /** Clerk finished, XfactorY registration did not (e.g. server unreachable): "Verify" retries it. */
   const [pendingSession, setPendingSession] = useState<string | null>(null);
   /** Existing-account path: the code step is Clerk's second step of a password sign-in. */
   const [secondStep, setSecondStep] = useState<SecondStep | null>(null);
@@ -200,7 +200,7 @@ export function CustomSignUpForm({
   const signInHref =
     redirectTo && redirectTo !== "/" ? `/sign-in?redirect_url=${encodeURIComponent(redirectTo)}` : "/sign-in";
 
-  // Signed in with an identity that never completed X!Y sign-up (e.g. sent here by the
+  // Signed in with an identity that never completed XfactorY sign-up (e.g. sent here by the
   // proxy): end that session so sign-up can run. Only a session present when the page opened.
   const endStaleSession = useRef(staleSession);
   useEffect(() => {
@@ -249,7 +249,7 @@ export function CustomSignUpForm({
       }
       setStatus({
         tone: "error",
-        message: "We still need more information to create your account. Please try again or contact X!Y support.",
+        message: "We still need more information to create your account. Please try again or contact XfactorY support.",
       });
     } catch (error) {
       setStatus({ tone: "error", message: parseClerkError(error).message });
@@ -304,7 +304,7 @@ export function CustomSignUpForm({
 
   /**
    * "Email taken" during manual sign-up: the Clerk identity may exist without ever having
-   * completed X!Y sign-up (an older accidental sign-in, or a sign-up whose last step failed).
+   * completed XfactorY sign-up (an older accidental sign-in, or a sign-up whose last step failed).
    * Signing in with the password just entered proves ownership; registration then completes.
    * A wrong password (or a Google-only account) shows Clerk's original message.
    */
@@ -399,7 +399,7 @@ export function CustomSignUpForm({
 
     try {
       setIsSubmitting(true);
-      // No Clerk account is created while the X!Y server cannot register it.
+      // No Clerk account is created while the XfactorY server cannot register it.
       try {
         await ensureFlowToken();
       } catch (error) {
@@ -422,9 +422,9 @@ export function CustomSignUpForm({
       if (parsed.paramName === "first_name" || parsed.paramName === "last_name") {
         setFieldErrors((current) => ({ ...current, name: parsed.message }));
       } else if (parsed.code === "form_identifier_exists") {
-        // One quick question to X!Y first: a registered account gets the message at once
+        // One quick question to XfactorY first: a registered account gets the message at once
         // (no Clerk sign-in, no code e-mailed, nothing written). Only a Clerk identity that never
-        // finished X!Y sign-up goes on to the password check that completes its registration.
+        // finished XfactorY sign-up goes on to the password check that completes its registration.
         if ((await accountStatusForEmail(email.trim())) === "registered") showAccountExists();
         else await registerExistingIdentity(EMAIL_EXISTS);
       } else if (parsed.paramName === "email_address") {
@@ -448,7 +448,7 @@ export function CustomSignUpForm({
     clearField("code");
 
     if (pendingSession) {
-      // The code was already accepted; only the X!Y registration step needs a retry.
+      // The code was already accepted; only the XfactorY registration step needs a retry.
       try {
         setIsSubmitting(true);
         await finishRegistration(pendingSession);
@@ -581,7 +581,7 @@ export function CustomSignUpForm({
       className="auth-form"
       onSubmit={needsVerification ? handleVerifyEmail : completingGoogle ? handleCompleteGoogle : handleCreateAccount}
     >
-      <h1 className="auth-card-heading">Create your X!Y Factory account</h1>
+      <h1 className="auth-card-heading">Create your XfactorY Factory account</h1>
 
       <div className={`status-box status-${status?.tone ?? "ok"}${status ? " show" : ""}`}>
         <StatusIcon tone={status?.tone ?? "ok"} />

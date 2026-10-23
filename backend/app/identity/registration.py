@@ -1,7 +1,7 @@
 """Explicit application registration, kept separate from Clerk authentication.
 
 A valid Clerk session proves *who* the caller is. It does not prove that the person completed
-X!Y sign-up: Clerk can create an identity from a Google sign-in, and the Clerk webhook /
+XfactorY sign-up: Clerk can create an identity from a Google sign-in, and the Clerk webhook /
 older read-time synchronisation create `users` rows for any identity. Registration is proven
 only by `users.registration_completed_at`, which is set exclusively by `complete()` below:
 
@@ -39,7 +39,7 @@ log = logging.getLogger("xy.registration")
 SIGN_UP_REQUIRED_MESSAGE = "Please sign up first, then sign in to continue."
 TERMS_REQUIRED_MESSAGE = "Please accept the Terms of Service and Privacy Policy to continue."
 TERMS_OUTDATED_MESSAGE = "The Terms of Service or Privacy Policy changed. Please review and accept them again."
-SUSPENDED_MESSAGE = "This account has been suspended. Please contact X!Y support."
+SUSPENDED_MESSAGE = "This account has been suspended. Please contact XfactorY support."
 FLOW_TTL_SECONDS = 30 * 60
 FLOW_PURPOSES = ("sign-in", "sign-up")
 FLOW_METHODS = ("manual", "google")
@@ -156,7 +156,7 @@ def require_registered(row) -> None:
 #   legacy_terms        - Terms acceptance recorded on the users row
 #   legacy_activity     - saved marketplace roles / submitted Manufacturer details form /
 #                         saved Visionary profile / admin role (only possible after signing up)
-#   legacy_password     - the Clerk account has a password: only the Sign-up page (or X!Y staff)
+#   legacy_password     - the Clerk account has a password: only the Sign-up page (or XfactorY staff)
 #                         creates password accounts; a sign-in attempt never does
 #   legacy_legal_terms  - Clerk recorded legal-terms acceptance, which only the Sign-up page sends
 # NOT evidence: a users row existing, a webhook or welcome email, a verified email, or a
@@ -297,7 +297,7 @@ async def complete(session: AsyncSession, settings: Settings, *, clerk_user_id: 
         )
     except IntegrityError as exc:
         await session.rollback()
-        raise HTTPException(409, "This email is already linked to another account. Please contact X!Y support.") from exc
+        raise HTTPException(409, "This email is already linked to another account. Please contact XfactorY support.") from exc
 
     current = (await session.execute(text("""
         SELECT status, registration_completed_at, registration_method FROM users WHERE id = :id FOR UPDATE

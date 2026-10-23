@@ -1,5 +1,5 @@
 /**
- * Approval-first manufacturer onboarding: the dashboard stays locked until X!Y approves, date of
+ * Approval-first manufacturer onboarding: the dashboard stays locked until XfactorY approves, date of
  * birth is optional, corrections open only the listed fields, and the admin names those fields.
  * Same layout and styles as before (existing elements and classes only).
  */
@@ -45,11 +45,11 @@ describe("manufacturer dashboard while the application is reviewed", () => {
     expect(screen.getByText("Your workspace")).toBeInTheDocument(); // still on the dashboard
   });
 
-  it("rejected: shows X!Y's explanation and, once allowed, Apply again", () => {
+  it("rejected: shows XfactorY's explanation and, once allowed, Apply again", () => {
     const fix = vi.fn();
     dashboard({
       lock: { message: "Your manufacturer application was not approved. You can now send a new application.",
-              detail: "X!Y: We could not confirm you work here.", actionLabel: "Apply again" },
+              detail: "XfactorY: We could not confirm you work here.", actionLabel: "Apply again" },
       onFixCompanyDetails: fix,
     });
     expect(screen.getByText(/could not confirm you work here/)).toBeInTheDocument();
@@ -94,13 +94,13 @@ describe("details form", () => {
     expect(submitted[0]).toMatchObject({ firstName: "Jansi", lastName: "Rani", email: "jansi@gmail.com", dob: null });
   });
 
-  it("corrections: only the fields X!Y listed can be edited", () => {
+  it("corrections: only the fields XfactorY listed can be edited", () => {
     render(<AccountScreen onBack={noop} onAccountCreated={noop} onSearchCompanies={async () => []}
                           correctionFields={["capacity", "personalEmail"]}
                           initial={{ firstName: "Asha", lastName: "Rao", email: "asha@gmail.com", dob: "1990-02-02",
                                      companyName: "Asha Cast", companyType: "Other", country: "India",
                                      phone: "+919000011111", capacity: "500" }} />);
-    expect(screen.getByText(/X!Y asked you to correct: Email address, Production capacity/)).toBeInTheDocument();
+    expect(screen.getByText(/XfactorY asked you to correct: Email address, Production capacity/)).toBeInTheDocument();
     for (const id of ["acc-capacity", "acc-email"]) expect(field(id).disabled).toBe(false);
     for (const id of ["acc-first", "acc-last", "acc-dob", "acc-company", "acc-company-type", "acc-country", "acc-phone"]) {
       expect(field(id).disabled).toBe(true);

@@ -1,5 +1,5 @@
 """Admins tab -> Edit details: name / phone / (admin-only accounts) email, who may edit whom, the
-built-in administrator, X!Y (Clerk) name sync, history. Real PostgreSQL through the real admin API."""
+built-in administrator, XfactorY (Clerk) name sync, history. Real PostgreSQL through the real admin API."""
 import os
 import uuid
 
@@ -135,9 +135,9 @@ async def test_xy_account_admin_name_synced_to_clerk(client, monkeypatch, clerk_
     # phone only: no Clerk call
     r = await client.patch(f"/admin/admin-users/{xy['id']}", headers=root, json={"phone": "+91 90000 11111"})
     assert r.json()["clerkSync"] == "not_needed" and len(clerk_names) == 1
-    # email is managed in the X!Y account
+    # email is managed in the XfactorY account
     r = await client.patch(f"/admin/admin-users/{xy['id']}", headers=root, json={"email": "new@example.com"})
-    assert r.status_code == 422 and "X!Y account" in r.json()["detail"]
+    assert r.status_code == 422 and "XfactorY account" in r.json()["detail"]
     # Clerk unavailable: saved here, reported as failed (not an error)
     clerk_names.fail = True
     r = await client.patch(f"/admin/admin-users/{xy['id']}", headers=root, json={"firstName": "Meenakshi"})
