@@ -78,7 +78,7 @@ async def test_visionary_flow_end_to_end(client):
     # --- first visit: nothing saved yet
     r = await client.get("/visionary/me", headers=v)
     assert r.status_code == 200, r.text
-    assert r.json() == {"profile": None, "idea": None, "stage": "", "requirements": None, "requests": []}
+    assert r.json() == {"profile": None, "idea": None, "stage": "", "requirements": None, "projects": [], "requests": []}
 
     # --- step 1: validation, then save
     r = await client.put("/visionary/profile", headers=v, json={**VISIONARY, "name": "  "})

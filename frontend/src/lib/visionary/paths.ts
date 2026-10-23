@@ -15,6 +15,8 @@ export type VisionarySlide =
   | "request"
   | "submitted"
   | "project"
+  | "projects"
+  | "requests"
   | "manufacturer";
 
 export const VISIONARY_SLIDE_TITLES: Record<VisionarySlide, string> = {
@@ -27,5 +29,7 @@ export const VISIONARY_SLIDE_TITLES: Record<VisionarySlide, string> = {
   request: "Create Manufacturing Request – X!Y",
   submitted: "Manufacturing Request Sent – X!Y",
   project: "My Project – X!Y",
+  projects: "Your Projects – X!Y",
+  requests: "Your Requests – X!Y",
   manufacturer: "Manufacturer Profile – X!Y",
 };

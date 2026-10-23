@@ -208,13 +208,13 @@ export function MyProject({
           <button type="button" className="btn btn-primary" onClick={onAddProject}>
             Add Project
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => onContinue("submitted")}>
+          <button type="button" className="btn btn-primary" onClick={() => onContinue("requests")}>
             View Request
           </button>
           <button type="button" className="btn btn-primary" onClick={() => onToast("Coming soon.")}>
             Edit Project
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => onToast("Coming soon.")}>
+          <button type="button" className="btn btn-primary" onClick={() => onContinue("projects")}>
             View Project
           </button>
           <button type="button" className="btn btn-primary" onClick={() => onContinue("results")}>

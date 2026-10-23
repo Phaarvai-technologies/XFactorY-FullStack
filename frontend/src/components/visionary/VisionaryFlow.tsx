@@ -10,6 +10,7 @@ import { StepStage } from "@/components/visionary/StepStage";
 import { StepGuide } from "@/components/visionary/StepGuide";
 import { VisionaryToast, useVisionaryToast } from "@/components/visionary/FlowChrome";
 import { ManufacturerProfilePage } from "@/components/visionary/ManufacturerProfilePage";
+import { ProjectList, RequestList } from "@/components/visionary/ProjectBoards";
 import { MyProject, RequestSubmitted } from "@/components/visionary/VisionarySlides";
 import { errorMessage, useVisionaryApi } from "@/lib/visionary/api";
 import { VISIONARY_SLIDE_TITLES, type VisionarySlide } from "@/lib/visionary/paths";
@@ -226,6 +227,8 @@ export function VisionaryFlow() {
       {slide === "project" ? (
         <MyProject key={visit} onContinue={go} onAddProject={startNewProject} onToast={toast.show} />
       ) : null}
+      {slide === "projects" ? <ProjectList key={visit} onContinue={go} /> : null}
+      {slide === "requests" ? <RequestList key={visit} onContinue={go} /> : null}
       {slide === "manufacturer" ? <ManufacturerProfilePage key={visit} onContinue={go} /> : null}
       <VisionaryToast message={toast.message} shown={toast.shown} />
     </>

@@ -4,6 +4,7 @@ import { StepStage } from "@/components/visionary/StepStage";
 import { StepGuide } from "@/components/visionary/StepGuide";
 import { StepNeeds } from "@/components/visionary/StepNeeds";
 import { ManufacturerResults } from "@/components/visionary/ManufacturerResults";
+import { ProjectList, RequestList } from "@/components/visionary/ProjectBoards";
 import { VisionaryFlow } from "@/components/visionary/VisionaryFlow";
 import { setVisionaryData } from "@/lib/visionary/store";
 import type { VisionarySlide } from "@/lib/visionary/paths";
@@ -433,5 +434,89 @@ describe("Visionary stage and AI guide flow", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Project / Product name")).toHaveValue("");
     expect(screen.getByText("Step 2 of 4")).toBeInTheDocument();
+  });
+
+  it("View Project and View Request open expandable cards", async () => {
+    setVisionaryData({
+      profile: null,
+      idea: { project: "Customized Bottle", idea: "A bottle", product: "Bottle", industry: "Food & Beverage" },
+      stage: "Prototype Stage",
+      requirements: {
+        manufacturing_location: "Chennai",
+        quantity: { value: 1000, unit: "units" },
+        budget: { amount: 200000, currency: "INR" },
+        timeline: "immediately",
+        additional_requirements: "",
+        machines: [],
+      },
+      projects: [
+        {
+          id: "p1",
+          project: "Customized Bottle",
+          idea: "A refillable bottle for cafés",
+          product: "Bottle",
+          industry: "Food & Beverage",
+          stage: "Prototype Stage",
+          requirements: {
+            manufacturing_location: "Chennai",
+            quantity: { value: 1000, unit: "units" },
+            budget: { amount: 200000, currency: "INR" },
+            timeline: "immediately",
+            additional_requirements: "Food grade",
+            machines: ["Blow Moulding"],
+          },
+          created_at: "2026-10-23T00:00:00.000Z",
+        },
+        {
+          id: "p2",
+          project: "Paper Cups",
+          idea: "Printed cups",
+          product: "Cups",
+          industry: "Packaging",
+          stage: "Idea Stage",
+          requirements: null,
+          created_at: "2026-10-22T00:00:00.000Z",
+        },
+      ],
+      requests: [
+        {
+          id: "r1",
+          request_id: "REQ-1",
+          manufacturer_id: "m1",
+          manufacturer_name: "Tec Info",
+          project_name: "Customized Bottle",
+          visionary: "Priya",
+          machine: "Blow Moulding",
+          quantity: { value: 1000, unit: "units" },
+          required_duration: "1_month",
+          manufacturing_location: "Chennai",
+          budget: { amount: 200000, currency: "INR" },
+          timeline: "immediately",
+          additional_requirements: "",
+          status: "submitted",
+          created_at: "2026-10-23T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const { unmount } = render(<ProjectList onContinue={() => {}} />);
+    expect(screen.getByRole("heading", { name: "Your Projects" })).toBeInTheDocument();
+    expect(screen.getByText("Paper Cups")).toBeInTheDocument();
+    expect(screen.queryByText("A refillable bottle for cafés")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Customized Bottle/ }));
+    expect(screen.getByText("A refillable bottle for cafés")).toBeInTheDocument();
+    expect(screen.getByText("Blow Moulding")).toBeInTheDocument();
+    expect(screen.getByText("Chennai")).toBeInTheDocument();
+    unmount();
+
+    render(<RequestList onContinue={() => {}} />);
+    expect(screen.getByRole("heading", { name: "Your Requests" })).toBeInTheDocument();
+    expect(screen.getByText("Sent to Tec Info")).toBeInTheDocument();
+    expect(screen.queryByText("REQ-1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Sent to Tec Info/ }));
+    expect(screen.getByText("REQ-1")).toBeInTheDocument();
+    expect(screen.getByText("Blow Moulding")).toBeInTheDocument();
   });
 });

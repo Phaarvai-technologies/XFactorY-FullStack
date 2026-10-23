@@ -130,15 +130,20 @@ class VisionaryRepository:
         await self.db.commit()
 
     # ------------------------------------------------------------------ project
-    async def project(self, user_id: UUID) -> dict | None:
-        """The Visionary's current (most recent) project."""
-        row = (await self.db.execute(text("""
+    async def projects(self, user_id: UUID) -> list[dict]:
+        """Every open project, newest first."""
+        rows = (await self.db.execute(text("""
             SELECT vp.*, op.title project_name, op.narrative idea_description, op.status opportunity_status
             FROM visionary_projects vp JOIN opportunities op ON op.id=vp.opportunity_id
             WHERE vp.user_id=:u AND op.status NOT IN ('closed','cancelled')
-            ORDER BY vp.created_at DESC LIMIT 1
-        """), {"u": user_id})).mappings().first()
-        return dict(row) if row else None
+            ORDER BY vp.created_at DESC, vp.id DESC
+        """), {"u": user_id})).mappings()
+        return [dict(row) for row in rows]
+
+    async def project(self, user_id: UUID) -> dict | None:
+        """The Visionary's current (most recent) project."""
+        rows = await self.projects(user_id)
+        return rows[0] if rows else None
 
     async def _insert_project(self, user_id: UUID, title: str) -> None:
         user = await self.user_row(user_id)

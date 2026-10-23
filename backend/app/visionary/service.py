@@ -159,6 +159,19 @@ class VisionaryService:
         return {"project": project["project_name"] or "", "idea": project["idea_description"] or "",
                 "product": project["product"] or "", "industry": project["industry"] or ""}
 
+    def _project_card(self, project: dict) -> dict:
+        created = project.get("created_at")
+        return {
+            "id": str(project["id"]),
+            "project": project["project_name"] or "",
+            "idea": project["idea_description"] or "",
+            "product": project["product"] or "",
+            "industry": project["industry"] or "",
+            "stage": project.get("project_stage") or "",
+            "requirements": self._requirements_view(project),
+            "created_at": created.isoformat() if hasattr(created, "isoformat") else (created or ""),
+        }
+
     @staticmethod
     def _requirements_view(project: dict | None) -> dict | None:
         if not project or not (project["requirements_saved_at"] or project["manufacturing_location"]
@@ -273,13 +286,15 @@ class VisionaryService:
         """Everything the flow needs to resume where the Visionary left off."""
         async def load():
             profile = await self.repo.profile(actor.user_id)
-            project = await self.repo.project(actor.user_id)
+            projects = await self.repo.projects(actor.user_id)
+            project = projects[0] if projects else None
             requests = await self.repo.requests(actor.user_id)
             return {
                 "profile": self._profile_view(profile),
                 "idea": self._idea_view(project),
                 "stage": (project or {}).get("project_stage") or "",
                 "requirements": self._requirements_view(project),
+                "projects": [self._project_card(item) for item in projects],
                 "requests": [self._request_view(r) for r in requests],
             }
         return await self._run(load())

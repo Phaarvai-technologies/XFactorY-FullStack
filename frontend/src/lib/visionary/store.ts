@@ -5,17 +5,38 @@ import type {
   VisionaryRequirements,
 } from "@/lib/visionary/storage";
 
+/** One saved project, newest first in VisionaryData.projects. */
+export type VisionaryProject = {
+  id: string;
+  project: string;
+  idea: string;
+  product: string;
+  industry: string;
+  stage: string;
+  requirements: VisionaryRequirements | null;
+  created_at: string;
+};
+
 /** GET /visionary/me (and every save): the signed-in Visionary's saved data. */
 export type VisionaryData = {
   profile: VisionaryProfile | null;
   idea: VisionaryIdea | null;
   stage: string;
   requirements: VisionaryRequirements | null;
+  /** Newest first. The flow still resumes from the first item. */
+  projects: VisionaryProject[];
   /** Oldest first; the screens show the latest. */
   requests: ManufacturingRequest[];
 };
 
-const EMPTY: VisionaryData = { profile: null, idea: null, stage: "", requirements: null, requests: [] };
+const EMPTY: VisionaryData = {
+  profile: null,
+  idea: null,
+  stage: "",
+  requirements: null,
+  projects: [],
+  requests: [],
+};
 
 /**
  * In-memory copy of the server data for the current page. VisionaryFlow loads it from the
@@ -35,7 +56,13 @@ export function setVisionaryData(next: VisionaryData): void {
   const requirements = next.requirements
     ? { ...next.requirements, machines: next.requirements.machines ?? [] }
     : null;
-  current = { ...EMPTY, ...next, requirements, requests: next.requests ?? [] };
+  current = {
+    ...EMPTY,
+    ...next,
+    requirements,
+    projects: next.projects ?? [],
+    requests: next.requests ?? [],
+  };
 }
 
 export function addVisionaryRequest(request: ManufacturingRequest): void {
