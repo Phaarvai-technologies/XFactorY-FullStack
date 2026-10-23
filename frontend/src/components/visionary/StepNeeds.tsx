@@ -115,11 +115,7 @@ export function StepNeeds({
     }
     setSaving(true);
     try {
-      try {
-        window.sessionStorage.setItem("xy-visionary-machines", JSON.stringify(data.machines ?? []));
-      } catch {
-        // Ignore storage errors.
-      }
+      // The selected machines are saved with the other requirements (in the database).
       await visionaryApi.saveRequirements(data, true); // PUT /visionary/project/requirements
       onContinue("results");
     } catch (error) {
@@ -324,11 +320,6 @@ export function StepNeeds({
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  try {
-                    window.sessionStorage.setItem("xy-visionary-machines", JSON.stringify(form.machines ?? []));
-                  } catch {
-                    // Ignore storage errors.
-                  }
                   void visionaryApi.saveRequirements(payload(), false).catch(() => undefined);
                   const prevSlide: VisionarySlide =
                     getVisionaryData().stage === "Ready for Manufacturing" ? "step3" : "guide";

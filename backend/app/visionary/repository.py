@@ -32,6 +32,10 @@ DISCOVERABLE = f"""
       AND {eligibility.sql_condition("visionary_visible")}
 """
 
+# Same normalisation as service.match_key: lower case, runs of spaces / , . / ( ) _ - become one
+# space, trimmed ("CNC Turning/Lathe" = "cnc turning / lathe"; "Chennai, Tamil Nadu" = "chennai tamil nadu").
+_KEY = "btrim(regexp_replace(lower(COALESCE({}, '')), '[[:space:],./()_-]+', ' ', 'g'))"
+
 ORG_COLUMNS = """
     o.id, o.display_name, o.verification_status, op.company_category, op.about_company,
     op.stated_production_capacity, op.production_capacity_label, op.business_type,
@@ -198,13 +202,13 @@ class VisionaryRepository:
         await self.db.execute(text("""
             UPDATE visionary_projects SET manufacturing_location=NULLIF(:location,''),
               quantity=NULLIF(:quantity,0), budget_amount=NULLIF(:budget,0), timeline=NULLIF(:timeline,''),
-              additional_requirements=NULLIF(:additional,''),
+              additional_requirements=NULLIF(:additional,''), required_machines=CAST(:machines AS text[]),
               requirements_saved_at=CASE WHEN :complete THEN now() ELSE requirements_saved_at END
             WHERE id=:id AND user_id=:u
         """), {"id": project["id"], "u": user_id, "location": data["manufacturing_location"],
                "quantity": data["quantity"]["value"], "budget": data["budget"]["amount"],
                "timeline": data["timeline"], "additional": data["additional_requirements"],
-               "complete": complete})
+               "machines": list(data.get("machines") or []), "complete": complete})
         if complete:
             await self.db.execute(text("""
                 UPDATE opportunities SET status='active', updated_at=now()
@@ -221,6 +225,65 @@ class VisionaryRepository:
             params["org"] = org_id
         sql += " ORDER BY o.display_name, o.id"
         return [dict(r) for r in (await self.db.execute(text(sql), params)).mappings()]
+
+    async def matching_manufacturers(self, location: str, machines: list[str]) -> list[dict]:
+        """Discoverable manufacturers (same visibility / approval rule as the list) that match the
+        Visionary's saved requirements. Both values arrive normalised by the service (match_key):
+        - location: the headquarters city, or "city, state" (as shown on the card), equals it;
+          a manufacturer without a recorded city never matches a location requirement;
+        - machines: at least one PUBLISHED machine whose name or subcategory equals one of them.
+        An empty value means that requirement was not given (no filter)."""
+        sql = f"SELECT {ORG_COLUMNS} {DISCOVERABLE}"
+        params: dict = {}
+        if location:
+            sql += f"""
+              AND ({_KEY.format("f.city")} = :loc
+                   OR {_KEY.format("concat_ws(' ', f.city, COALESCE(NULLIF(btrim(f.state_province), ''), f.country_name, op.country_name))")} = :loc)"""
+            params["loc"] = location
+        if machines:
+            sql += f"""
+              AND EXISTS (SELECT 1 FROM machines mm
+                          LEFT JOIN machine_specs sub ON sub.machine_id = mm.id AND sub.spec_code = 'subcategory'
+                          WHERE mm.organization_id = o.id AND mm.publication_status = 'published'
+                            AND mm.status <> 'archived'
+                            AND ({_KEY.format("mm.name")} = ANY(:machines)
+                                 OR {_KEY.format("sub.value_text")} = ANY(:machines)))"""
+            params["machines"] = machines
+        sql += " ORDER BY o.display_name, o.id"
+        return [dict(r) for r in (await self.db.execute(text(sql), params)).mappings()]
+
+    async def imported_listings(self, location: str, q: str, limit: int, offset: int) -> tuple[list[dict], int]:
+        """Directory listings: companies brought in by the database import (REAL records) that are
+        NOT visible as verified manufacturers yet (not claimed / approved / complete). Matched on
+        the headquarters city only (same rule as matching_manufacturers): the import holds no
+        machines, prices or availability. Optional `q`: company name contains it. Read-only:
+        requests are still only possible to verified manufacturers (see booking / DISCOVERABLE)."""
+        where = f"""
+            FROM organizations o
+            LEFT JOIN organization_profiles op ON op.organization_id = o.id
+            LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
+            LEFT JOIN files logo ON logo.id = op.logo_file_id
+            WHERE o.organization_type = 'manufacturer' AND o.entry_source = 'IMPORTED'
+              AND o.record_type = 'REAL' AND NOT o.is_archived AND o.status IN ('claim_pending', 'active')
+              AND NOT (o.id = ANY(:verified))
+              AND ({_KEY.format("f.city")} = :loc
+                   OR {_KEY.format("concat_ws(' ', f.city, COALESCE(NULLIF(btrim(f.state_province), ''), f.country_name, op.country_name))")} = :loc)
+              AND (:q = '' OR o.display_name ILIKE :like ESCAPE '\\')
+        """
+        # Companies that ARE visible as verified manufacturers (only approved ones can be: a short
+        # list), so the listings can leave them out without evaluating the overview view per row.
+        verified = list((await self.db.execute(text(f"""
+            SELECT o.id FROM organizations o
+            JOIN manufacturer_onboarding mo ON mo.organization_id = o.id AND mo.status = 'approved'
+            WHERE o.organization_type = 'manufacturer' AND {eligibility.sql_condition("visionary_visible")}
+        """))).scalars())
+        params = {"loc": location, "q": q, "verified": verified,
+                  "like": "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"}
+        total = await self.db.scalar(text(f"SELECT count(*) {where}"), params)
+        rows = (await self.db.execute(text(f"""
+            SELECT {ORG_COLUMNS} {where} ORDER BY o.display_name, o.id LIMIT :limit OFFSET :offset
+        """), {**params, "limit": limit, "offset": offset})).mappings()
+        return [dict(r) for r in rows], int(total or 0)
 
     async def manufacturer_details(self, org_ids: list[UUID]) -> dict:
         """Published machinery, certifications and availability for the given manufacturers."""

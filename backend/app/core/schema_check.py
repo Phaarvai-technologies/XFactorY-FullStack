@@ -19,6 +19,7 @@ MIGRATION_HINT = (
 REQUIRED = [
     ("users", "personal_email", "024_personal_email.sql"),
     ("manufacturer_submissions", "correction_fields", "025_approval_first.sql"),
+    ("visionary_projects", "required_machines", "027_visionary_required_machines.sql"),
     ("manufacturer_onboarding", None, "XY_Database_Schema.sql"),
     ("manufacturer_availability_preferences", None, "004_manufacturer_api_support.sql"),
     ("facilities", "sez_status", "004_manufacturer_api_support.sql"),

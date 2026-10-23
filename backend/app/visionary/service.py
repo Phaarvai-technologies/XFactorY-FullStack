@@ -7,6 +7,7 @@ ManufacturingRequest) and src/lib/manufacturer/publicProfile.ts
 """
 import json
 import logging
+import re
 from decimal import Decimal
 from uuid import UUID
 
@@ -55,6 +56,22 @@ def _json(value):
         except json.JSONDecodeError:
             return None
     return value
+
+
+def match_key(value) -> str:
+    """Matching key (same rule as repository._KEY): case, spacing and , . / ( ) _ - ignored."""
+    return re.sub(r"[\s,./()_-]+", " ", str(value or "").lower()).strip()
+
+
+# Requirements the database cannot evaluate: shown to the Visionary, never used to filter.
+NOT_COMPARED = {
+    "quantity": "Manufacturers record a monthly production capacity but no minimum or maximum order size, "
+                "so the quantity is not used to filter.",
+    "budget": "Manufacturer prices are optional and set per machine (per hour, day, unit or batch), so "
+              "they cannot be compared with a project budget; the budget is not used to filter.",
+    "timeline": "Manufacturer availability calendars do not record a start date that can be compared "
+                "with the timeline, so it is not used to filter.",
+}
 
 
 def _location(row: dict) -> str:
@@ -147,7 +164,8 @@ class VisionaryService:
         if not project or not (project["requirements_saved_at"] or project["manufacturing_location"]
                                or project["quantity"] or project["budget_amount"] or project["timeline"]):
             return None
-        return {"manufacturing_location": project["manufacturing_location"] or "",
+        return {"machines": list(project.get("required_machines") or []),
+                "manufacturing_location": project["manufacturing_location"] or "",
                 "quantity": {"value": project["quantity"] or 0, "unit": "units"},
                 "budget": {"amount": _int(project["budget_amount"]), "currency": "INR"},
                 "timeline": project["timeline"] or "",
@@ -198,6 +216,13 @@ class VisionaryService:
             "verified": org["verification_status"] == "verified" or any(c["status"] == "verified" for c in certs),
             "status": "active",
         }
+
+    def _listing(self, org: dict) -> dict:
+        """ManufacturerRecord for a not-yet-verified imported company (no machines, not bookable)."""
+        record = self._record(org, [], [], None)
+        record.update({"verified": False, "listing": True, "matchedMachines": [],
+                       "availability": "Not yet verified"})
+        return record
 
     def _public_profile(self, org: dict, machines: list, certs: list, pref: dict | None) -> dict:
         """PublicManufacturerProfile (Manufacturer Profile page). Public fields only: no contact
@@ -266,6 +291,49 @@ class VisionaryService:
                 await self.repo.manufacturer_details([o["id"] for o in orgs]))
             return [self._record(o, machines.get(o["id"], []), certs.get(o["id"], []), availability.get(o["id"]))
                     for o in orgs]
+        return await self._run(load())
+
+    LISTINGS_PAGE = 24
+
+    async def matches(self, actor: ActorContext, q: str = "", listings_offset: int = 0) -> dict:
+        """"Find a Manufacturer": manufacturers matching the Visionary's SAVED requirements.
+
+        Applied in the database: location (headquarters city) and required machines (at least one
+        selected machine published; manufacturers with more of them first). Quantity, budget and
+        timeline are returned as `notCompared` with the reason (the database has no data to compare
+        them with). Without saved requirements nothing is listed (never an unfiltered list)."""
+        async def load():
+            requirements = self._requirements_view(await self.repo.project(actor.user_id))
+            if not requirements:
+                return {"requirements": None, "applied": [], "notCompared": [], "manufacturers": [],
+                        "listings": [], "listingsTotal": 0}
+            wanted = {match_key(m): m for m in requirements["machines"] if match_key(m)}
+            location = match_key(requirements["manufacturing_location"])
+            orgs = await self.repo.matching_manufacturers(location, list(wanted))
+            machines, certs, availability = self._group(
+                await self.repo.manufacturer_details([o["id"] for o in orgs]))
+            records = []
+            for org in orgs:
+                own = machines.get(org["id"], [])
+                record = self._record(org, own, certs.get(org["id"], []), availability.get(org["id"]))
+                offered = {match_key(m["name"]) for m in own} | {match_key(m["specs"].get("subcategory")) for m in own}
+                record["matchedMachines"] = [name for key, name in wanted.items() if key in offered]
+                records.append(record)
+            records.sort(key=lambda r: -len(r["matchedMachines"]))  # stable: name order otherwise
+            applied = (["location"] if location else []) + (["machines"] if wanted else [])
+            given = {"quantity": requirements["quantity"]["value"], "budget": requirements["budget"]["amount"],
+                     "timeline": requirements["timeline"]}
+            # Not-yet-verified directory listings (imported companies) in the same city, after the
+            # verified matches. They carry no machines, so a machine requirement is not compared.
+            listings, listings_total = [], 0
+            if location:
+                rows, listings_total = await self.repo.imported_listings(
+                    location, " ".join(q.split())[:100], self.LISTINGS_PAGE, max(0, listings_offset))
+                listings = [self._listing(row) for row in rows]
+            return {"requirements": requirements, "applied": applied,
+                    "notCompared": [{"field": f, "reason": NOT_COMPARED[f]} for f in ("quantity", "budget", "timeline")
+                                    if given[f]],
+                    "manufacturers": records, "listings": listings, "listingsTotal": listings_total}
         return await self._run(load())
 
     async def _manufacturer(self, manufacturer_id: str) -> tuple[dict, list, list, dict | None]:

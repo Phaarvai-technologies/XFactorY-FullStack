@@ -30,17 +30,10 @@ export function getVisionaryData(): VisionaryData {
 }
 
 export function setVisionaryData(next: VisionaryData): void {
-  let machines = next.requirements?.machines ?? current.requirements?.machines;
-  if ((!machines || !machines.length) && typeof window !== "undefined") {
-    try {
-      const raw = window.sessionStorage.getItem("xy-visionary-machines");
-      if (raw) machines = JSON.parse(raw);
-    } catch {
-      // Ignore storage errors.
-    }
-  }
+  // The server's copy is the only source: the required machines are saved with the other
+  // requirements, so nothing from an earlier browser session can mix in.
   const requirements = next.requirements
-    ? { ...next.requirements, machines: machines ?? [] }
+    ? { ...next.requirements, machines: next.requirements.machines ?? [] }
     : null;
   current = { ...EMPTY, ...next, requirements, requests: next.requests ?? [] };
 }
