@@ -119,6 +119,7 @@ a {
   line-height: 1;
   color: var(--navy);
   letter-spacing: -0.02em;
+  transform: translateY(3px);
 }
 
 .logo-img,
