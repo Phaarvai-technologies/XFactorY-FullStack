@@ -618,6 +618,7 @@
 .xy-visionary #v-pj .mreq small{color:var(--muted);font-size:.85rem}
 .xy-visionary #v-pj .badge{display:inline-block;margin-top:14px;background:#e6f6ef;color:#0d7a4f;padding:4px 14px;border-radius:999px;font-size:.85rem;font-weight:700}
 .xy-visionary #v-pj .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
+.xy-visionary #v-pj .actions .btn{flex:1 1 140px;text-align:center}
 .xy-visionary #v-pj .btn{font:inherit;font-weight:600;font-size:.95rem;border-radius:12px;padding:12px 22px;border:1.5px solid transparent;display:inline-block;cursor:pointer;transition:background .15s}
 .xy-visionary #v-pj .btn-primary{background:linear-gradient(180deg,#2a6ce8,var(--blue));color:#fff;box-shadow:0 4px 14px rgba(29,95,224,.3)}
 .xy-visionary #v-pj .btn-primary:hover{background:var(--blue-dark)}

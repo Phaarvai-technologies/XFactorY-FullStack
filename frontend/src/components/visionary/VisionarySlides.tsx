@@ -205,25 +205,20 @@ export function MyProject({
           </section>
         </div>
         <div className="actions">
+          <button type="button" className="btn btn-primary" onClick={onAddProject}>
+            Add Project
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onContinue("submitted")}>
+            View Request
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onToast("Coming soon.")}>
+            Edit Project
+          </button>
           <button type="button" className="btn btn-primary" onClick={() => onToast("Coming soon.")}>
             View Project
           </button>
-          <button type="button" className="btn btn-ghost" onClick={() => onContinue("manufacturer")}>
-            View Manufacturer
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => onContinue("submitted")}>
-            View Request
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => onToast("Coming soon.")}>
-            Edit Project
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => onContinue("results")}>
+          <button type="button" className="btn btn-primary" onClick={() => onContinue("results")}>
             Explore Manufacturers
-          </button>
-        </div>
-        <div className="actions">
-          <button type="button" className="btn btn-primary" onClick={onAddProject}>
-            Add Project
           </button>
         </div>
       </main>
