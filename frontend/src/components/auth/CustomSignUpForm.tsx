@@ -583,7 +583,7 @@ export function CustomSignUpForm({
       className="auth-form"
       onSubmit={needsVerification ? handleVerifyEmail : completingGoogle ? handleCompleteGoogle : handleCreateAccount}
     >
-      <h1 className="auth-card-heading">Create your XfactorY Factory account</h1>
+      <h1 className="auth-card-heading">Create your XfactorY account</h1>
 
       <div className={`status-box status-${status?.tone ?? "ok"}${status ? " show" : ""}`}>
         <StatusIcon tone={status?.tone ?? "ok"} />
