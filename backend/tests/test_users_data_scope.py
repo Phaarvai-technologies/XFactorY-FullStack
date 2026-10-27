@@ -32,7 +32,7 @@ async def test_users_data_filter_real_demo_all(client):  # noqa: F811
     test_org = await _owner(client, test_sub, f"DS Test Co {t}")
     assert (await client.get("/identity/me", headers=hdr(client, plain_sub))).status_code == 200   # no company
     for org, kind in ((demo_org, "DEMO"), (test_org, "TEST")):
-        r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"record_type": kind})
+        r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=admin, json={"record_type": kind, "reason": "Checked with the company"})
         assert r.status_code == 200, r.text
 
     emails = lambda body: {row["email"] for row in body["rows"]}  # noqa: E731
@@ -57,7 +57,7 @@ async def test_users_data_filter_real_demo_all(client):  # noqa: F811
     assert no_profile["dataCounts"] == {"real": 1, "demo": 0, "all": 1}
 
     # reclassifying a company moves its user between Real and Demo; no user data changes
-    r = await client.patch(f"/admin/manufacturers/{demo_org}/admin-fields", headers=admin, json={"record_type": "REAL"})
+    r = await client.patch(f"/admin/manufacturers/{demo_org}/admin-fields", headers=admin, json={"record_type": "REAL", "reason": "Checked with the company"})
     assert r.status_code == 200
     assert f"{demo_sub}@example.com" in emails(await _list(client, admin, q=t, data="real"))
     assert (await _list(client, admin, q=t))["dataCounts"] == {"real": 3, "demo": 1, "all": 4}

@@ -175,7 +175,7 @@ describe("Manufacturer wizards and availability form", () => {
     assert(screen.getAllByText("Certification name and issuing body are both required.").length > 0, "no error shown");
   });
 
-  it("Availability: Machine Name lists the manufacturer's own machinery", async () => {
+  it("Availability: Machine Name shows the saved plan and accepts a machine name", async () => {
     const state = createInitialManufacturerState();
     state.machinery = [
       { ...(machine as any), id: 1, type: "VMC 850", status: "Published" },
@@ -188,10 +188,13 @@ describe("Manufacturer wizards and availability form", () => {
       onCycleDay={noop} onOpenRecurringModal={noop} onAcceptBooking={noop} onDeclineBooking={noop}
       onBackToLanding={noop} showToast={noop} />);
     fireEvent.click(screen.getAllByRole("button").find((b) => /availability/i.test(b.textContent ?? ""))!); await flush();
-    const select = document.getElementById("cap-machine") as HTMLSelectElement;
-    const options = [...select.options].map((o) => o.value).filter(Boolean);
-    assert(JSON.stringify(options) === '["VMC 850","Laser cutter"]', `options: ${JSON.stringify(options)}`);
-    assert(select.value === "VMC 850", `saved plan not selected: ${select.value}`);
+    // Machine Name is a text field (the manufacturer types the machine); the saved plan is shown.
+    const input = document.getElementById("cap-machine") as HTMLInputElement;
+    assert(input.tagName === "INPUT" && input.type === "text", `not a text field: ${input.tagName}`);
+    assert(input.value === "VMC 850", `saved plan not shown: ${input.value}`);
+    assert(input.placeholder === "Type or enter machine name", `placeholder: ${input.placeholder}`);
+    fireEvent.change(input, { target: { value: "Laser cutter" } });
+    assert(input.value === "Laser cutter", "typing does not change the machine name");
   });
 
 });

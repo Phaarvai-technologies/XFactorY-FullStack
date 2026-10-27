@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { IdeaAssistant } from "@/components/visionary/AiAssistant";
 import { FlowHeader, Progress } from "@/components/visionary/FlowChrome";
 import { IDEA_ICONS, ideaFrame, resolveIdeaIcon } from "@/lib/visionary/ideaVisual";
 import { errorMessage, useVisionaryApi } from "@/lib/visionary/api";
@@ -155,6 +156,23 @@ export function StepIdea({
     } finally {
       setSaving(false);
     }
+  }
+
+  /** An AI suggestion the user confirmed: into the fields (still editable), then saved as a draft
+   * through the existing idea save (the same one "Previous" uses), so it survives a refresh.
+   * "Add Project" (fresh): only the fields are filled; the new project is created by the screen's
+   * own Save & Next / Previous, so applying never creates a duplicate project. */
+  async function applyFromAi(fields: Partial<VisionaryIdea>) {
+    const next = { ...idea, ...fields };
+    const nextSector = fields.industry ?? sector;
+    setIdea(next);
+    if (fields.industry !== undefined) setSector(fields.industry);
+    setErrors({});
+    if (fresh) return;
+    await visionaryApi.saveIdea(
+      { project: next.project.trim(), idea: next.idea.trim(), product: next.product.trim(), industry: nextSector.trim() },
+      false,
+    );
   }
 
   const caption = idea.product.trim() || idea.project.trim() || "Your idea takes shape here";
@@ -337,6 +355,11 @@ export function StepIdea({
               </button>
             </div>
           </form>
+          <IdeaAssistant
+            values={{ project: idea.project, idea: idea.idea, product: idea.product, industry: industryValue }}
+            onApply={applyFromAi}
+            newProject={fresh}
+          />
         </section>
       </main>
     </div>

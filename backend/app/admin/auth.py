@@ -20,6 +20,16 @@ from app.core.database import get_session
 from app.identity.registration import RegistrationRequired, ensure_registered
 
 ADMIN_ROLES = ("platform_administrator", "platform_operator", "support_specialist", "verification_analyst")
+
+# What each role may change (every role can view, add internal notes and edit the other admin fields).
+REVIEW_ROLES = ("platform_administrator", "platform_operator", "verification_analyst")   # approve / correct / reject
+CLASSIFY_ROLES = ("platform_administrator", "platform_operator")    # Real / Demo / Test, archive
+ACCOUNT_ROLES = ("platform_administrator", "platform_operator", "support_specialist")    # suspend / reactivate users
+
+
+def require_role(admin: "AdminContext", allowed: tuple[str, ...], message: str) -> None:
+    if not set(admin.roles) & set(allowed):
+        raise HTTPException(status_code=403, detail=message)
 # While an admin still has a temporary password, only these admin endpoints work.
 PASSWORD_CHANGE_ALLOWED = ("/admin/me", "/admin/auth/change-password")
 

@@ -384,7 +384,8 @@ async def test_sample_bookings_come_from_the_database(client):
 
     from app.core.database import engine
 
-    seed = Path(__file__).resolve().parents[1] / "database" / "seeds" / "sample_booking_requests.sql"
+    # the sample-data script lives with the Supabase files (frontend/infra/supabase)
+    seed = Path(__file__).resolve().parents[2] / "frontend" / "infra" / "supabase" / "sample_booking_requests.sql"
     async with engine.begin() as conn:
         await conn.exec_driver_sql(seed.read_text(encoding="utf-8"))
     added = await client.sql("SELECT xy_seed_sample_bookings(:e)", e=f"{client.user}@example.com")
@@ -403,7 +404,11 @@ async def test_sample_bookings_come_from_the_database(client):
          "status": "Cancelled"},
     ]
 
-    # Accept the Reserved one ("Confirm booking") and cancel the Booked one.
+    # Accept the Reserved one ("Confirm booking") and cancel the Booked one. Approval first: the
+    # booking requests can be answered once XfactorY approved the application.
+    org = (await client.sql("""SELECT m.organization_id FROM memberships m JOIN users u ON u.id=m.user_id
+                               WHERE u.clerk_user_id=:s""", s=client.user))[0][0]
+    assert (await approve_company(client, str(org))).status_code == 200
     ids = {b["buyer"]: b["id"] for b in r.json()["state"]["bookings"]}
     r = await client.patch(f"/manufacturer/booking-requests/{ids['BluePeak Foods']}", json={"status": "accepted"})
     r = await client.patch(f"/manufacturer/booking-requests/{ids['Vertex Auto Parts']}", json={"status": "declined"})

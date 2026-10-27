@@ -232,7 +232,7 @@ class AdminRepository:
             p["assigned_to"] = f["assigned_to"]
         return where, p
 
-    async def manufacturers(self, f: dict, page: int, page_size: int, sort: str) -> dict:
+    def _list_where(self, f: dict) -> tuple[str, dict]:
         where, p = self._filters(f)
         # Manufacturers tab: only approved companies and companies an admin brought in (import /
         # Add company). A company a user submitted appears once an admin approves it; until then it
@@ -243,8 +243,18 @@ class AdminRepository:
             awaiting = (f"EXISTS (SELECT 1 FROM organizations o WHERE o.id = admin_manufacturer_overview.organization_id "
                         f"AND {AWAITING_APPROVAL_SQL})")
             where.append(awaiting if listing == "awaiting" else f"NOT {awaiting}")
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        return (("WHERE " + " AND ".join(where)) if where else ""), p
+
+    async def manufacturers(self, f: dict, page: int, page_size: int, sort: str) -> dict:
+        clause, p = self._list_where(f)
         total = await self.db.scalar(text(f"SELECT count(*) FROM admin_manufacturer_overview {clause}"), p)
+        # All / Real / Demo tabs: counts for every type with the other filters applied (the tab
+        # itself, i.e. the record_type filter, is ignored so each tab shows its own number).
+        count_clause, count_p = self._list_where({**f, "record_type": None})
+        by_type = await self.rows(f"""SELECT record_type, count(*) AS n FROM admin_manufacturer_overview
+                                      {count_clause} GROUP BY record_type""", count_p)
+        record_type_counts = {t: 0 for t in RECORD_TYPES}
+        record_type_counts.update({r["record_type"]: r["n"] for r in by_type if r["record_type"] in record_type_counts})
         rows = await self.rows(f"""
             SELECT {LIST_COLUMNS} FROM admin_manufacturer_overview {clause}
             ORDER BY {SORTS.get(sort, SORTS['updated'])} LIMIT :limit OFFSET :offset
@@ -254,7 +264,7 @@ class AdminRepository:
                    array_remove(array_agg(DISTINCT country ORDER BY country), NULL) AS countries
             FROM admin_manufacturer_overview
         """)
-        return {"total": total, "rows": rows, "facets": facets}
+        return {"total": total, "rows": rows, "facets": facets, "recordTypeCounts": record_type_counts}
 
     async def overview_row(self, org_id: str) -> dict | None:
         return await self.row(f"""
@@ -272,7 +282,8 @@ class AdminRepository:
             SELECT {LIST_COLUMNS}, req.request_kind, req.request_submitted_at, req.requested_by,
                    coalesce(req.open_requests, 0) AS open_requests
             FROM admin_manufacturer_overview {OPEN_REQUEST_JOIN} {clause}
-            ORDER BY array_position(ARRAY['SUBMITTED','NEEDS_CORRECTION','IN_PROGRESS','NOT_STARTED','REVIEWED'],
+            ORDER BY (record_type = 'REAL'),   -- "all": the few demo rows first, never cut off by the limit
+                     array_position(ARRAY['SUBMITTED','NEEDS_CORRECTION','IN_PROGRESS','NOT_STARTED','REVIEWED'],
                                     review_status),
                      coalesce(last_updated, registered_at) DESC
             LIMIT 500

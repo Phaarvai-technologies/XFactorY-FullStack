@@ -175,7 +175,9 @@ class VisionaryService:
     @staticmethod
     def _requirements_view(project: dict | None) -> dict | None:
         if not project or not (project["requirements_saved_at"] or project["manufacturing_location"]
-                               or project["quantity"] or project["budget_amount"] or project["timeline"]):
+                               or project["quantity"] or project["budget_amount"] or project["timeline"]
+                               # added from an accepted AI Guide suggestion, before the requirements step
+                               or project.get("required_machines") or project["additional_requirements"]):
             return None
         return {"machines": list(project.get("required_machines") or []),
                 "manufacturing_location": project["manufacturing_location"] or "",

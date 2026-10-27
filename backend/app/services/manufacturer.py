@@ -207,6 +207,18 @@ class ManufacturerService:
         snapshot["approval"]["access"] = await self._run(access.state(self.repo.db, raw["context"], self.settings, row))
         return snapshot
 
+    async def _gated(self, actor: Actor, profile: bool = False) -> dict:
+        """Context for a write below the basic details form. Never creates anything: a user without a
+        manufacturer workspace (details form not sent) is refused like any other locked section."""
+        try:
+            ctx = await self._run(self.repo.context(actor))
+        except HTTPException as exc:
+            if exc.status_code != 409:   # 409: no manufacturer workspace yet
+                raise
+            raise HTTPException(403, access.NOT_SUBMITTED_MESSAGE) from exc
+        await self._require_access(ctx, profile=profile)
+        return ctx
+
     async def _require_access(self, ctx: dict, profile: bool = False) -> None:
         """Every manufacturer write below the basic details form: refused (403) until XfactorY approves
         the user's application; the shared company profile needs the company's owner / admin."""
@@ -240,7 +252,7 @@ class ManufacturerService:
             "feedback": latest.get("review_feedback") if latest else None,
             "submittedAt": latest.get("updated_at") if latest else None,
             "reviewedAt": latest.get("reviewed_at") if latest else None,
-            "eligibility": eligibility.evaluate(org_status, p.get("completeness")),
+            "eligibility": eligibility.evaluate(org_status, p.get("completeness"), p.get("record_type")),
             # The user's own update requests for companies managed by someone else: their own
             # proposed values, status and the admin's feedback only (no data of that company).
             "updateRequests": [{
@@ -422,8 +434,7 @@ class ManufacturerService:
     async def update_profile(self, actor: Actor, changes: dict, progress: dict | None = None) -> dict:
         """PATCH /manufacturer/profile: apply only the changed fields, then return
         the record freshly read back from the database."""
-        ctx = await self.ensure_actor(actor)
-        await self._require_access(ctx, profile=True)
+        ctx = await self._gated(actor, profile=True)
         company = changes.get("company") or {}
         assets: dict = {}
         for key in ("logo", "cover"):
@@ -463,8 +474,7 @@ class ManufacturerService:
         return await self.update_profile(actor, data)
 
     async def create_machinery(self, actor: Actor, data: dict) -> dict:
-        ctx = await self.ensure_actor(actor)
-        await self._require_access(ctx)
+        ctx = await self._gated(actor)
         images = []
         for item in data.get("images", []):
             file_id = await self._run(self._image_file(ctx, item.get("src", ""), "machine_image", "machines"))
@@ -493,32 +503,30 @@ class ManufacturerService:
         return resolved
 
     async def create_machinery_draft(self, actor: Actor, client_key, changes: dict, progress: dict | None) -> dict:
-        ctx = await self.ensure_actor(actor)
-        await self._require_access(ctx)
+        ctx = await self._gated(actor)
         images = await self._run(self._machinery_images(ctx, changes.get("images")))
         await self._run(self.repo.create_machinery_draft(actor, client_key, changes, images, progress))
         return await self.bootstrap(actor)
 
     async def update_machinery_draft(self, actor: Actor, machine_id: str, changes: dict,
                                      progress: dict | None, finish: str | None) -> dict:
-        ctx = await self.ensure_actor(actor)
-        await self._require_access(ctx)
+        ctx = await self._gated(actor)
         images = await self._run(self._machinery_images(ctx, changes.get("images")))
         await self._run(self.repo.update_machinery_draft(actor, machine_id, changes, images, progress, finish))
         return await self.bootstrap(actor)
 
     async def patch_availability(self, actor: Actor, changes: dict) -> dict:
-        await self._require_access(await self.ensure_actor(actor))
+        await self._gated(actor)
         await self._run(self.repo.patch_availability(actor, changes))
         return await self.bootstrap(actor)
 
     async def set_machinery_status(self, actor: Actor, machine_id: str, status: str) -> dict:
-        await self._require_access(await self.ensure_actor(actor))
+        await self._gated(actor)
         await self._run(self.repo.set_machinery_status(actor, machine_id, status))
         return await self.bootstrap(actor)
 
     async def save_availability(self, actor: Actor, data: dict) -> dict:
-        await self._require_access(await self.ensure_actor(actor))
+        await self._gated(actor)
         await self._run(self.repo.save_availability(actor, data))
         return await self.bootstrap(actor)
 
@@ -538,6 +546,6 @@ class ManufacturerService:
         return await notifications.for_user(self.repo.db, ctx["user_id"], ctx["organization_id"])
 
     async def decide_booking(self, actor: Actor, booking_id: str, status: str) -> dict:
-        await self._require_access(await self.ensure_actor(actor))
+        await self._gated(actor)
         await self._run(self.repo.update_booking(actor, booking_id, status))
         return await self.bootstrap(actor)

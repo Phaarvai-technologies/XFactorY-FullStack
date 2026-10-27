@@ -137,9 +137,13 @@ async def create_manufacturer(body: CompanyCreate, admin: Admin, svc: Svc,
 
 @router.get("/review-queue")
 async def review_queue(admin: Admin, svc: Svc, q: str | None = None, review_status: ListParam = None,
-                       assigned: Literal["me", "unassigned"] | None = None, include_test: bool = False):
-    filters = {"q": q, "review_status": review_status, "assigned": assigned,
-               "record_type": None if include_test else ["REAL"]}
+                       assigned: Literal["me", "unassigned"] | None = None,
+                       data: Literal["real", "demo", "all"] | None = None, include_test: bool = False):
+    """data: real (default) = real companies only, demo = demo / test data only, all = both.
+    include_test=true is the older form of data=all."""
+    data = data or ("all" if include_test else "real")
+    record_types = {"real": ["REAL"], "demo": ["DEMO", "TEST"], "all": None}[data]
+    filters = {"q": q, "review_status": review_status, "assigned": assigned, "record_type": record_types}
     return await svc.review_queue(filters, admin)
 
 

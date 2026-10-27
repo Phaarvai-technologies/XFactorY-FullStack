@@ -7,6 +7,8 @@ Two separate facts about a manufacturer company (organization):
 * COMPLETE  - its profile meets every required item of the existing completeness check
               (admin_manufacturer_overview.completeness, the 14 required fields, computed by the
               database from saved data; a percentage sent by a client is never used).
+* REAL      - it is real data (organizations.record_type = 'REAL'). DEMO / TEST records are sample
+              data: never shown to Visionaries and never bookable, whatever their approval.
 
 Each capability below says which facts it needs. To change a rule later (e.g. let approved
 but incomplete manufacturers be found), edit RULES only: the SQL used by Visionary search,
@@ -23,13 +25,14 @@ COMPLETE_PERCENT = 100
 
 # capability -> facts required (all must hold)
 RULES: dict[str, tuple[str, ...]] = {
-    "visionary_visible": ("approved", "complete"),   # search, recommendations, profile page
-    "booking": ("approved", "complete"),             # new booking requests (subject to existing rules)
+    "visionary_visible": ("approved", "complete", "real"),   # search, recommendations, profile page
+    "booking": ("approved", "complete", "real"),             # new booking requests (subject to existing rules)
 }
 
 _FACT_SQL = {
     "approved": "elig.onboarding_raw_status = 'approved'",
     "complete": f"elig.completeness >= {COMPLETE_PERCENT}",
+    "real": "elig.record_type = 'REAL'",
 }
 
 
@@ -51,10 +54,11 @@ def sql_condition(capability: str, org_alias: str = "o") -> str:
             f"THEN {full} ELSE false END)")
 
 
-def evaluate(approval_status: str | None, completeness: int | None) -> dict:
+def evaluate(approval_status: str | None, completeness: int | None, record_type: str | None = "REAL") -> dict:
     """The same rules in Python, for status displays (never for access decisions)."""
     facts = {"approved": approval_status == "approved",
-             "complete": (completeness or 0) >= COMPLETE_PERCENT}
+             "complete": (completeness or 0) >= COMPLETE_PERCENT,
+             "real": (record_type or "REAL") == "REAL"}
     return {
         "approved": facts["approved"],
         "complete": facts["complete"],

@@ -1,13 +1,14 @@
 /** Manufacturers tab lists approved / admin-added companies (Listing filter), Mark as demo / real on
  * manufacturers and Visionaries, and the person-level Demo badge in Users. */
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminHostContext, type AdminHost } from "@/lib/admin/api";
 
 const toasts = vi.hoisted(() => [] as string[]);
+const me = vi.hoisted(() => ({ current: null as null | { id: string; roles: string[] } }));
 vi.mock("@/components/admin/AdminShell", () => ({
   useToast: () => (m: string) => toasts.push(m),
-  useAdminMe: () => null,
+  useAdminMe: () => me.current,
 }));
 
 import { Manufacturers } from "@/components/admin/Manufacturers";
@@ -33,7 +34,7 @@ function serve(get: (url: string) => unknown) {
   });
   return calls;
 }
-beforeEach(() => { toasts.length = 0; });
+beforeEach(() => { toasts.length = 0; me.current = null; });
 afterEach(() => vi.unstubAllGlobals());
 
 const MFG = {
@@ -79,19 +80,26 @@ describe("Manufacturers: listing", () => {
 });
 
 describe("Mark as demo / real", () => {
-  it("Manufacturers: Actions -> Mark as demo (real row) / Mark as real (demo row)", async () => {
+  it("Manufacturers: Actions -> Change Real / Demo… opens the details page (a reason is asked there)", async () => {
+    me.current = { id: "a", roles: ["platform_operator"] };
     const calls = serve(() => LIST);
+    const h = host("/admin/manufacturers");
+    render(<AdminHostContext.Provider value={h}><Manufacturers /></AdminHostContext.Provider>);
+    await screen.findByText("Real Forge");
+    await pick("Real Forge", "Change Real / Demo…");
+    await pick("Demo Forge", "Change Real / Demo…");
+    expect(h.went).toEqual(["/admin/manufacturers/o1?tab=onboarding", "/admin/manufacturers/o2?tab=onboarding"]);
+    expect(calls.filter((c) => c.method === "PATCH")).toEqual([]);     // nothing changed from the list
+  });
+
+  it("Manufacturers: support and verification roles do not get the Real / Demo action", async () => {
+    me.current = { id: "a", roles: ["support_specialist"] };
+    serve(() => LIST);
     render(<AdminHostContext.Provider value={host("/admin/manufacturers")}><Manufacturers /></AdminHostContext.Provider>);
     await screen.findByText("Real Forge");
-    await pick("Real Forge", "Mark as demo");
-    await pick("Demo Forge", "Mark as real");
-    const patches = calls.filter((c) => c.method === "PATCH");
-    expect(patches.map((c) => [c.url.replace(/^.*?\/admin\//, "/"), c.body])).toEqual([
-      ["/manufacturers/o1/admin-fields", { record_type: "DEMO" }],
-      ["/manufacturers/o2/admin-fields", { record_type: "REAL" }],
-    ]);
-    await waitFor(() => expect(toasts).toEqual(["Real Forge marked as demo data", "Demo Forge marked as real data"]));
-    expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThanOrEqual(3);   // list reloaded
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Real Forge" }));
+    await screen.findByRole("menuitem", { name: "View details" });
+    expect(screen.queryByRole("menuitem", { name: "Change Real / Demo…" })).toBeNull();
   });
 
   const VIS = {

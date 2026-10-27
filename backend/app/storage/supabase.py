@@ -31,6 +31,12 @@ class UploadedObject:
     public_url: str
 
 
+def _is_image(raw: bytes) -> bool:
+    """PNG, JPEG or WebP file signature."""
+    return (raw.startswith(b"\x89PNG\r\n\x1a\n") or raw.startswith(b"\xff\xd8\xff")
+            or (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"))
+
+
 def decode_data_url(data_url: str) -> DecodedImage | None:
     """Decode the `data:image/...;base64,...` strings produced by the frontend FileReader."""
     if not isinstance(data_url, str) or not data_url.startswith("data:"):
@@ -46,6 +52,10 @@ def decode_data_url(data_url: str) -> DecodedImage | None:
         raise ValueError("Only PNG, JPG and WebP images are supported")
     if len(raw) > MAX_BYTES:
         raise ValueError("Image must be 10 MB or smaller")
+    # The bytes must really be an image of a supported type: the declared type alone can be
+    # faked (e.g. an SVG / HTML file sent as "image/png" would be served as a public file).
+    if not _is_image(raw):
+        raise ValueError("The file is not a valid PNG, JPG or WebP image")
     return DecodedImage(raw, "image/jpeg" if extension == "jpg" else content_type, extension,
                         hashlib.sha256(raw).hexdigest())
 

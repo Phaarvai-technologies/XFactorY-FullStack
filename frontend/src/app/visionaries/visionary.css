@@ -1046,3 +1046,50 @@
   }
 }
 
+
+/* ---------------------------------------------------------------------------------------------
+ * AI assistant (added; scoped to the assistant only).
+ * - #v-s2 .xy-ai: the optional "Need help with your idea?" panel below the Your idea form.
+ * - .ai-*: suggestion cards / confirmation / notes, inside the AI Guide chat and the idea panel.
+ * Uses the existing palette and the AI Guide chat look; existing rules are unchanged.
+ * ------------------------------------------------------------------------------------------- */
+.xy-visionary #v-s2 .xy-ai{margin-top:20px;background:#fff;border:1px solid var(--line);border-radius:22px;padding:22px 24px;box-shadow:0 8px 30px rgba(29,95,224,.07)}
+.xy-visionary #v-s2 .xy-ai-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.xy-visionary #v-s2 .xy-ai-head b{display:block;color:var(--ink);font-size:1rem;margin-bottom:4px}
+.xy-visionary #v-s2 .xy-ai-head p{color:var(--muted);font-size:.88rem;margin:0}
+.xy-visionary #v-s2 .xy-ai .ai-actions{margin-top:12px}
+.xy-visionary #v-s2 .xy-ai .chip{font:inherit;font-size:13px;font-weight:600;color:var(--blue);background:#fff;border:1px solid var(--blue);border-radius:999px;padding:7px 14px;cursor:pointer;transition:background .15s,color .15s}
+.xy-visionary #v-s2 .xy-ai .chip:hover:not(:disabled){background:var(--blue);color:#fff}
+.xy-visionary #v-s2 .xy-ai .chip:disabled{opacity:.5;cursor:not-allowed}
+.xy-visionary #v-s2 .xy-ai-chat{margin-top:16px;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.xy-visionary #v-s2 .xy-ai .chat-log{max-height:420px;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+.xy-visionary #v-s2 .xy-ai .msg{max-width:90%;padding:12px 16px;border-radius:18px;font-size:.92rem;line-height:1.55;word-break:break-word}
+.xy-visionary #v-s2 .xy-ai .msg.ai{background:var(--blue-soft);border-top-left-radius:6px;align-self:flex-start;color:var(--ink)}
+.xy-visionary #v-s2 .xy-ai .msg.me{background:var(--blue);color:#fff;border-top-right-radius:6px;align-self:flex-end}
+.xy-visionary #v-s2 .xy-ai .msg ul{padding-left:20px;margin:6px 0 0}
+.xy-visionary #v-s2 .xy-ai .msg li{margin:4px 0}
+.xy-visionary #v-s2 .xy-ai .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.xy-visionary #v-s2 .xy-ai .typing{display:flex;gap:5px;padding:14px 16px}
+.xy-visionary #v-s2 .xy-ai .typing i{width:8px;height:8px;border-radius:50%;background:var(--blue);opacity:.35;animation:typingDot 1s infinite}
+.xy-visionary #v-s2 .xy-ai .typing i:nth-child(2){animation-delay:.15s}
+.xy-visionary #v-s2 .xy-ai .typing i:nth-child(3){animation-delay:.3s}
+.xy-visionary #v-s2 .xy-ai .chat-form{display:flex;gap:10px;padding:12px 14px;border-top:1px solid var(--line);background:#fff}
+.xy-visionary #v-s2 .xy-ai .chat-input{flex:1;font:inherit;font-size:.92rem;padding:11px 14px;border:1px solid var(--line);border-radius:12px;color:var(--ink);outline:none}
+.xy-visionary #v-s2 .xy-ai .chat-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,95,224,.15)}
+.xy-visionary #v-s2 .xy-ai .chat-send{font:inherit;font-weight:700;color:#fff;background:var(--blue);border:0;border-radius:12px;padding:0 20px;cursor:pointer}
+.xy-visionary #v-s2 .xy-ai .chat-send:disabled{opacity:.5;cursor:not-allowed}
+.xy-visionary .ai-p{margin:0 0 6px}
+.xy-visionary .ai-p:last-child{margin-bottom:0}
+.xy-visionary .ai-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.xy-visionary .ai-note{margin:10px 0 0;font-size:.85rem;color:#8a5a10;background:#f4e7ce;border-radius:10px;padding:8px 12px}
+.xy-visionary .ai-sugg{margin-top:12px;background:#fff;border:1px solid #d6e2f7;border-radius:14px;padding:14px 16px;color:#0f2347}
+.xy-visionary .ai-sugg-title{display:block;font-size:.95rem;margin-bottom:4px}
+.xy-visionary .ai-sugg-details{display:grid;gap:6px;margin:8px 0 0;font-size:.85rem}
+.xy-visionary .ai-sugg-details dt{font-weight:600;color:#5b6b88}
+.xy-visionary .ai-sugg-details dd{margin:0}
+.xy-visionary .ai-confirm{margin-top:10px;background:#f5f9ff;border:1px dashed #9db9ee;border-radius:12px;padding:10px 12px;font-size:.88rem}
+.xy-visionary .ai-confirm ul{padding-left:18px;margin:4px 0 0}
+.xy-visionary .ai-applied{font-size:.85rem;font-weight:700;color:#2f6e52}
+.xy-visionary .ai-error-text{margin:6px 0 0;width:100%;font-size:.85rem;color:#c62f3e}
+.xy-visionary .msg.ai.ai-error{background:#f7e7e3;color:#a3372a}
+.xy-visionary #v-guide .chip:disabled,.xy-visionary #v-guide .chat-send:disabled{opacity:.5;cursor:not-allowed}

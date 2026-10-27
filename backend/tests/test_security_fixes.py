@@ -28,9 +28,8 @@ async def _uid(c, sub):
 
 
 @pytest.fixture
-def approval_first(monkeypatch):
-    from app.core.config import get_settings
-    monkeypatch.setattr(get_settings(), "manufacturer_approval_first", True)
+def approval_first():
+    """Approval first is always on now (migration 025); kept so the tests read the same."""
 
 
 async def _new_company(c, name=None):
@@ -118,7 +117,9 @@ async def test_rejected_and_corrections_stay_locked(client, approval_first):  # 
     for decision in ("NEEDS_CORRECTION", "REJECTED"):
         _, h, org = await _new_company(client)
         r = await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=boss,
-                               json={"review_status": decision, "reason": "Please fix the phone number"})
+                               json={"review_status": decision, "reason": "Please fix the phone number",
+                                     # a correction names the fields to fix (admin chooses them)
+                                     **({"correction_fields": ["companyPhone"]} if decision == "NEEDS_CORRECTION" else {})})
         assert r.status_code == 200, r.text
         assert (await client.patch("/manufacturer/profile", headers=h, json=PROFILE)).status_code == 403
 
@@ -146,7 +147,10 @@ async def test_accounts_from_before_approval_keep_working(client, approval_first
 
 # ---------------------------------------------------------------- smaller fixes
 async def test_upload_must_really_be_an_image(client):  # noqa: F811
-    _, h, _ = await _new_company(client)
+    _, h, org = await _new_company(client)
+    _, boss = await _role(client, "platform_administrator")       # approval first: unlock the profile
+    assert (await client.patch(f"/admin/manufacturers/{org}/admin-fields", headers=boss,
+                               json={"review_status": "REVIEWED"})).status_code == 200
     fake = "data:image/png;base64," + base64.b64encode(b"<svg onload=alert(1)>").decode()
     r = await client.patch("/manufacturer/profile", headers=h, json={"company": {"logo": fake}})
     assert r.status_code == 422 and "valid PNG" in r.text

@@ -35,7 +35,8 @@ class Settings(BaseSettings):
     terms_version: str = "terms-1.2;privacy-1.4"
 
     @field_validator("database_url", "clerk_issuer", "clerk_jwks_url", "clerk_secret_key",
-                     "clerk_webhook_signing_secret", mode="before")
+                     "clerk_webhook_signing_secret", "gemini_api_key", "anthropic_api_key",
+                     "visionary_ai_model", "visionary_ai_fallback_model", mode="before")
     @classmethod
     def _trimmed(cls, value):
         """Values pasted into a hosting dashboard often carry a trailing newline / space; in
@@ -80,6 +81,20 @@ class Settings(BaseSettings):
     # Manufacturer applications (app/manufacturer_access.py): after an admin rejects an
     # application, the applicant may send a fresh one this many hours after the rejection.
     manufacturer_reapply_after_hours: int = 24
+
+    # Visionary AI assistant (Your idea help + AI Guide), app/visionary/ai.py. Keys stay on the
+    # server. Provider: "gemini" (GEMINI_API_KEY) or "anthropic" (ANTHROPIC_API_KEY); "auto" uses
+    # the one whose key is set (Gemini first). No key = the assistant is off: the screens say so
+    # and the onboarding works as before without it. VISIONARY_AI_MODEL empty = provider default
+    # (gemini-3.5-flash-lite / claude-sonnet-4-5).
+    visionary_ai_provider: Literal["auto", "gemini", "anthropic"] = "auto"
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    visionary_ai_model: str = ""
+    visionary_ai_timeout_seconds: int = 45
+    # Optional second model, used only when the main one is still overloaded ("high demand",
+    # rate limited, not answering) after short retries. Set it empty for no fallback.
+    visionary_ai_fallback_model: str = "gemini-3.1-flash-lite"
 
     # Admin email + password sign-in (`python -m app.admin_account create ...`).
     # A session ends after ADMIN_SESSION_HOURS, or earlier after ADMIN_IDLE_MINUTES

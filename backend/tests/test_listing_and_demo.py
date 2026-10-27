@@ -64,14 +64,14 @@ async def test_manufacturers_tab_lists_only_approved_or_admin_sourced(client):  
 
     # mark a listed manufacturer as demo: it moves to the Demo filter, the person too
     r = await client.patch(f"/admin/manufacturers/{subs['approved']}/admin-fields", headers=admin,
-                           json={"record_type": "DEMO"})
+                           json={"record_type": "DEMO", "reason": "Checked with the company"})
     assert r.status_code == 200 and r.json()["manufacturer"]["recordType"] == "DEMO"
     assert await _ids(client, admin, t, record_type=["DEMO", "TEST"]) == {subs["approved"]}
     assert await _ids(client, admin, t, record_type=["REAL"]) == {imported, added}
     users = (await client.get("/admin/users", headers=admin, params={"q": f"user_lst_approved_{t}", "data": "demo"})).json()
     assert [u["email"] for u in users["rows"]] == [f"user_lst_approved_{t}@example.com"]
     # and back to real
-    await client.patch(f"/admin/manufacturers/{subs['approved']}/admin-fields", headers=admin, json={"record_type": "REAL"})
+    await client.patch(f"/admin/manufacturers/{subs['approved']}/admin-fields", headers=admin, json={"record_type": "REAL", "reason": "Checked with the company"})
     assert subs["approved"] in await _ids(client, admin, t, record_type=["REAL"])
 
 

@@ -99,18 +99,21 @@ describe("Users: Data filter", () => {
   });
 });
 
-describe("Manufacturers: Data filter", () => {
+describe("Manufacturers: All / Real / Demo tabs", () => {
   const LIST = { total: 0, page: 1, pageSize: 25, rows: [], facets: { industries: [], countries: [] } };
+  const tabs = () => within(screen.getByRole("tablist", { name: "Real or demo data" }));
+  const selectedTabs = () => tabs().getAllByRole("tab").filter((t) => t.getAttribute("aria-selected") === "true")
+    .map((t) => t.textContent);
 
-  it("maps onto the record type filter: Real -> REAL, Demo -> DEMO + TEST, Real + demo -> none", async () => {
+  it("maps onto the record type filter: Real -> REAL, Demo -> DEMO + TEST, All -> none", async () => {
     serve(LIST);
     const h = host("/admin/manufacturers");
     render(<AdminHostContext.Provider value={h}><Manufacturers /></AdminHostContext.Provider>);
-    await screen.findByRole("group", { name: "Data" });
-    expect(pressed()[0]).toBe("Real + demo");
-    fireEvent.click(within(dataGroup()).getByRole("button", { name: "Real" }));
-    fireEvent.click(within(dataGroup()).getByRole("button", { name: "Demo" }));
-    fireEvent.click(within(dataGroup()).getByRole("button", { name: "Real + demo" }));
+    await screen.findByRole("tablist", { name: "Real or demo data" });
+    expect(selectedTabs()).toEqual(["All"]);
+    fireEvent.click(tabs().getByRole("tab", { name: "Real" }));
+    fireEvent.click(tabs().getByRole("tab", { name: "Demo" }));
+    fireEvent.click(tabs().getByRole("tab", { name: "All" }));
     expect(h.went).toEqual([
       "/admin/manufacturers?record_type=REAL",
       "/admin/manufacturers?record_type=DEMO&record_type=TEST",
@@ -122,14 +125,14 @@ describe("Manufacturers: Data filter", () => {
     const urls = serve(LIST);
     const { unmount } = render(<AdminHostContext.Provider value={host("/admin/manufacturers", "record_type=TEST&record_type=DEMO")}>
       <Manufacturers /></AdminHostContext.Provider>);
-    await screen.findByRole("group", { name: "Data" });
-    expect(pressed()).toEqual(["Demo"]);
+    await screen.findByRole("tablist", { name: "Real or demo data" });
+    expect(selectedTabs()).toEqual(["Demo"]);
     expect(urls[0]).toContain("record_type=TEST");
     unmount();
     render(<AdminHostContext.Provider value={host("/admin/manufacturers", "record_type=REAL&record_type=TEST")}>
       <Manufacturers /></AdminHostContext.Provider>);
-    await screen.findByRole("group", { name: "Data" });
-    expect(pressed()).toEqual([]);
+    await screen.findByRole("tablist", { name: "Real or demo data" });
+    expect(selectedTabs()).toEqual([]);
     expect(screen.getByText("Custom record type filter applied")).toBeInTheDocument();
   });
 });

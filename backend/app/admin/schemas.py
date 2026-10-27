@@ -132,3 +132,5 @@ class CompanyCreate(_Model):
     phone: str = Field(default="", max_length=30)
     capacity: str = Field(default="", max_length=100)
     reason: str = Field(default="", max_length=500)
+    # Real company or demo (sample) data; TEST is never entered by hand. Default: REAL.
+    record_type: Literal["REAL", "DEMO"] = "REAL"

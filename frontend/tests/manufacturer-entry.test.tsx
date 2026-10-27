@@ -171,25 +171,16 @@ describe("Manufacturer portal entry", () => {
     fireEvent.click(availabilityButton!);
     await flush();
 
+    // Machine Name is a text field; the plan saved in the database is shown on the first open.
     const select = document.getElementById(
       "cap-machine",
-    ) as HTMLSelectElement | null;
+    ) as HTMLInputElement | null;
 
-    assert(select, "Machinery selector missing");
-
-    const options = Array.from(select!.options)
-      .map((option) => option.value)
-      .filter(Boolean);
-
-    assert(
-      JSON.stringify(options) ===
-        '["Thermoforming","Injection Moulding"]',
-      `Unexpected machinery options: ${options}`,
-    );
+    assert(select, "Machine Name field missing");
 
     assert(
       select!.value === "Injection Moulding",
-      `Saved plan not selected: ${select!.value}`,
+      `Saved plan not shown: ${select!.value}`,
     );
 
     const backButton = document.querySelector(".panel-back");

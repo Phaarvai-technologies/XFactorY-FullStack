@@ -13,6 +13,11 @@ import { AdminHostContext, type AdminHost } from "@/lib/admin/api";
 import { createInitialManufacturerState } from "@/lib/manufacturer/types";
 
 vi.mock("@/components/manufacturer/NotificationBell", () => ({ NotificationBell: () => null }));
+// the admin page is used by an administrator (review decisions need an administrator, operator or analyst)
+vi.mock("@/components/admin/AdminShell", () => ({
+  useToast: () => () => undefined,
+  useAdminMe: () => ({ id: "admin-1", name: "Priya Admin", email: "priya@x.y", roles: ["platform_administrator"] }),
+}));
 vi.mock("@/components/manufacturer/AccountMenu", () => ({ AccountMenu: () => null }));
 
 afterEach(() => vi.unstubAllGlobals());

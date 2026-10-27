@@ -16,7 +16,7 @@ from app.core import eligibility
 # A manufacturer is listed for Visionaries (search, recommendations, profile page, booking
 # drafts) only when the central eligibility rule allows it (app/core/eligibility.py: admin
 # approval AND a 100% complete profile), while the organization is active, not archived by
-# an admin, not a TEST record, and its owner's account is not suspended.
+# an admin, real data (not a DEMO / TEST record), and its owner's account is not suspended.
 DISCOVERABLE = f"""
     FROM organizations o
     JOIN LATERAL (
@@ -28,7 +28,7 @@ DISCOVERABLE = f"""
     LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
     LEFT JOIN files logo ON logo.id = op.logo_file_id
     WHERE o.organization_type = 'manufacturer' AND o.status = 'active'
-      AND NOT o.is_archived AND o.record_type <> 'TEST'
+      AND NOT o.is_archived AND o.record_type = 'REAL'
       AND {eligibility.sql_condition("visionary_visible")}
 """
 

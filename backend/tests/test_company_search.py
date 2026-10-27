@@ -20,48 +20,60 @@ async def seed(c, name, city='Hosur', profile=True):
     return org
 
 
+async def search(c, q, **headers):
+    r = await c.get('/manufacturer/companies/search', params={'q': q}, **headers)
+    assert r.status_code == 200, r.text
+    return r.json()['items']
+
+
 async def test_sql_seeded_search_and_selection(client):
+    """The details form's live company search (GET /manufacturer/companies/search, at least two
+    letters) and the read-only details of the chosen record."""
     assert (await client.get('/manufacturer/bootstrap')).status_code == 200
-    a=await seed(client,'Alpha Castings')
-    b=await seed(client,'AL AKSAA CNC')
-    partial=await seed(client,'Precision Alpha Works',profile=False)
-    data=(await client.get('/manufacturer/claims/search',params={'q':'A'})).json()
-    ids=[x['id'] for x in data['results']]
+    t = uuid4().hex[:5]
+    a = await seed(client, f'Alpha{t} Castings')
+    b = await seed(client, f'Alpha{t} AKSAA CNC')
+    partial = await seed(client, f'Precision Alpha{t} Works', profile=False)
+    ids = [x['id'] for x in await search(client, f'alpha{t}')]
     assert a in ids and b in ids and partial in ids
-    assert ids.index(partial)>ids.index(a) and ids.index(partial)>ids.index(b)
-    for q in (' alpha CASTINGS ','Alpha Castings','castings'):
-        results=(await client.get('/manufacturer/claims/search',params={'q':q})).json()['results']
-        assert any(x['id']==a for x in results)
-    detail=await client.get('/manufacturer/claims/companies/'+b)
-    assert detail.status_code==200,detail.text
-    assert detail.json()['id']==b and detail.json()['capacity']=='500 parts/month'
-    before=(await client.sql('SELECT count(*) FROM memberships'))[0][0]
-    await client.get('/manufacturer/claims/companies/'+a)
-    assert (await client.sql('SELECT count(*) FROM memberships'))[0][0]==before
-    late=await seed(client,'Alpha Newly Seeded')
-    assert late in [x['id'] for x in (await client.get('/manufacturer/claims/search',params={'q':'A'})).json()['results']]
-    assert (await client.get('/manufacturer/claims/search',params={'q':'no-match-xyz'})).json()['results']==[]
-    assert (await client.get('/manufacturer/claims/search',params={'q':' '})).json()['results']==[]
-    limited=(await client.get('/manufacturer/claims/search',params={'q':'A','limit':1})).json()
-    assert len(limited['results'])==1 and limited['hasMore']
-    assert (await client.get('/manufacturer/claims/search',params={'q':'A'},headers={'Authorization':''})).status_code==401
+    assert ids.index(partial) > ids.index(a) and ids.index(partial) > ids.index(b)   # starts-with first
+    for q in (f' alpha{t} CASTINGS ', f'Alpha{t} Castings', f'{t} castings'):
+        assert any(x['id'] == a for x in await search(client, q))
+    detail = await client.get('/manufacturer/companies/' + b)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['id'] == b and detail.json()['capacity'] == '500 parts/month'
+    before = (await client.sql('SELECT count(*) FROM memberships'))[0][0]
+    await client.get('/manufacturer/companies/' + a)
+    assert (await client.sql('SELECT count(*) FROM memberships'))[0][0] == before   # viewing grants nothing
+    late = await seed(client, f'Alpha{t} Newly Seeded')
+    assert late in [x['id'] for x in await search(client, f'alpha{t}')]               # live, no cache
+    assert await search(client, 'no-match-xyz') == []
+    assert await search(client, f'{t[0]} ') == []                                       # under two letters
+    one = await client.get('/manufacturer/companies/search', params={'q': 'a'})
+    assert one.status_code == 422                                                       # one letter: refused
+    unauth = await client.get('/manufacturer/companies/search', params={'q': 'Alpha'},
+                              headers={'Authorization': ''})
+    assert unauth.status_code == 401
 
 
 async def test_same_names_owned_records_literal_wildcards(client):
     await client.get('/manufacturer/bootstrap')
-    first=await seed(client,'Twin Precision','Chennai')
-    second=await seed(client,'Twin Precision','Erode')
-    rows=(await client.get('/manufacturer/claims/search',params={'q':'Twin Precision'})).json()['results']
-    assert {r['id'] for r in rows}>={first,second}
-    assert (await client.get('/manufacturer/claims/companies/'+second)).json()['city']=='Erode'
+    t = uuid4().hex[:5]
+    first = await seed(client, f'Twin{t} Precision', 'Chennai')
+    second = await seed(client, f'Twin{t} Precision', 'Erode')
+    rows = await search(client, f'Twin{t} Precision')
+    assert {r['id'] for r in rows} == {first, second}
+    assert {r['city'] for r in rows} == {'Chennai', 'Erode'}                 # told apart by location
+    assert (await client.get('/manufacturer/companies/' + second)).json()['city'] == 'Erode'
     await client.sql("""INSERT INTO memberships(user_id,organization_id,membership_role)
-      SELECT id,CAST(:id AS uuid),'owner' FROM users WHERE clerk_user_id=:sub""",id=first,sub=client.user)
-    rows=(await client.get('/manufacturer/claims/search',params={'q':'Twin Precision'})).json()['results']
-    assert first not in [r['id'] for r in rows]
-    assert (await client.get('/manufacturer/claims/companies/'+first)).status_code==404
-    wildcard=await seed(client,'A_100% Works')
-    rows=(await client.get('/manufacturer/claims/search',params={'q':'A_100%'})).json()['results']
-    assert [r['id'] for r in rows]==[wildcard]
+      SELECT id,CAST(:id AS uuid),'owner' FROM users WHERE clerk_user_id=:sub""", id=first, sub=client.user)
+    rows = {r['id']: r for r in await search(client, f'Twin{t} Precision')}
+    assert rows[first]['ownedByYou'] and rows[first]['claimed'] and not rows[second]['claimed']
+    assert (await client.get('/manufacturer/companies/' + first)).json()['access'] == 'owner'
+    wildcard = await seed(client, f'A_100% Works {t}')
+    lookalike = await seed(client, f'AB1000 Works {t}')                       # would match if _ / % were wildcards
+    found = [r['id'] for r in await search(client, f'A_100% Works {t}')]
+    assert found == [wildcard] and lookalike not in found
 
 
 async def test_selection_cannot_create_duplicate_or_grant_ownership(client):
@@ -89,9 +101,7 @@ async def test_attached_import_package_sample(client):
     assert samples
     for sample in samples:
         org=await seed(client,sample['company_name'],sample['city'])
-        results=(await client.get('/manufacturer/claims/search',params={'q':'A','limit':50})).json()['results']
-        assert org in [r['id'] for r in results]
-        full=(await client.get('/manufacturer/claims/search',params={'q':sample['company_name'].swapcase()})).json()['results']
-        assert any(r['id']==org for r in full)
-        detail=(await client.get('/manufacturer/claims/companies/'+org)).json()
-        assert (detail['id'],detail['name'],detail['city'])==(org,sample['company_name'],sample['city'])
+        full=await search(client,sample['company_name'].swapcase())   # any case finds it
+        assert any(r['id']==org and r['city']==sample['city'] for r in full)
+        detail=(await client.get('/manufacturer/companies/'+org)).json()
+        assert (detail['id'],detail['companyName'],detail['city'])==(org,sample['company_name'],sample['city'])

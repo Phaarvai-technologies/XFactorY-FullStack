@@ -92,7 +92,9 @@ async def ready():
     try:
         problems = await missing_schema(engine)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "error", "detail": f"Database unreachable: {exc}"}, status_code=503)
+        # The reason goes to the server log only: it can name hosts, users or the database.
+        logging.getLogger("xy.health").warning("Readiness check failed: %s", exc)
+        return JSONResponse({"status": "error", "detail": "Database unreachable"}, status_code=503)
     if problems:
         return JSONResponse({"status": "error", "missing": problems, "fix": MIGRATION_HINT}, status_code=503)
     return {"status": "ok"}

@@ -120,6 +120,8 @@ export type ManufacturerList = {
   pageSize: number;
   rows: ManufacturerRow[];
   facets: { industries: string[]; countries: string[] };
+  /** Rows per record type with the other filters applied (the record type filter ignored). */
+  recordTypeCounts?: Record<RecordType, number>;
 };
 
 export type Certification = { name: string; body: string; fileName: string; status: string };

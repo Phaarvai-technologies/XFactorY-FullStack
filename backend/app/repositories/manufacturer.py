@@ -161,6 +161,14 @@ LISTED_COMPANY_SQL = f"""
 # Who may update an organization through the onboarding form: its active owner / admin.
 OWNER_ROLES_SQL = "('owner', 'admin')"
 
+# Onboarding lookup (search, details, selecting, same-name check) shows real companies only. A DEMO
+# record (sample data) stays visible to its own owner / admin, so an owner whose company an admin
+# classified as DEMO keeps access to it. Needs the :user_id parameter. (The importer, which must
+# see DEMO records to report real/demo conflicts, uses LISTED_COMPANY_SQL alone.)
+LOOKUP_VISIBLE_SQL = f"""(o.record_type = 'REAL' OR EXISTS (
+    SELECT 1 FROM memberships lv WHERE lv.organization_id = o.id AND lv.status = 'active'
+      AND lv.user_id = :user_id AND lv.membership_role IN {OWNER_ROLES_SQL}))"""
+
 
 def profile_flags(data: dict) -> dict[str, bool]:
     """Same completion rules as ManufacturerApp.handleProfileChange."""
@@ -480,9 +488,9 @@ class ManufacturerRepository:
             # statement sees a claim committed meanwhile - in one statement it would not).
             locked = (await self.db.execute(text(f"""
                 SELECT o.id, o.display_name FROM organizations o
-                WHERE o.id = CAST(:company_id AS uuid) AND {LISTED_COMPANY_SQL}
+                WHERE o.id = CAST(:company_id AS uuid) AND {LISTED_COMPANY_SQL} AND {LOOKUP_VISIBLE_SQL}
                 FOR UPDATE OF o
-            """), {"company_id": str(company_id)})).first()
+            """), {"company_id": str(company_id), "user_id": ctx["user_id"]})).first()
             row = None if locked is None else (await self.db.execute(text(f"""
                 SELECT CAST(:id AS uuid) AS id, CAST(:name AS text) AS display_name,
                        EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=CAST(:id AS uuid)
@@ -524,11 +532,12 @@ class ManufacturerRepository:
             SELECT o.id FROM organizations o
             LEFT JOIN organization_profiles op ON op.organization_id = o.id
             LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
-            WHERE {LISTED_COMPANY_SQL} AND o.id <> :organization_id
+            WHERE {LISTED_COMPANY_SQL} AND {LOOKUP_VISIBLE_SQL} AND o.id <> :organization_id
               AND lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) = :name
               AND lower(btrim(COALESCE(op.country_name, f.country_name, ''))) = :country
             LIMIT 1
-        """), {"organization_id": ctx["organization_id"], "name": name, "country": country})
+        """), {"organization_id": ctx["organization_id"], "name": name, "country": country,
+                "user_id": ctx["user_id"]})
         if clash is None:
             # Another user's company with this name + country may still be awaiting approval.
             clash = await self.db.scalar(text("""
@@ -570,7 +579,7 @@ class ManufacturerRepository:
               LEFT JOIN LATERAL (
                 SELECT city, state_province, country_name FROM facilities
                 WHERE organization_id = o.id AND is_headquarters AND status <> 'suspended' LIMIT 1) f ON true
-              WHERE {LISTED_COMPANY_SQL}
+              WHERE {LISTED_COMPANY_SQL} AND {LOOKUP_VISIBLE_SQL}
                 AND (lower(regexp_replace(btrim(o.display_name), '\\s+', ' ', 'g')) LIKE :contains ESCAPE '\\'
                      OR lower(regexp_replace(btrim(COALESCE(o.legal_name, '')), '\\s+', ' ', 'g'))
                         LIKE :contains ESCAPE '\\')
@@ -611,7 +620,7 @@ class ManufacturerRepository:
             LEFT JOIN LATERAL (
               SELECT city, state_province, country_name FROM facilities
               WHERE organization_id = o.id AND is_headquarters AND status <> 'suspended' LIMIT 1) f ON true
-            WHERE o.id = CAST(:id AS uuid) AND {LISTED_COMPANY_SQL}
+            WHERE o.id = CAST(:id AS uuid) AND {LISTED_COMPANY_SQL} AND {LOOKUP_VISIBLE_SQL}
         """), {"id": company_id, "user_id": user_id})).first()
         if r is None:
             raise LookupError("Company not found")
@@ -1208,7 +1217,7 @@ class ManufacturerRepository:
                    logo.object_key logo_object_key,cover.object_key cover_object_key,
                    mo.personal_information_completed,mo.company_information_completed,mo.location_completed,
                    mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage,
-                   mo.status approval_status,
+                   mo.status approval_status, o.record_type,
                    -- approval-first access of this user (app/manufacturer_access.py), same query
                    (SELECT row_to_json(x) FROM (__ACCESS_ROW__) x) AS access_row,
                    (SELECT ov.completeness FROM admin_manufacturer_overview ov
