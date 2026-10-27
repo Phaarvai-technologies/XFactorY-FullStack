@@ -564,6 +564,8 @@ export function CustomSignUpForm({
         redirectUrlComplete: callback,
         emailAddress: email.trim() || undefined,
         legalAccepted: consent,
+        // Always show Google's account chooser (never the Google account used last, silently).
+        oidcPrompt: "select_account",
       });
     } catch (error) {
       const parsed = parseClerkError(error);

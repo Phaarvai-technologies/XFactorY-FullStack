@@ -208,7 +208,8 @@ export type NoticeCode =
   | "oauth_failed"
   | "suspended"
   | "account_mismatch"
-  | "account_exists";
+  | "account_exists"
+  | "other_account_signed_out";
 
 /** `action: "sign-in"`: the page shows a Sign-in link next to the message. */
 export type Notice = { tone: "error" | "warn" | "ok"; message: string; action?: "sign-in" };
@@ -225,6 +226,10 @@ export const NOTICES: Record<NoticeCode, Notice> = {
     message: "This email is linked to an existing XfactorY account that uses a different sign-in. Please contact XfactorY support - do not create a new account.",
   },
   account_exists: { tone: "warn", message: ACCOUNT_EXISTS_MESSAGE, action: "sign-in" },
+  other_account_signed_out: {
+    tone: "warn",
+    message: "Another account was still signed in on this browser. It has been signed out - please sign in again.",
+  },
 };
 
 export function noticeFor(value: string | null | undefined): Notice | null {

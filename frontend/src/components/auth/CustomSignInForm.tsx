@@ -6,7 +6,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseClerkError } from "@/lib/auth/clerkErrors";
-import { endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
+import {
+  endSession,
+  signedInEmail,
+  signOutOtherAccount,
+  tokenForCreatedSession,
+  type ClerkLike,
+} from "@/lib/auth/clerkSession";
 import {
   authPageHref,
   checkRegistration,
@@ -175,9 +181,15 @@ export function CustomSignInForm({
     return !!signIn?.id && (signIn.status === "needs_second_factor" || signIn.status === "needs_client_trust");
   }
 
-  /** Clerk says this browser already has a session: same registration rule. */
-  async function continueExistingSession() {
+  /** Clerk says this browser already has a session. It is only continued when it is the account
+   * the person just typed (same registration rule); someone else's session is signed out. */
+  async function continueExistingSession(typedEmail?: string) {
     const current = clerk.session;
+    const active = signedInEmail(clerk);
+    if (!typedEmail || !active || active !== typedEmail.trim().toLowerCase()) {
+      await signOutOtherAccount(clerk);
+      return;
+    }
     const check = await checkRegistration(current ? await current.getToken().catch(() => null) : null);
     if (check.state === "registered") {
       router.push(redirectTo);
@@ -296,7 +308,7 @@ export function CustomSignInForm({
       ) {
         setFieldErrors((current) => ({ ...current, password: parsed.message }));
       } else if (parsed.code === "session_exists") {
-        await continueExistingSession();
+        await continueExistingSession(email);
         return;
       } else if (parsed.code === "too_many_requests") {
         setStatus({ tone: "warn", message: parsed.message });
@@ -507,7 +519,7 @@ async function handleDeviceCode() {
     const parsed = parseClerkError(error);
 
     if (parsed.code === "session_exists") {
-      await continueExistingSession();
+      await continueExistingSession(email);
       return;
     }
 
@@ -567,9 +579,17 @@ async function handleResendDeviceCode() {
         strategy: "oauth_google",
         redirectUrl: callback,
         redirectUrlComplete: callback,
+        // Always show Google's account chooser: on a shared computer Google would otherwise
+        // sign in silently with the Google account used last.
+        oidcPrompt: "select_account",
       });
     } catch (error) {
       const parsed = parseClerkError(error);
+      if (parsed.code === "session_exists") {
+        // Another account is still signed in here: sign it out instead of continuing as it.
+        await signOutOtherAccount(clerk);
+        return;
+      }
       setStatus({ tone: "error", message: parsed.message });
       setIsSubmitting(false);
     }

@@ -16,6 +16,8 @@ const h = vi.hoisted(() => {
     /** Sessions ended through Clerk's session.remove() (no navigation, unlike signOut()). */
     removed: [] as string[],
     search: new URLSearchParams(),
+    /** The account already signed in on this browser (shared-computer tests). */
+    current: null as null | { email: string; session: { id: string; getToken: () => Promise<string | null> } },
     pushed: [] as string[],
     replaced: [] as string[],
     requests: [] as { url: string; method: string; auth: string | null; body: unknown }[],
@@ -32,7 +34,12 @@ const clerkObject = {
   get client() {
     return { sessions: h.sessions };
   },
-  session: null,
+  get session() {
+    return h.current?.session ?? null;
+  },
+  get user() {
+    return h.current ? { primaryEmailAddress: { emailAddress: h.current.email } } : null;
+  },
   signOut: (...args: unknown[]) => h.signOut(...args),
 };
 vi.mock("@clerk/nextjs", () => ({ useClerk: () => clerkObject }));
@@ -65,6 +72,7 @@ beforeEach(() => {
   h.sessions = [];
   h.removed = [];
   h.search = new URLSearchParams();
+  h.current = null;
   h.pushed = [];
   h.replaced = [];
   h.requests = [];
@@ -224,6 +232,7 @@ describe("Sign-in", () => {
       strategy: "oauth_google",
       redirectUrl: "http://localhost:3000/sso-callback?intent=sign-in&redirect_url=%2Fvisionaries%2Fflow",
       redirectUrlComplete: "http://localhost:3000/sso-callback?intent=sign-in&redirect_url=%2Fvisionaries%2Fflow",
+      oidcPrompt: "select_account",                 // Google always asks which account
     });
     expect(JSON.parse(window.sessionStorage.getItem("xy-oauth-intent") ?? "{}")).toEqual({
       purpose: "sign-in", returnPath: "/visionaries/flow",
@@ -235,6 +244,44 @@ describe("Sign-in", () => {
     render(<CustomSignInForm staleSession />);
     expect(screen.getByText("Your account is ready. Please sign in to continue.")).toBeInTheDocument();
     await waitFor(() => expect(h.signOut).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("Shared computer: someone else is still signed in", () => {
+  it("password sign-in with a different email signs the other account out (never continues as it)", async () => {
+    h.current = { email: "priya@example.com", session: { id: "sess_priya", getToken: async () => "token-priya" } };
+    h.signIn.create = vi.fn(async () => { throw clerkError("session_exists", "You're already signed in."); });
+    render(<CustomSignInForm redirectTo="/app" />);
+    await fillSignIn("ravi@example.com");
+    await waitFor(() => expect(h.signOut).toHaveBeenCalledTimes(1));
+    expect(String((h.signOut.mock.calls[0][0] as { redirectUrl: string }).redirectUrl)).toContain("notice=other_account_signed_out");
+    expect(h.pushed).toEqual([]);                    // not taken into the other person's account
+    expect(h.requests).toEqual([]);                  // the other account's token is never used
+  });
+
+  it("the same person who is already signed in simply continues", async () => {
+    h.current = { email: "a@example.com", session: { id: "sess_a", getToken: async () => "token-a" } };
+    h.signIn.create = vi.fn(async () => { throw clerkError("session_exists", "You're already signed in."); });
+    registration("registered");
+    render(<CustomSignInForm redirectTo="/app" />);
+    await fillSignIn("A@Example.com");
+    await waitFor(() => expect(h.pushed).toEqual(["/app"]));
+    expect(h.signOut).not.toHaveBeenCalled();
+  });
+
+  it("Google while another account is signed in: that account is signed out first", async () => {
+    h.current = { email: "priya@example.com", session: { id: "sess_priya", getToken: async () => "token-priya" } };
+    h.signIn.authenticateWithRedirect = vi.fn(async () => { throw clerkError("session_exists", "You're already signed in."); });
+    render(<CustomSignInForm redirectTo="/app" />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue with Google" })));
+    await waitFor(() => expect(h.signOut).toHaveBeenCalledTimes(1));
+    expect(h.pushed).toEqual([]);
+  });
+
+  it("the notice after signing the other account out", () => {
+    h.search = new URLSearchParams("notice=other_account_signed_out");
+    render(<CustomSignInForm />);
+    expect(screen.getByText(/Another account was still signed in on this browser/)).toBeInTheDocument();
   });
 });
 
@@ -998,14 +1045,10 @@ describe("First Google sign-up succeeds the first time", () => {
   it("Clerk already made the new session active (sign-up no longer reported) → registration completes with it", async () => {
     intent({ purpose: "sign-up", returnPath: "/", flowToken: "flow-google" });
     createdSession("sess_active");
-    (clerkObject as { session: unknown }).session = { id: "sess_active", getToken: async () => "token-for-sess_active" };
+    h.current = { email: "new@example.com", session: { id: "sess_active", getToken: async () => "token-for-sess_active" } };
     h.signUp = { status: null, verifications: {} };
     h.backend["POST /identity/registration/complete"] = () => ({ status: 200, json: { registered: true, alreadyRegistered: false } });
-    try {
-      await runCallback();
-      expect(h.replaced).toEqual(["/"]);
-    } finally {
-      (clerkObject as { session: unknown }).session = null;
-    }
+    await runCallback();
+    expect(h.replaced).toEqual(["/"]);
   });
 });

@@ -21,8 +21,27 @@ type SessionLike = {
 export type ClerkLike = {
   client?: { sessions?: SessionLike[] } | null;
   session?: SessionLike | null;
+  /** The signed-in user (when a session is active). */
+  user?: { primaryEmailAddress?: { emailAddress?: string } | null } | null;
   signOut: (options?: { sessionId?: string; redirectUrl?: string }) => Promise<unknown>;
 };
+
+/** Email of the account currently signed in on this browser ("" when none / unknown). */
+export function signedInEmail(clerk: ClerkLike): string {
+  return (clerk.user?.primaryEmailAddress?.emailAddress ?? "").trim().toLowerCase();
+}
+
+/**
+ * Someone else's session is still active on this browser (a shared computer where the previous
+ * person did not sign out). Never continue as that account: sign it out and come back to this
+ * page with a notice, so the new person signs in with their own account.
+ */
+export async function signOutOtherAccount(clerk: ClerkLike): Promise<void> {
+  const url = new URL(window.location.href);
+  url.searchParams.set("notice", "other_account_signed_out");
+  url.searchParams.delete("continue");
+  await clerk.signOut({ redirectUrl: `${url.pathname}${url.search}` });
+}
 
 type SetActive = (params: { session: string }) => Promise<unknown>;
 
