@@ -215,7 +215,7 @@ async def test_record_types_archive_and_metrics(client, no_clerk):
     before = (await client.get("/admin/overview", headers=admin)).json()["cards"]
 
     r = await client.patch(f"/admin/manufacturers/{demo}/admin-fields", headers=admin,
-                           json={"record_type": "DEMO", "entry_source": "ADMIN_ASSISTED", "referral_source": "Trade fair"})
+                           json={"record_type": "DEMO", "entry_source": "ADMIN_ASSISTED", "referral_source": "Trade fair", "reason": "Checked with the company"})
     assert r.json()["manufacturer"]["recordType"] == "DEMO"
     after = (await client.get("/admin/overview", headers=admin)).json()["cards"]
     assert after["totalManufacturers"] == before["totalManufacturers"] - 1

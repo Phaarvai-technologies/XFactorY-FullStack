@@ -15,7 +15,7 @@ from app import manufacturer_access as access
 from app import manufacturer_approval as approval
 from app import notifications
 from app.admin import accounts
-from app.admin.auth import AdminContext
+from app.admin.auth import ACCOUNT_ROLES, CLASSIFY_ROLES, REVIEW_ROLES, AdminContext, require_role
 from app.admin.repository import (
     REQUIRED_FIELDS,
     REVIEW_TO_DB,
@@ -182,6 +182,7 @@ class AdminService:
         for r in rows:
             r["assignedAdminName"] = names.get(r["assignedAdminId"] or "")
         return {"total": data["total"], "page": page, "pageSize": page_size, "rows": rows,
+                "recordTypeCounts": data["recordTypeCounts"],
                 "facets": {"industries": data["facets"]["industries"] or [],
                            "countries": data["facets"]["countries"] or []}}
 
@@ -567,6 +568,15 @@ class AdminService:
 
     # ------------------------------------------------------------------ XY-ADMIN-07 / 08
     async def admin_fields(self, admin: AdminContext, org_id: str, body: dict) -> dict:
+        # Role rules first, before anything is read or changed.
+        if body.get("review_status"):
+            require_role(admin, REVIEW_ROLES, "Only administrators, operators and verification analysts can "
+                                              "approve, correct or reject applications.")
+        if body.get("record_type") is not None:
+            require_role(admin, CLASSIFY_ROLES, "Only administrators and operators can change whether a "
+                                                "company is real or demo data.")
+            if not (body.get("reason") or "").strip():
+                raise HTTPException(422, "Add a reason for changing the record type.")
         await self._company_only(org_id)
         meta = await self.repo.org_meta(org_id)
         if not meta:
@@ -760,6 +770,7 @@ class AdminService:
 
     async def archive(self, admin: AdminContext, org_ids: list[str], archived: bool, reason: str | None,
                       demo_test_only: bool = False) -> dict:
+        require_role(admin, CLASSIFY_ROLES, "Only administrators and operators can archive or restore manufacturers.")
         skipped = []
         if demo_test_only:
             types = await self.repo.record_types(org_ids)
@@ -961,8 +972,15 @@ class AdminService:
         u = await self.repo.user(user_id)
         if not u:
             raise HTTPException(404, "User not found")
+        require_role(admin, ACCOUNT_ROLES, "Only administrators, operators and support specialists can "
+                                           "suspend or reactivate accounts.")
         if str(u["id"]) == str(admin.user_id):
             raise HTTPException(422, "You cannot suspend your own account.")
+        if (u["email"] or "").strip().lower() == self.settings.admin_default_email.strip().lower():
+            raise HTTPException(422, "The built-in administrator cannot be suspended.")
+        if await self.repo.is_admin(str(u["id"])) and "platform_administrator" not in admin.roles:
+            # Lower roles must not be able to lock an administrator (or each other) out.
+            raise HTTPException(403, "Only administrators can suspend or reactivate an admin account.")
         target = "suspended" if suspend else "active"
         if u["account_status"] == "deactivated":
             raise HTTPException(422, "This account was deleted in Clerk and cannot be changed here.")

@@ -45,7 +45,9 @@ async def upsert_user(
                 :clerk_user_id, :email, :display_name, :first_name, :last_name, 'active'
             )
             ON CONFLICT (clerk_user_id) DO UPDATE SET
-                email = EXCLUDED.email,
+                -- Only a verified address replaces the stored one (an unverified address could be
+                -- someone else's, e.g. an admin's, typed into the person's Clerk profile).
+                email = CASE WHEN :email_verified THEN EXCLUDED.email ELSE users.email END,
                 display_name = EXCLUDED.display_name,
                 first_name = COALESCE(EXCLUDED.first_name, users.first_name),
                 last_name = COALESCE(EXCLUDED.last_name, users.last_name),
@@ -60,6 +62,7 @@ async def upsert_user(
             "display_name": display_name or email,
             "first_name": first_name,
             "last_name": last_name,
+            "email_verified": bool(email_verified),
         },
     )
     user_id = result.scalar_one()

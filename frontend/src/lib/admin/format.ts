@@ -110,7 +110,7 @@ export function reviewTone(status: ReviewStatus): string {
 }
 
 export function recordTone(type: RecordType): string {
-  return type === "REAL" ? "badge-neutral" : "badge-purple";
+  return type === "REAL" ? "badge-info" : "badge-purple";
 }
 
 export function accountTone(status: AccountStatus): string {

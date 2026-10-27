@@ -16,6 +16,7 @@ from app.identity.auth import CurrentActor
 from app.visionary.schemas import (
     IdeaIn, ProfileIn, ProjectUpdateIn, RequestDraftIn, RequestIn, RequirementsIn, StageIn,
 )
+from app.visionary.ai import AiAcceptedIn, AiMessageIn, Panel, VisionaryAi
 from app.visionary.service import VisionaryService
 
 router = APIRouter(prefix="/visionary", tags=["visionary"])
@@ -99,6 +100,37 @@ async def request_draft(manufacturer_id: str, actor: CurrentActor, svc: Service)
 async def save_request_draft(manufacturer_id: str, body: RequestDraftIn, actor: CurrentActor, svc: Service):
     """Request form "Save"."""
     return await svc.save_draft(actor, manufacturer_id, body.model_dump())
+
+
+# ------------------------------------------------------------------ AI assistant (optional)
+def ai_service(session: Annotated[AsyncSession, Depends(get_session)],
+               settings: Annotated[Settings, Depends(get_settings)]) -> VisionaryAi:
+    return VisionaryAi(session, settings)
+
+
+Ai = Annotated[VisionaryAi, Depends(ai_service)]
+
+
+@router.get("/ai/{panel}")
+async def ai_history(panel: Panel, actor: CurrentActor, ai: Ai, new_project: bool = False):
+    """The signed-in Visionary's conversation for this screen of the current project:
+    {configured, messages, contextChanged}. "idea" = Your idea help, "guide" = AI Guide.
+    new_project=true: Your idea opened by "Add Project" (the next project's conversation)."""
+    return await ai.history(actor, panel, new_project)
+
+
+@router.post("/ai/{panel}/messages")
+async def ai_message(panel: Panel, body: AiMessageIn, actor: CurrentActor, ai: Ai):
+    """Ask the assistant. `form`: the screen's current (possibly unsaved) values. Returns the
+    stored user turn and the reply; proposed field values are in reply.suggestions[].fields and
+    are never applied here. 503/502 when the assistant is off or unavailable."""
+    return await ai.send(actor, panel, body)
+
+
+@router.post("/ai/{panel}/accepted")
+async def ai_accepted(panel: Panel, body: AiAcceptedIn, actor: CurrentActor, ai: Ai):
+    """Records a suggestion the user confirmed and applied (the values are saved by the screen)."""
+    return await ai.accepted(actor, panel, body)
 
 
 @router.get("/requests")

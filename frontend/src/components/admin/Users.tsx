@@ -299,6 +299,12 @@ export function UserDetailView({ id }: { id: string }) {
   }
 
   const isSelf = me?.id === u.id;
+  // Suspend / reactivate: administrators, operators and support specialists; an admin account
+  // only by an administrator (the backend refuses everything else with a message).
+  const roles = me?.roles ?? [];
+  const canChangeStatus =
+    (roles.includes("platform_administrator") ||
+      (!u.isAdmin && (roles.includes("platform_operator") || roles.includes("support_specialist"))));
   return (
     <>
       <PageHeader
@@ -307,6 +313,7 @@ export function UserDetailView({ id }: { id: string }) {
         subtitle={`${u.email}${u.phone ? ` · ${u.phone}` : ""} · Registered ${fmtDate(u.registeredAt)}`}
         actions={
           !isSelf &&
+          canChangeStatus &&
           u.accountStatus !== "deactivated" &&
           (u.accountStatus === "active" ? (
             <button type="button" className="btn-danger-ghost adm-btn-md" onClick={() => setAction("suspend")}>

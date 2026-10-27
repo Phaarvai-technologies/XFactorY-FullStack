@@ -52,8 +52,9 @@ async def _approved_complete_manufacturer(c, name):
     h = hdr(c, sub)
     assert (await c.post("/manufacturer/account", headers=h, json=account(name))).status_code == 201
     org = await own_org(c, sub)
-    await complete_profile(c, h)
+    # approval first: the remaining sections open only after XfactorY approves the application
     assert (await approve_company(c, org)).status_code == 200
+    await complete_profile(c, h)
     return sub, h, org
 
 

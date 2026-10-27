@@ -27,12 +27,14 @@ type DashboardScreenProps = {
   onOpenProfileWizard: (jumpToNextIncomplete: boolean) => void;
   /** Set when XfactorY asked for corrections to the submitted company details. */
   onFixCompanyDetails?: () => void;
-    lock?: {
+  /** Approval first: set while the application is awaiting review, needs corrections or was
+   * rejected. Only the dashboard home stays open; every section shows `message` instead. */
+  lock?: {
     message: string;
-    detail: string | null;
-    actionLabel: string | null;
+    detail?: string | null;
+    actionLabel?: string | null;
   } | null;
-
+  /** Approved member who is not the company's primary user: the shared company profile is read-only. */
   profileLockedMessage?: string | null;
   /** The user's update requests for companies managed by someone else (status and feedback). */
   updateRequests?: CompanyUpdateRequest[];
@@ -121,8 +123,22 @@ export function DashboardScreen({
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
 
   function showPanel(next: DashboardPanel) {
+    if (lock && next !== "home") {
+      showToast(lock.message); // locked until XfactorY approves: stay on the dashboard
+      return;
+    }
     setPanel(next);
     window.scrollTo(0, 0);
+  }
+
+  /** Opening the profile wizard (also from inside the Company Profile panel). */
+  function openProfileWizard(jumpToNextIncomplete: boolean) {
+    const blocked = lock?.message ?? profileLockedMessage;
+    if (blocked) {
+      showToast(blocked);
+      return;
+    }
+    onOpenProfileWizard(jumpToNextIncomplete);
   }
 
   return (
@@ -223,9 +239,11 @@ export function DashboardScreen({
                 <div className="welcome-next-text">
                   Next step: <b>{nextStepLabel}</b>
                 </div>
-                <button className="btn-primary" type="button" onClick={() => onOpenProfileWizard(true)}>
-                  Complete remaining details
-                </button>
+                {lock ? null : (
+                  <button className="btn-primary" type="button" onClick={() => openProfileWizard(true)}>
+                    Complete remaining details
+                  </button>
+                )}
               </div>
             </div>
 
@@ -337,7 +355,7 @@ export function DashboardScreen({
                 className="btn-primary"
                 type="button"
                 style={{ marginTop: 22 }}
-                onClick={() => onOpenProfileWizard(false)}
+                onClick={() => openProfileWizard(false)}
               >
                 Open profile setup
               </button>

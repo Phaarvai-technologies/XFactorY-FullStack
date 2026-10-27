@@ -50,9 +50,19 @@ async def create_company(db: AsyncSession, *, admin_id: UUID, roles: tuple[str, 
             return str(done), False
     row = {"name": data["name"], "registration_id": data.get("registration_id", ""), "website": data.get("website", ""),
            "country": data.get("country", ""), "city": data.get("city", "")}
+    record_type = data.get("record_type") or "REAL"
     candidates = (await db.execute(text(EXISTING_SQL), {
         "norm": normalize_company_name(row["name"]), "reg": row["registration_id"].lower()})).all()
-    verdict, found = match(row, candidates)
+    # Same rules as the importer: a match of the same type is a duplicate; a match of the other
+    # type only (real vs demo) is a classification conflict. The existing record is never converted.
+    verdict, found = match(row, [c for c in candidates if c.record_type == record_type])
+    if verdict == "new":
+        other, twin = match(row, [c for c in candidates if c.record_type != record_type])
+        if other == "present":
+            raise CreateError(f"This company already exists as {twin.record_type.lower()} data: "
+                              f"{twin.display_name}. Change that record's type instead of adding it again.",
+                              409, "classification_conflict", str(twin.id))
+        verdict = other if other == "ambiguous" else verdict
     if verdict == "present":
         raise CreateError(f"This company already exists: {found.display_name}. Open it instead of adding it again.",
                           409, "duplicate_company", str(found.id))
@@ -65,9 +75,9 @@ async def create_company(db: AsyncSession, *, admin_id: UUID, roles: tuple[str, 
     org_id = await db.scalar(text("""
         INSERT INTO organizations (display_name, legal_name, organization_type, status, website_domain,
                                    entry_source, record_type, onboarding_source)
-        VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'ADMIN_ASSISTED', 'REAL', :src)
+        VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'ADMIN_ASSISTED', :rt, :src)
         RETURNING id
-    """), {"name": data["name"], "web": website_domain(data.get("website", "")), "src": SOURCE})
+    """), {"name": data["name"], "web": website_domain(data.get("website", "")), "src": SOURCE, "rt": record_type})
     await db.execute(text("""
         INSERT INTO organization_profiles (organization_id, registration_id, contact_email, contact_phone,
                                            address_line1, country_code, country_name, company_category,
@@ -88,7 +98,7 @@ async def create_company(db: AsyncSession, *, admin_id: UUID, roles: tuple[str, 
                 "city": data.get("city", ""), "state": data.get("state", ""), "country": data.get("country", ""),
                 "code": code})
     await record_event(db, event="created", role="admin", source=SOURCE, organization_id=org_id, actor=admin_id,
-                       details={"reason": data.get("reason") or None}, key=key)
+                       details={"reason": data.get("reason") or None, "record_type": record_type}, key=key)
     await db.execute(text("""
         INSERT INTO admin_change_history (manufacturer_id, field_changed, old_value, new_value, changed_by, reason)
         VALUES (:o, 'Company created', NULL, :n, :a, NULLIF(:r, ''))

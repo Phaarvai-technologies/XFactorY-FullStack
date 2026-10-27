@@ -36,6 +36,63 @@ export type ManufacturerMatches = {
   listingsTotal: number;
 };
 
+// ---------------------------------------------------------------- AI assistant (optional)
+export type AiPanel = "idea" | "guide";
+export type AiFields = Partial<{
+  project: string;
+  idea: string;
+  product: string;
+  industry: string;
+  machines: string[];
+  additional_requirements: string;
+}>;
+export type AiSuggestion = {
+  id: string;
+  title: string;
+  summary: string;
+  target_users: string;
+  problem: string;
+  why_it_fits: string;
+  materials_or_processes: string;
+  first_step: string;
+  assumptions: string;
+  /** Proposed values for existing fields (validated by the backend); applied only after confirmation. */
+  fields: AiFields;
+};
+export type AiMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  mode?: "chat" | "start" | "explore" | "refine";
+  chips?: string[];
+  suggestions?: AiSuggestion[];
+  refreshNote?: string;
+  /** Suggestion ids the user already applied. */
+  accepted?: string[];
+};
+export type AiHistory = { configured: boolean; messages: AiMessage[]; contextChanged: string[] };
+/** The screen's current values (unsaved edits included); sent so the reply uses the latest input. */
+export type AiForm = Partial<{
+  project: string;
+  idea: string;
+  product: string;
+  industry: string;
+  manufacturing_location: string;
+  machines: string[];
+  quantity: number;
+  budget: number;
+  timeline: string;
+  additional_requirements: string;
+}>;
+export type AiSendBody = {
+  message: string;
+  mode: "chat" | "start" | "explore" | "refine";
+  form?: AiForm;
+  request_id: string;
+  /** Your idea opened by "Add Project": the next project's conversation, no saved project values. */
+  new_project?: boolean;
+};
+
 export function errorMessage(error: unknown, fallback: string): string {
   // 4xx answers carry a readable "detail"; validation lists (422) and server errors do not.
   if (error instanceof ApiError && error.status > 0 && error.status < 500) {
@@ -121,6 +178,16 @@ export function useVisionaryApi() {
           method: "PUT",
           body: JSON.stringify(draft),
         }),
+      /** AI assistant: conversation for this screen of the current project (backend-stored). */
+      aiHistory: (panel: AiPanel, newProject = false) =>
+        call<AiHistory>(`/ai/${panel}${newProject ? "?new_project=true" : ""}`),
+      aiSend: (panel: AiPanel, body: AiSendBody) =>
+        call<{ messages: AiMessage[] }>(`/ai/${panel}/messages`, { method: "POST", body: JSON.stringify(body) }),
+      aiAccepted: (
+        panel: AiPanel,
+        body: { message_id: string; suggestion_id: string; fields: string[]; new_project?: boolean },
+      ) =>
+        call<{ accepted: boolean }>(`/ai/${panel}/accepted`, { method: "POST", body: JSON.stringify(body) }),
       sendRequest: (request: RequestInput) =>
         call<ManufacturingRequest>("/requests", { method: "POST", body: JSON.stringify(request) }),
     };

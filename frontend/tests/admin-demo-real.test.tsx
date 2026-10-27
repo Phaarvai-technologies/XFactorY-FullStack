@@ -144,6 +144,43 @@ describe("Manufacturer detail: changing Real / Demo", () => {
   });
 });
 
+describe("Manufacturer detail: actions follow the admin's role", () => {
+  const ORG = detailFixture.manufacturer.id as string;
+  function serve() {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(detailFixture), { status: 200 }));
+    render(<AdminHostContext.Provider value={host(`/admin/manufacturers/${ORG}`, "tab=onboarding")}>
+      <ManufacturerDetail id={ORG} />
+    </AdminHostContext.Provider>);
+  }
+
+  it("support specialists cannot decide applications or archive", async () => {
+    me.current = { id: "a", roles: ["support_specialist"] };
+    serve();
+    expect(await screen.findByText(/Only administrators, operators and verification analysts can approve/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save status" })).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Actions/ })[0]);
+    expect(await screen.findByRole("menuitem", { name: "View machinery" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+  });
+
+  it("verification analysts decide applications but do not archive", async () => {
+    me.current = { id: "a", roles: ["verification_analyst"] };
+    serve();
+    expect(await screen.findByRole("button", { name: "Save status" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Actions/ })[0]);
+    await screen.findByRole("menuitem", { name: "View machinery" });
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+  });
+
+  it("operators can archive", async () => {
+    me.current = { id: "a", roles: ["platform_operator"] };
+    serve();
+    await screen.findByRole("button", { name: "Save status" });
+    fireEvent.click(screen.getAllByRole("button", { name: /^Actions/ })[0]);
+    expect(await screen.findByRole("menuitem", { name: /^(Archive|Restore)$/ })).toBeInTheDocument();
+  });
+});
+
 describe("Onboarding & review: Real / Demo / Real + demo", () => {
   function serveQueue() {
     const urls: string[] = [];

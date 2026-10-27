@@ -160,6 +160,9 @@ export function ManufacturerDetail({ id }: { id: string }) {
   const tab = (TABS.find((t) => t.key === search.get("tab"))?.key ?? "company") as TabKey;
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const me = useAdminMe();
+  // Archive / restore: administrators and operators (the backend checks the same roles).
+  const canArchive = !!me?.roles.some((r) => r === "platform_administrator" || r === "platform_operator");
 
   if (!d) return loading ? <Loading /> : <ErrorBox message={error?.message ?? "Could not load"} onRetry={reload} />;
 
@@ -190,9 +193,11 @@ export function ManufacturerDetail({ id }: { id: string }) {
             items={[
               { label: "Onboarding & review", icon: <ClipboardCheck size={15} />, onSelect: () => setTab("onboarding") },
               { label: "View machinery", icon: <Cog size={15} />, onSelect: () => go(`/admin/machinery?org=${id}`) },
-              m.isArchived
-                ? { label: "Restore", icon: <ArchiveRestore size={15} />, group: true, onSelect: () => setArchiveOpen(true) }
-                : { label: "Archive", icon: <Archive size={15} />, group: true, danger: true, onSelect: () => setArchiveOpen(true) },
+              ...(!canArchive
+                ? []
+                : [m.isArchived
+                    ? { label: "Restore", icon: <ArchiveRestore size={15} />, group: true, onSelect: () => setArchiveOpen(true) }
+                    : { label: "Archive", icon: <Archive size={15} />, group: true, danger: true, onSelect: () => setArchiveOpen(true) }]),
             ]}
           />
         }
@@ -713,7 +718,14 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
   /** Needs correction: the exact fields the applicant must correct. */
   const [fix, setFix] = useState<Set<string>>(() => new Set(d.pendingSubmission?.correctionFields ?? []));
   const askFields = status === "NEEDS_CORRECTION" && d.pendingSubmission !== null;
+  // Approve / correct / reject: administrators, operators and verification analysts.
+  const canReview = !!me?.roles.some((r) =>
+    r === "platform_administrator" || r === "platform_operator" || r === "verification_analyst");
+  // Real / Demo: administrators and operators, with a confirmation and a reason (backend checks the same).
+  const canClassify = !!me?.roles.some((r) => r === "platform_administrator" || r === "platform_operator");
   const [recordType, setRecordType] = useState<RecordType>(m.recordType);
+  const [classifying, setClassifying] = useState(false);
+  const [classifyReason, setClassifyReason] = useState("");
   const [entrySource, setEntrySource] = useState<EntrySource>(m.entrySource);
   const [referral, setReferral] = useState(m.referralSource ?? "");
   const [note, setNote] = useState("");
@@ -918,6 +930,12 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
         ) : null}
 
         <Section title="Review status" note={<ReviewBadge status={m.reviewStatus} />}>
+          {!canReview ? (
+            <p className="field-hint">
+              Only administrators, operators and verification analysts can approve, correct or reject applications.
+            </p>
+          ) : (
+          <>
           <label htmlFor="rv-status">Change status</label>
           <select id="rv-status" value={status} onChange={(e) => setStatus(e.target.value as ReviewStatus)}>
             {REVIEW_ORDER.map((s) => (
@@ -996,6 +1014,8 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
               </button>
             )}
           </div>
+          </>
+          )}
         </Section>
 
         <Section title="Assignment">
@@ -1024,17 +1044,40 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
         </Section>
 
         <Section title="Record classification">
-          <div className="form-grid adm-form-2">
-            <div>
-              <label htmlFor="rv-record">Record type</label>
-              <select id="rv-record" value={recordType} onChange={(e) => setRecordType(e.target.value as RecordType)}>
-                {RECORD_ORDER.map((r) => (
-                  <option key={r} value={r}>
-                    {RECORD_LABELS[r]}
-                  </option>
-                ))}
-              </select>
+          <div className="adm-badge-row">
+            <span className="adm-muted">Currently:</span> <RecordBadge type={m.recordType} />
+          </div>
+          {canClassify ? (
+            <div className="form-grid adm-form-2">
+              <div>
+                <label htmlFor="rv-record">Change to</label>
+                <select id="rv-record" value={recordType} onChange={(e) => setRecordType(e.target.value as RecordType)}>
+                  {RECORD_ORDER.filter((r) => r !== "TEST" || m.recordType === "TEST").map((r) => (
+                    <option key={r} value={r}>
+                      {RECORD_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="adm-btn-row">
+                <button
+                  type="button"
+                  className="btn-ghost adm-btn-sm"
+                  disabled={busy !== null || recordType === m.recordType}
+                  onClick={() => {
+                    setClassifyReason("");
+                    setErr(null);
+                    setClassifying(true);
+                  }}
+                >
+                  Change classification…
+                </button>
+              </div>
             </div>
+          ) : (
+            <p className="field-hint">Only administrators and operators can change whether a company is real or demo data.</p>
+          )}
+          <div className="form-grid adm-form-2">
             <div>
               <label htmlFor="rv-entry">Entry source</label>
               <select id="rv-entry" value={entrySource} onChange={(e) => setEntrySource(e.target.value as EntrySource)}>
@@ -1062,15 +1105,11 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             <button
               type="button"
               className="btn-primary adm-btn-sm"
-              disabled={
-                busy !== null ||
-                (recordType === m.recordType && entrySource === m.entrySource && referral.trim() === (m.referralSource ?? ""))
-              }
+              disabled={busy !== null || (entrySource === m.entrySource && referral.trim() === (m.referralSource ?? ""))}
               onClick={() =>
                 void patch(
                   "record",
                   {
-                    ...(recordType !== m.recordType ? { record_type: recordType } : {}),
                     ...(entrySource !== m.entrySource ? { entry_source: entrySource } : {}),
                     ...(referral.trim() !== (m.referralSource ?? "") ? { referral_source: referral.trim() } : {}),
                   },
@@ -1082,6 +1121,43 @@ function OnboardingTab({ d, onChange }: { d: Detail; onChange: (d: Detail) => vo
             </button>
           </div>
         </Section>
+        {classifying && (
+          <Modal title={`Mark as ${RECORD_LABELS[recordType]} data`} onClose={() => setClassifying(false)}>
+            <p className="adm-modal-text">
+              {recordType === "REAL"
+                ? "Real data is shown to Visionaries once the company is approved and its profile is complete."
+                : "Demo data is hidden from Visionaries and cannot be booked. Approval, profile and users stay unchanged."}
+            </p>
+            <label htmlFor="rv-record-reason">Reason</label>
+            <textarea
+              id="rv-record-reason"
+              rows={2}
+              value={classifyReason}
+              onChange={(e) => setClassifyReason(e.target.value)}
+            />
+            {err?.where === "classify" && <p className="field-error">{err.msg}</p>}
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary-full" onClick={() => setClassifying(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy !== null || !classifyReason.trim()}
+                onClick={async () => {
+                  const ok = await patch(
+                    "classify",
+                    { record_type: recordType, reason: classifyReason.trim() },
+                    `Marked as ${RECORD_LABELS[recordType]} data`,
+                  );
+                  if (ok) setClassifying(false);
+                }}
+              >
+                Mark as {RECORD_LABELS[recordType]}
+              </button>
+            </div>
+          </Modal>
+        )}
 
         <Section title={`Internal notes (${d.notes.length})`} note={<span className="adm-muted">Private unless shared with the manufacturer</span>}>
           <textarea rows={3} placeholder={shareNote ? "Write a message for the manufacturer…" : "Add a note for other admins…"} value={note} onChange={(e) => setNote(e.target.value)} aria-label="New note" />

@@ -1,7 +1,11 @@
 """Import manufacturer companies from a CSV file, without duplicates.
 
-    PYTHONPATH=. python -m app.import_manufacturers companies.csv --dry-run   # report only
-    PYTHONPATH=. python -m app.import_manufacturers companies.csv             # import
+    PYTHONPATH=. python -m app.import_manufacturers companies.csv --record-type REAL --dry-run   # report only
+    PYTHONPATH=. python -m app.import_manufacturers companies.csv --record-type REAL             # import
+    PYTHONPATH=. python -m app.import_manufacturers samples.csv --record-type DEMO               # demo data
+
+--record-type is required: REAL (real companies) or DEMO (sample data for demos, never shown to
+Visionaries). Every company the run inserts gets that type.
 
 Columns (header names are case-insensitive; only a company name is required):
     company_name | name | company        country           state | state_province
@@ -30,6 +34,11 @@ earlier row of the same file) by
 A company is never identified by its name alone: a row whose name exists but which has no
 location or identifier to compare is reported as AMBIGUOUS and skipped (fix the row and re-run).
 Re-running the same file therefore inserts nothing new. Everything runs in one transaction.
+
+Real and demo data never mix: a row matching a company of the OTHER type (by the same rules) is
+reported as a CONFLICT and skipped. The existing record is never converted; an admin decides
+(change its type with a reason, or archive the sample). When a company exists as both types, the
+record of the import's own type is the match. Archived records are ignored.
 """
 from __future__ import annotations
 
@@ -51,6 +60,7 @@ from app.repositories.manufacturer import COUNTRY_CODES, LISTED_COMPANY_SQL, nor
 from app.core.cli import run as run_cli
 
 SOURCE = "database_import"
+RECORD_TYPES = ("REAL", "DEMO")   # TEST records are created by tests only, never imported
 
 ALIASES = {
     "name": ("company_name", "name", "company", "manufacturer", "manufacturer_name"),
@@ -98,6 +108,8 @@ class Report:
     present: list[tuple[int, str, str, str]] = field(default_factory=list)
     ambiguous: list[tuple[int, str, str]] = field(default_factory=list)
     invalid: list[tuple[int, str]] = field(default_factory=list)
+    # (line, name, existing id, existing name, existing record type): same company, other type
+    conflicts: list[tuple[int, str, str, str, str]] = field(default_factory=list)
 
 
 EXISTING_SQL = f"""
@@ -106,7 +118,8 @@ EXISTING_SQL = f"""
            lower(btrim(COALESCE(op.registration_id, ''))) AS reg,
            lower(btrim(COALESCE(o.website_domain, ''))) AS web,
            lower(btrim(COALESCE(op.country_name, f.country_name, ''))) AS country,
-           lower(btrim(COALESCE(f.city, ''))) AS city
+           lower(btrim(COALESCE(f.city, ''))) AS city,
+           o.record_type
     FROM organizations o
     LEFT JOIN organization_profiles op ON op.organization_id = o.id
     LEFT JOIN LATERAL (SELECT city, country_name FROM facilities
@@ -155,7 +168,10 @@ async def ensure_batch(session, *, reference: str, content_sha256: str, actor: s
 
 
 async def import_rows(session, rows: list[dict], *, reference: str = "(rows passed in code)",
-                      content_sha256: str | None = None, actor: str | None = None) -> Report:
+                      content_sha256: str | None = None, actor: str | None = None,
+                      record_type: str = "REAL") -> Report:
+    if record_type not in RECORD_TYPES:
+        raise ValueError(f"record_type must be one of {', '.join(RECORD_TYPES)}")
     onboarding_source.require(SOURCE)
     report = Report()
     await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended('xy-import-manufacturers', 0))"))
@@ -170,7 +186,15 @@ async def import_rows(session, rows: list[dict], *, reference: str = "(rows pass
             continue
         candidates = (await session.execute(text(EXISTING_SQL), {
             "norm": normalize_company_name(row["name"]), "reg": row["registration_id"].lower()})).all()
-        verdict, found = match(row, candidates)
+        # the import's own type first; a match of the other type only is a conflict
+        verdict, found = match(row, [c for c in candidates if c.record_type == record_type])
+        if verdict == "new":
+            other, twin = match(row, [c for c in candidates if c.record_type != record_type])
+            if other == "present":
+                report.conflicts.append((number, row["name"], twin.id, twin.display_name, twin.record_type))
+                continue
+            if other == "ambiguous":
+                verdict = "ambiguous"
         if verdict == "present":
             report.present.append((number, row["name"], found.id, found.display_name))
             continue
@@ -183,10 +207,11 @@ async def import_rows(session, rows: list[dict], *, reference: str = "(rows pass
         org_id = await session.scalar(text("""
             INSERT INTO organizations (display_name, legal_name, organization_type, status, website_domain,
                                        entry_source, record_type, onboarding_source, import_batch_id)
-            VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'IMPORTED', 'REAL',
+            VALUES (:name, :name, 'manufacturer', 'claim_pending', NULLIF(:web, ''), 'IMPORTED', :rt,
                     :src, :batch)
             RETURNING id
-        """), {"name": row["name"], "web": website_domain(row["website"]), "src": SOURCE, "batch": batch_id})
+        """), {"name": row["name"], "web": website_domain(row["website"]), "src": SOURCE, "batch": batch_id,
+                "rt": record_type})
         await session.execute(text("""
             INSERT INTO organization_profiles (organization_id, registration_id, contact_email, contact_phone,
                                                address_line1, country_code, country_name, company_category,
@@ -207,7 +232,7 @@ async def import_rows(session, rows: list[dict], *, reference: str = "(rows pass
         from app.manufacturer_approval import record_event
         await record_event(session, event="imported", role="system", source=SOURCE, organization_id=org_id,
                            import_batch_id=batch_id, key=f"imported:{org_id}",
-                           details={"line": number, "reference": reference})
+                           details={"line": number, "reference": reference, "record_type": record_type})
         report.inserted.append((number, row["name"], str(org_id)))
     return report
 
@@ -217,6 +242,8 @@ async def main(argv: list[str] | None = None) -> int:
     parser.add_argument("csv", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="report what would happen; change nothing")
     parser.add_argument("--actor", help="operator or job name recorded on the import batch (default: OS user)")
+    parser.add_argument("--record-type", required=True, choices=RECORD_TYPES, type=str.upper,
+                        help="REAL for real companies, DEMO for sample data (required)")
     args = parser.parse_args(argv)
     from app.core.database import SessionFactory, engine
 
@@ -224,7 +251,7 @@ async def main(argv: list[str] | None = None) -> int:
     async with SessionFactory() as session:
         report = await import_rows(session, rows, reference=args.csv.name,
                                    content_sha256=hashlib.sha256(args.csv.read_bytes()).hexdigest(),
-                                   actor=args.actor)
+                                   actor=args.actor, record_type=args.record_type)
         if args.dry_run:
             await session.rollback()
         else:
@@ -233,11 +260,15 @@ async def main(argv: list[str] | None = None) -> int:
     label = "would insert" if args.dry_run else "inserted"
     print(f"rows: {len(rows)}  {label}: {len(report.inserted)}  already present: {len(report.present)}  "
           f"ambiguous (skipped): {len(report.ambiguous)}  invalid: {len(report.invalid)}  "
+          f"real/demo conflicts (skipped): {len(report.conflicts)}  type: {args.record_type}  "
           f"batch: {'(not saved)' if args.dry_run else report.batch_id}")
     for n, name, why in report.ambiguous:
         print(f"  AMBIGUOUS line {n}: {name} - {why}")
     for n, why in report.invalid:
         print(f"  INVALID line {n}: {why}")
+    for n, name, existing_id, existing_name, existing_type in report.conflicts:
+        print(f"  CONFLICT line {n}: {name} - already exists as {existing_type} record "
+              f"{existing_name} ({existing_id}); not imported, existing record unchanged")
     return 0
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, BadgeCheck, ClipboardCheck, Cog, Eye, FlaskConical, Pencil, Plus, SlidersHorizontal } from "lucide-react";
+import { Archive, ArchiveRestore, ClipboardCheck, Cog, Eye, FlaskConical, Pencil, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useState } from "react";
 import { AddCompanyModal } from "@/components/admin/AddCompany";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
@@ -20,22 +20,26 @@ import {
   ReviewBadge,
   SearchInput,
   Truncate,
-  DataScopeFilter,
   type DataScope,
 } from "@/components/admin/ui";
 import { jsonBody, toQuery, useAdminApi, useAdminHost, useResource, useUrlFilters } from "@/lib/admin/api";
 import {
   ENTRY_LABELS,
   ENTRY_ORDER,
-  RECORD_LABELS,
-  RECORD_ORDER,
   REVIEW_LABELS,
   REVIEW_ORDER,
   fmtAgo,
   fmtDate,
   sourceText,
 } from "@/lib/admin/format";
-import type { EntrySource, ManufacturerList, ManufacturerRow, RecordType, ReviewStatus } from "@/lib/admin/types";
+import type { EntrySource, ManufacturerList, ManufacturerRow, ReviewStatus } from "@/lib/admin/types";
+
+/** All / Real / Demo tabs: Demo covers demo and test records. */
+const DATA_TABS: { value: DataScope; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "real", label: "Real" },
+  { value: "demo", label: "Demo" },
+];
 
 export function Manufacturers() {
   const { go } = useAdminHost();
@@ -43,7 +47,7 @@ export function Manufacturers() {
   const toast = useToast();
   const f = useUrlFilters("/admin/manufacturers");
   const [showFilters, setShowFilters] = useState(() =>
-    ["industry", "process", "location", "completeness", "review_status", "record_type", "entry_source", "archived", "assigned", "listing"].some(
+    ["industry", "process", "location", "completeness", "review_status", "entry_source", "archived", "assigned", "listing"].some(
       (k) => f.search.has(k),
     ),
   );
@@ -56,6 +60,8 @@ export function Manufacturers() {
   // Admin Entry: administrators / operators only (the backend checks the same roles).
   const me = useAdminMe();
   const canAdd = !!me?.roles.some((r) => r === "platform_administrator" || r === "platform_operator");
+  // Real / Demo classification: administrators and operators (the backend checks the same roles).
+  const canClassify = canAdd;
 
   const params = {
     q: f.get("q"),
@@ -84,34 +90,33 @@ export function Manufacturers() {
   const setFilters = f.set;
   const commitSearch = useCallback((q: string) => setFilters({ q }), [setFilters]);
 
-  // Data filter = a shortcut over the Record type filter: Real -> REAL; Demo -> DEMO + TEST; all -> none.
+  // All / Real / Demo tabs set the record type filter: Real -> REAL; Demo -> DEMO + TEST; All -> none.
   const recordSet = [...params.record_type].sort().join(",");
   const dataScope: DataScope | null =
     recordSet === "" ? "all" : recordSet === "REAL" ? "real" : recordSet === "DEMO,TEST" ? "demo" : null;
   const setDataScope = (v: DataScope) =>
     f.set({ record_type: v === "real" ? ["REAL"] : v === "demo" ? ["DEMO", "TEST"] : [] });
+  // Counts per tab (the other filters applied, the tab itself ignored), from the backend.
+  const typeCounts = data?.recordTypeCounts;
+  const tabCount = (v: DataScope): number | null =>
+    !typeCounts
+      ? null
+      : v === "real"
+        ? typeCounts.REAL
+        : v === "demo"
+          ? typeCounts.DEMO + typeCounts.TEST
+          : typeCounts.REAL + typeCounts.DEMO + typeCounts.TEST;
 
+  // The tab is not counted as a filter.
   const activeFilterCount =
     [params.industry, params.process, params.location, params.completeness, params.assigned].filter(Boolean).length +
     params.review_status.length +
-    params.record_type.length +
     params.entry_source.length +
     (params.archived !== "active" ? 1 : 0) +
     (params.listing !== "listed" ? 1 : 0);
 
   const rows = data?.rows ?? [];
-  const selectable = rows.filter((r) => r.recordType !== "REAL" && !r.isArchived);
-
-  /** Mark as demo / real (the company's Record type; history keeps who changed it and when). */
-  async function setRecordType(r: ManufacturerRow, type: RecordType) {
-    try {
-      await call(`/manufacturers/${r.id}/admin-fields`, jsonBody("PATCH", { record_type: type }));
-      toast(`${r.companyName || "Company"} marked as ${type === "REAL" ? "real" : "demo"} data`);
-      reload();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not update");
-    }
-  }
+  const selectable = canClassify ? rows.filter((r) => r.recordType !== "REAL" && !r.isArchived) : [];
 
   async function runArchive() {
     if (!confirm) return;
@@ -175,10 +180,24 @@ export function Manufacturers() {
             <SlidersHorizontal size={15} /> Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
           </button>
         </div>
-        <div className="adm-toolbar-row">
-          <DataScopeFilter value={dataScope} onChange={setDataScope} />
-          {dataScope === null && <span className="adm-seg-hint">Custom record type filter applied</span>}
+        <div className="adm-tabs" role="tablist" aria-label="Real or demo data">
+          {DATA_TABS.map((t) => {
+            const count = tabCount(t.value);
+            return (
+              <button
+                key={t.value}
+                type="button"
+                role="tab"
+                aria-selected={dataScope === t.value}
+                className={`adm-tab${dataScope === t.value ? " active" : ""}`}
+                onClick={() => setDataScope(t.value)}
+              >
+                {count === null ? t.label : `${t.label} (${count})`}
+              </button>
+            );
+          })}
         </div>
+        {dataScope === null && <span className="adm-seg-hint">Custom record type filter applied</span>}
 
         {showFilters && (
           <div className="adm-filters">
@@ -248,15 +267,6 @@ export function Manufacturers() {
                 />
               </div>
               <div>
-                <label>Record type</label>
-                <PillFilter<RecordType>
-                  options={RECORD_ORDER}
-                  labels={RECORD_LABELS}
-                  value={params.record_type as RecordType[]}
-                  onChange={(v) => f.set({ record_type: v })}
-                />
-              </div>
-              <div>
                 <label>Entry source</label>
                 <PillFilter<EntrySource>
                   options={ENTRY_ORDER}
@@ -277,7 +287,6 @@ export function Manufacturers() {
                     location: null,
                     completeness: null,
                     review_status: [],
-                    record_type: [],
                     entry_source: [],
                     archived: null,
                     assigned: null,
@@ -364,7 +373,7 @@ export function Manufacturers() {
                     onSelect={(on) => setSelected(on ? [...selected, r.id] : selected.filter((id) => id !== r.id))}
                     onOpen={(tab) => go(`/admin/manufacturers/${r.id}${tab ? `?tab=${tab}` : ""}`)}
                     onArchive={() => setConfirm({ ids: [r.id], archive: !r.isArchived, batch: false })}
-                    onRecordType={(type) => void setRecordType(r, type)}
+                    canClassify={canClassify}
                   />
                 ))}
               </tbody>
@@ -438,7 +447,7 @@ function Row({
   onOpen,
   onArchive,
   onMachinery,
-  onRecordType,
+  canClassify,
 }: {
   r: ManufacturerRow;
   selected: boolean;
@@ -448,9 +457,9 @@ function Row({
   onOpen: (tab?: string) => void;
   onArchive: () => void;
   onMachinery: () => void;
-  onRecordType: (type: RecordType) => void;
+  canClassify: boolean;
 }) {
-  const canBatch = r.recordType !== "REAL" && !r.isArchived;
+  const canBatch = canClassify && r.recordType !== "REAL" && !r.isArchived;
   const name = r.companyName || "Unnamed company";
   const detailsId = `mfg-${r.id}`;
   return (
@@ -469,7 +478,7 @@ function Row({
             <button type="button" className="adm-link adm-truncate" title={name} onClick={() => onOpen()}>
               {name}
             </button>
-            <RecordBadge type={r.recordType} hideReal />
+            <RecordBadge type={r.recordType} />
             {r.isArchived && <span className="badge badge-neutral">Archived</span>}
           </div>
           {(r.location || r.industry) && (
@@ -499,12 +508,15 @@ function Row({
               { label: "Edit company details", icon: <Pencil size={15} />, onSelect: () => onOpen("company") },
               { label: "Onboarding & review", icon: <ClipboardCheck size={15} />, onSelect: () => onOpen("onboarding") },
               { label: "View machinery", icon: <Cog size={15} />, onSelect: onMachinery },
-              r.recordType === "REAL"
-                ? { label: "Mark as demo", icon: <FlaskConical size={15} />, onSelect: () => onRecordType("DEMO"), group: true }
-                : { label: "Mark as real", icon: <BadgeCheck size={15} />, onSelect: () => onRecordType("REAL"), group: true },
-              r.isArchived
-                ? { label: "Restore", icon: <ArchiveRestore size={15} />, onSelect: onArchive, group: true }
-                : { label: "Archive", icon: <Archive size={15} />, onSelect: onArchive, danger: true, group: true },
+              // changing Real / Demo needs a reason: done on the details page (Onboarding & review)
+              ...(canClassify
+                ? [{ label: "Change Real / Demo…", icon: <FlaskConical size={15} />, onSelect: () => onOpen("onboarding"), group: true }]
+                : []),
+              ...(!canClassify
+                ? []
+                : [r.isArchived
+                    ? { label: "Restore", icon: <ArchiveRestore size={15} />, onSelect: onArchive, group: true }
+                    : { label: "Archive", icon: <Archive size={15} />, onSelect: onArchive, danger: true, group: true }]),
             ]}
           />
         </td>
