@@ -13,9 +13,12 @@ import {
   completeRegistration,
   noticeFor,
   oauthCallbackUrl,
+  onBackendWaking,
   rememberOAuthIntent,
   SignUpFlowError,
+  STARTING_UP_MESSAGE,
   startSignUpFlow,
+  wakeBackend,
 } from "@/lib/auth/registration";
 import { safeRedirectPath } from "@/lib/auth/safeRedirect";
 import { NEEDS_SECOND_STEP, pickSecondStep, sendSecondStepCode, type SecondStep } from "@/lib/auth/secondFactor";
@@ -163,6 +166,16 @@ export function CustomSignUpForm({
   // ?notice=signup_required ("Please sign up first, then sign in to continue.") and other
   // fixed messages; the text is never taken from the URL.
   const [status, setStatus] = useState<StatusState | null>(() => noticeFor(searchParams.get("notice")));
+
+  // The server may be asleep: start waking it now, and say so while a request waits for it.
+  useEffect(() => {
+    wakeBackend();
+    return onBackendWaking((waking) =>
+      setStatus((current) =>
+        waking ? { tone: "warn", message: STARTING_UP_MESSAGE } : current?.message === STARTING_UP_MESSAGE ? null : current,
+      ),
+    );
+  }, []);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   /** Server-signed token that marks this attempt as an explicit sign-up (needed to register). */
   const flowToken = useRef<string | null>(null);

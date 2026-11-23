@@ -50,6 +50,82 @@ function timeoutSignal(signal?: AbortSignal): AbortSignal | undefined {
   return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// The backend can be asleep (Render free instance: about 50 s to start after a quiet period).
+// In the browser, a request that gets no answer (or 502 / 503 / 504 while the server starts) is
+// retried until BACKEND_WAKE.deadlineMs, and the pages show STARTING_UP_MESSAGE meanwhile, instead
+// of failing after the first REQUEST_TIMEOUT_MS. Server-side calls (proxy, server components) keep
+// the single attempt. Every request retried here is safe to repeat (reads, a signed flow token,
+// and the idempotent registration completion).
+
+/** Tests set deadlineMs to 0 and prewarm to false (vitest.setup.ts). */
+export const BACKEND_WAKE = { deadlineMs: 90000, pauseMs: 3000, prewarm: true };
+
+export const STARTING_UP_MESSAGE =
+  "Our server is starting up. This can take up to a minute - please wait, there is no need to retry.";
+
+type WakingListener = (waking: boolean) => void;
+const wakingListeners = new Set<WakingListener>();
+
+/** Called with true while a request waits for the server to start, and false when it is done. */
+export function onBackendWaking(listener: WakingListener): () => void {
+  wakingListeners.add(listener);
+  return () => {
+    wakingListeners.delete(listener);
+  };
+}
+
+function announceWaking(waking: boolean) {
+  for (const listener of wakingListeners) listener(waking);
+}
+
+let prewarmed = false;
+
+/** Sign-in / Sign-up pages: start waking the server as soon as the page opens, so it is usually up
+ * by the time the person submits. Fire-and-forget; the answer is not needed. */
+export function wakeBackend(fetchImpl: Fetch = fetch): void {
+  if (prewarmed || !BACKEND_WAKE.prewarm || typeof window === "undefined") return;
+  prewarmed = true;
+  let healthUrl: string;
+  try {
+    healthUrl = `${new URL(API_URL).origin}/health`;
+  } catch {
+    return;
+  }
+  void fetchImpl(healthUrl, { method: "GET", cache: "no-store", mode: "no-cors" }).catch(() => undefined);
+}
+
+const STARTING_STATUSES = new Set([502, 503, 504]);
+
+async function backendFetch(doFetch: Fetch, url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+  if (typeof window === "undefined" || signal) return doFetch(url, { ...init, signal: timeoutSignal(signal) });
+  const deadline = Date.now() + BACKEND_WAKE.deadlineMs;
+  let waking = false;
+  try {
+    for (;;) {
+      let response: Response | null = null;
+      let failure: unknown = null;
+      try {
+        response = await doFetch(url, { ...init, signal: timeoutSignal() });
+      } catch (error) {
+        failure = error;
+      }
+      const notUpYet = response === null || STARTING_STATUSES.has(response.status);
+      if (!notUpYet || Date.now() >= deadline) {
+        if (response) return response;
+        throw failure;
+      }
+      if (!waking) {
+        waking = true;
+        announceWaking(true);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(BACKEND_WAKE.pauseMs, Math.max(0, deadline - Date.now()))));
+    }
+  } finally {
+    if (waking) announceWaking(false);
+  }
+}
+
 function detailText(payload: unknown, fallback: string): string {
   const detail = (payload as { detail?: unknown } | null)?.detail;
   if (typeof detail === "string") return detail;
@@ -77,12 +153,11 @@ export async function checkRegistration(
   const doFetch = options.fetchImpl ?? fetch;
   let response: Response;
   try {
-    response = await doFetch(`${API_URL}/identity/registration`, {
+    response = await backendFetch(doFetch, `${API_URL}/identity/registration`, {
       method: "GET",
       cache: "no-store",
       headers: { Authorization: `Bearer ${token}` },
-      signal: timeoutSignal(options.signal),
-    });
+    }, options.signal);
   } catch {
     return { state: "error", message: UNAVAILABLE };
   }
@@ -117,12 +192,11 @@ export async function startSignUpFlow(
 ): Promise<string> {
   let response: Response;
   try {
-    response = await fetchImpl(`${API_URL}/identity/registration/flows`, {
+    response = await backendFetch(fetchImpl, `${API_URL}/identity/registration/flows`, {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ method, returnPath, termsAccepted, termsVersion: TERMS_VERSION }),
-      signal: timeoutSignal(),
     });
   } catch {
     throw new SignUpFlowError(START_FAILED, null);
@@ -150,12 +224,11 @@ export async function completeRegistration(
   if (!token) return { ok: false, code: null, message: failed, retryable: true };
   let response: Response;
   try {
-    response = await fetchImpl(`${API_URL}/identity/registration/complete`, {
+    response = await backendFetch(fetchImpl, `${API_URL}/identity/registration/complete`, {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ flowToken }),
-      signal: timeoutSignal(),
     });
   } catch {
     return { ok: false, code: null, message: failed, retryable: true };
@@ -181,12 +254,11 @@ export async function accountStatusForEmail(
   fetchImpl: Fetch = fetch,
 ): Promise<"registered" | "not_registered" | "unknown"> {
   try {
-    const response = await fetchImpl(`${API_URL}/identity/registration/account-status`, {
+    const response = await backendFetch(fetchImpl, `${API_URL}/identity/registration/account-status`, {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
-      signal: timeoutSignal(),
     });
     if (!response.ok) return "unknown";
     const registered = ((await response.json().catch(() => null)) as { registered?: unknown } | null)?.registered;

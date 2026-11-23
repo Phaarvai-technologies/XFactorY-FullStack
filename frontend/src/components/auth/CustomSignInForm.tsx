@@ -18,7 +18,10 @@ import {
   checkRegistration,
   noticeFor,
   oauthCallbackUrl,
+  onBackendWaking,
   rememberOAuthIntent,
+  STARTING_UP_MESSAGE,
+  wakeBackend,
 } from "@/lib/auth/registration";
 import { safeRedirectPath } from "@/lib/auth/safeRedirect";
 
@@ -97,6 +100,16 @@ export function CustomSignInForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Fixed messages selected by ?notice= (e.g. "registered" after sign-up); never text from the URL.
   const [status, setStatus] = useState<StatusState | null>(() => noticeFor(searchParams.get("notice")));
+
+  // The server may be asleep: start waking it now, and say so while a request waits for it.
+  useEffect(() => {
+    wakeBackend();
+    return onBackendWaking((waking) =>
+      setStatus((current) =>
+        waking ? { tone: "warn", message: STARTING_UP_MESSAGE } : current?.message === STARTING_UP_MESSAGE ? null : current,
+      ),
+    );
+  }, []);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [isResettingPassword, setIsResettingPassword] = useState(false);

@@ -3,12 +3,14 @@
 import { useClerk } from "@clerk/nextjs";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { activateRegisteredSession, endSession, tokenForCreatedSession, type ClerkLike } from "@/lib/auth/clerkSession";
 import {
   authPageHref,
   checkRegistration,
   completeRegistration,
+  onBackendWaking,
+  STARTING_UP_MESSAGE,
   takeOAuthIntent,
   type OAuthIntent,
 } from "@/lib/auth/registration";
@@ -35,9 +37,10 @@ import { safeRedirectPath } from "@/lib/auth/safeRedirect";
  *   or changed: session ended, Sign-up shows "You already have an account. Please sign in."
  * The intent (from the callback address, else this tab's storage) only picks which branch to
  * finish; it grants nothing by itself. If Clerk never answers, the page gives up after
- * CALLBACK_TIMEOUT_MS with "Google sign-in didn't complete" instead of spinning forever.
+ * CALLBACK_TIMEOUT_MS with "Google sign-in didn't complete" instead of spinning forever. The limit
+ * leaves room for a server that is still starting up (requests wait up to 90 s for it).
  */
-const CALLBACK_TIMEOUT_MS = 45000;
+const CALLBACK_TIMEOUT_MS = 150000;
 
 export default function SsoCallbackPage() {
   const clerk = useClerk() as unknown as ClerkLike;
@@ -46,6 +49,10 @@ export default function SsoCallbackPage() {
   const router = useRouter();
   const ran = useRef(false);
   const settled = useRef(false);
+  const [waking, setWaking] = useState(false);
+
+  // While a request waits for the server to start, say so instead of a silent spinner.
+  useEffect(() => onBackendWaking(setWaking), []);
 
   // Clerk did not load / answer at all (blocked script, network): leave with an error.
   useEffect(() => {
@@ -196,7 +203,7 @@ export default function SsoCallbackPage() {
       <div className="wrap" style={{ maxWidth: 520, textAlign: "center" }}>
         <h1 style={{ fontSize: 28, marginBottom: 12 }}>Signing you in…</h1>
         <p style={{ color: "var(--ink-soft)", marginBottom: 0, lineHeight: 1.6 }}>
-          Completing your authentication with XfactorY.
+          {waking ? STARTING_UP_MESSAGE : "Completing your authentication with XfactorY."}
         </p>
       </div>
     </div>
