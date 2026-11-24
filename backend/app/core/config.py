@@ -100,10 +100,11 @@ class Settings(BaseSettings):
     # signed-up manufacturer on "Find a Manufacturer" (approved or not, any % complete, Real or Demo,
     # same city / machines first) with "Select Manufacturer", each card saying why it would be hidden
     # under the real rule; the "Not yet verified" imported listings can be selected too. Archived and
-    # suspended companies stay hidden. Default false = the real rule (app/core/eligibility.py):
-    # approved + 100% complete + Real.
-    # Remove the variable (or set it false) to go back to the rule; no code change needed.
-    visionary_show_unverified_manufacturers: bool = False
+    # suspended companies stay hidden. The real rule (app/core/eligibility.py) is approved + 100%
+    # complete + Real.
+    # ON BY DEFAULT FOR NOW (project testing phase). To revert after testing: change True to False
+    # here, or set VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=false on the server.
+    visionary_show_unverified_manufacturers: bool = True
 
     # Admin email + password sign-in (`python -m app.admin_account create ...`).
     # A session ends after ADMIN_SESSION_HOURS, or earlier after ADMIN_IDLE_MINUTES

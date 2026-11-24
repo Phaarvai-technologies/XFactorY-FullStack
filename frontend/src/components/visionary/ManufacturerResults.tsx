@@ -135,7 +135,9 @@ export function ManufacturerResults({
   const note = status === "ready"
     ? [matchingNote(result),
        listingsTotal > 0
-         ? "Companies marked “Not yet verified” come from public business records and have not joined XfactorY yet: you can view them, but requests can only be sent to verified manufacturers."
+         ? listings.some((item) => item.selectable)
+           ? "Companies marked “Not yet verified” come from public business records and have not joined XfactorY yet."
+           : "Companies marked “Not yet verified” come from public business records and have not joined XfactorY yet: you can view them, but requests can only be sent to verified manufacturers."
          : ""].filter(Boolean).join(" ")
     : "";
 
@@ -315,7 +317,7 @@ function ManufacturerCard({
     <article
       className={`mcard${selected ? " selected" : ""}`}
       onClick={() => {
-        if (!item.listing) onSelect(item.id); // a not-yet-verified listing cannot be chosen
+        if (canChoose(item)) onSelect(item.id); // a not-yet-verified listing cannot be chosen
       }}
     >
       <div className="top">
@@ -362,9 +364,10 @@ function ManufacturerCard({
         <i />
         {item.availability}
       </div>
+      {item.testingNote ? <div className="lbl">{item.testingNote}</div> : null}
       <div className="spacer" />
       <div className="btns">
-        {item.listing ? null : (
+        {!canChoose(item) ? null : (
         <button
           type="button"
           className="btn"
@@ -464,13 +467,20 @@ function ManufacturerProfile({
         <i />
         Availability: {item.availability}
       </div>
-      {item.listing ? null : (
+      {item.testingNote ? <div className="lbl">{item.testingNote}</div> : null}
+      {!canChoose(item) ? null : (
         <button type="button" className="btn" onClick={() => onChoose(item.id)}>
           Select Manufacturer
         </button>
       )}
     </article>
   );
+}
+
+/** Verified manufacturers can be chosen; a "Not yet verified" listing only in the TEMPORARY testing
+ * mode (backend VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true sends `selectable`). */
+function canChoose(item: ManufacturerRecord): boolean {
+  return !item.listing || Boolean(item.selectable);
 }
 
 function SkeletonCard() {

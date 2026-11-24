@@ -10,3 +10,6 @@ os.environ["CLERK_AUTHORIZED_PARTIES"] = '["http://localhost:3000"]'
 os.environ["CLERK_SECRET_KEY"] = "sk_test_dummy"
 os.environ["SUPABASE_URL"] = "https://proj.supabase.co"
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "dummy"
+# The tests check the real Visionary rule; the temporary "show every manufacturer" mode is
+# switched on only inside the test written for it.
+os.environ["VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS"] = "false"

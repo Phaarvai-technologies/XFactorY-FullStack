@@ -79,6 +79,10 @@ export type ManufacturerRecord = {
   status: "active";
   /** A not-yet-verified directory listing (imported company): shown, but no requests. */
   listing?: boolean;
+  /** TEMPORARY testing mode (backend VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS): a listing that can be selected. */
+  selectable?: boolean;
+  /** TEMPORARY testing mode: why it would be hidden under the real rule ("Testing only: Not approved · …"). */
+  testingNote?: string;
 };
 
 export type SelectedManufacturer = {
