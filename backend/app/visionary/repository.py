@@ -17,7 +17,7 @@ from app.core import eligibility
 # drafts) only when the central eligibility rule allows it (app/core/eligibility.py: admin
 # approval AND a 100% complete profile), while the organization is active, not archived by
 # an admin, real data (not a DEMO / TEST record), and its owner's account is not suspended.
-DISCOVERABLE = f"""
+_DISCOVERABLE_BASE = """
     FROM organizations o
     JOIN LATERAL (
         SELECT u.status FROM memberships m JOIN users u ON u.id = m.user_id
@@ -29,7 +29,35 @@ DISCOVERABLE = f"""
     LEFT JOIN files logo ON logo.id = op.logo_file_id
     WHERE o.organization_type = 'manufacturer' AND o.status = 'active'
       AND NOT o.is_archived AND o.record_type = 'REAL'
-      AND {eligibility.sql_condition("visionary_visible")}
+"""
+DISCOVERABLE = _DISCOVERABLE_BASE + f"""      AND {eligibility.sql_condition("visionary_visible")}
+"""
+# TEMPORARY testing mode (settings.visionary_show_unverified_manufacturers): EVERY signed-up
+# manufacturer with an active owner - approved or not, complete or not, Real, Demo or Test.
+# Only archived, suspended / closed companies and suspended owners stay hidden.
+DISCOVERABLE_TESTING = """
+    FROM organizations o
+    JOIN LATERAL (
+        SELECT u.status FROM memberships m JOIN users u ON u.id = m.user_id
+        WHERE m.organization_id = o.id AND m.status = 'active'
+        ORDER BY (m.membership_role = 'owner') DESC, m.created_at LIMIT 1
+    ) owner_user ON owner_user.status = 'active'
+    LEFT JOIN organization_profiles op ON op.organization_id = o.id
+    LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
+    LEFT JOIN files logo ON logo.id = op.logo_file_id
+    WHERE o.organization_type = 'manufacturer' AND o.status IN ('active', 'claim_pending')
+      AND NOT o.is_archived
+"""
+
+# TEMPORARY testing mode: one company by id, including "Not yet verified" imported listings
+# (no owner yet) and Demo / Test records, so a Visionary can open and select it. Never archived.
+ANY_MANUFACTURER_TESTING = """
+    FROM organizations o
+    LEFT JOIN organization_profiles op ON op.organization_id = o.id
+    LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
+    LEFT JOIN files logo ON logo.id = op.logo_file_id
+    WHERE o.organization_type = 'manufacturer' AND NOT o.is_archived
+      AND o.status IN ('claim_pending', 'active')
 """
 
 # Same normalisation as service.match_key: lower case, runs of spaces / , . / ( ) _ - become one
@@ -41,7 +69,7 @@ ORG_COLUMNS = """
     op.stated_production_capacity, op.production_capacity_label, op.business_type,
     op.organization_size, op.employee_count, op.establishment_year,
     COALESCE(f.country_name, op.country_name) country, f.city, f.state_province,
-    logo.object_key logo_object_key
+    logo.object_key logo_object_key, o.record_type
 """
 
 
@@ -57,8 +85,14 @@ def request_number() -> str:
 
 
 class VisionaryRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, show_unverified: bool = False):
         self.db = session
+        # TEMPORARY testing switch (see Settings.visionary_show_unverified_manufacturers).
+        self.show_unverified = show_unverified
+
+    @property
+    def _visible(self) -> str:
+        return DISCOVERABLE_TESTING if self.show_unverified else DISCOVERABLE
 
     # ------------------------------------------------------------------ identity
     async def user_row(self, user_id: UUID) -> dict:
@@ -223,13 +257,18 @@ class VisionaryRepository:
 
     # ------------------------------------------------------------------ manufacturers
     async def manufacturers(self, org_id: str | None = None) -> list[dict]:
-        sql = f"SELECT {ORG_COLUMNS} {DISCOVERABLE}"
+        sql = f"SELECT {ORG_COLUMNS} {self._visible}"
         params: dict = {}
         if org_id is not None:
             sql += " AND o.id = :org"
             params["org"] = org_id
         sql += " ORDER BY o.display_name, o.id"
-        return [dict(r) for r in (await self.db.execute(text(sql), params)).mappings()]
+        rows = [dict(r) for r in (await self.db.execute(text(sql), params)).mappings()]
+        if not rows and org_id is not None and self.show_unverified:
+            # TEMPORARY testing mode: a "Not yet verified" listing can be opened and selected too.
+            rows = [dict(r) for r in (await self.db.execute(
+                text(f"SELECT {ORG_COLUMNS} {ANY_MANUFACTURER_TESTING} AND o.id = :org"), params)).mappings()]
+        return rows
 
     async def matching_manufacturers(self, location: str, machines: list[str]) -> list[dict]:
         """Discoverable manufacturers (same visibility / approval rule as the list) that match the
@@ -238,7 +277,7 @@ class VisionaryRepository:
           a manufacturer without a recorded city never matches a location requirement;
         - machines: at least one PUBLISHED machine whose name or subcategory equals one of them.
         An empty value means that requirement was not given (no filter)."""
-        sql = f"SELECT {ORG_COLUMNS} {DISCOVERABLE}"
+        sql = f"SELECT {ORG_COLUMNS} {self._visible}"
         params: dict = {}
         if location:
             sql += f"""
@@ -269,7 +308,8 @@ class VisionaryRepository:
             LEFT JOIN facilities f ON f.organization_id = o.id AND f.is_headquarters AND f.status <> 'suspended'
             LEFT JOIN files logo ON logo.id = op.logo_file_id
             WHERE o.organization_type = 'manufacturer' AND o.entry_source = 'IMPORTED'
-              AND o.record_type = 'REAL' AND NOT o.is_archived AND o.status IN ('claim_pending', 'active')
+              AND (o.record_type = 'REAL' OR :any_type) AND NOT o.is_archived
+              AND o.status IN ('claim_pending', 'active')
               AND NOT (o.id = ANY(:verified))
               AND ({_KEY.format("f.city")} = :loc
                    OR {_KEY.format("concat_ws(' ', f.city, COALESCE(NULLIF(btrim(f.state_province), ''), f.country_name, op.country_name))")} = :loc)
@@ -277,18 +317,39 @@ class VisionaryRepository:
         """
         # Companies that ARE visible as verified manufacturers (only approved ones can be: a short
         # list), so the listings can leave them out without evaluating the overview view per row.
-        verified = list((await self.db.execute(text(f"""
-            SELECT o.id FROM organizations o
-            JOIN manufacturer_onboarding mo ON mo.organization_id = o.id AND mo.status = 'approved'
-            WHERE o.organization_type = 'manufacturer' AND {eligibility.sql_condition("visionary_visible")}
-        """))).scalars())
-        params = {"loc": location, "q": q, "verified": verified,
+        if self.show_unverified:
+            # TEMPORARY testing mode: signed-up companies are already in the matches (any approval).
+            verified = list((await self.db.execute(text(f"SELECT o.id {DISCOVERABLE_TESTING}"))).scalars())
+        else:
+            verified = list((await self.db.execute(text(f"""
+                SELECT o.id FROM organizations o
+                JOIN manufacturer_onboarding mo ON mo.organization_id = o.id AND mo.status = 'approved'
+                WHERE o.organization_type = 'manufacturer' AND {eligibility.sql_condition("visionary_visible")}
+            """))).scalars())
+        params = {"loc": location, "q": q, "verified": verified, "any_type": self.show_unverified,
                   "like": "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"}
         total = await self.db.scalar(text(f"SELECT count(*) {where}"), params)
         rows = (await self.db.execute(text(f"""
             SELECT {ORG_COLUMNS} {where} ORDER BY o.display_name, o.id LIMIT :limit OFFSET :offset
         """), {**params, "limit": limit, "offset": offset})).mappings()
         return [dict(r) for r in rows], int(total or 0)
+
+    async def testing_manufacturers(self) -> list[dict]:
+        """TEMPORARY testing mode: every signed-up manufacturer (see DISCOVERABLE_TESTING), whatever
+        its approval, completeness or Real / Demo type. The service puts the matching ones first."""
+        sql = f"SELECT {ORG_COLUMNS} {DISCOVERABLE_TESTING} ORDER BY o.display_name, o.id"
+        return [dict(r) for r in (await self.db.execute(text(sql))).mappings()]
+
+    async def testing_status(self, org_ids: list[UUID]) -> dict:
+        """TEMPORARY testing mode: {organization id: (approval status, completeness %)} for the notes
+        on the cards ("Not approved", "Profile 60% complete")."""
+        if not org_ids:
+            return {}
+        rows = await self.db.execute(text("""
+            SELECT organization_id, onboarding_raw_status, completeness
+            FROM admin_manufacturer_overview WHERE organization_id = ANY(:ids)
+        """), {"ids": org_ids})
+        return {r.organization_id: (r.onboarding_raw_status, r.completeness) for r in rows}
 
     async def manufacturer_details(self, org_ids: list[UUID]) -> dict:
         """Published machinery, certifications and availability for the given manufacturers."""
@@ -320,6 +381,10 @@ class VisionaryRepository:
 
     async def booking_allowed(self, org_id: UUID) -> bool:
         """Central booking rule (approval + 100% complete profile), checked when a request is sent."""
+        if self.show_unverified:
+            # TEMPORARY testing mode: any non-archived manufacturer can receive a request.
+            return bool(await self.db.scalar(text(f"SELECT EXISTS(SELECT 1 {ANY_MANUFACTURER_TESTING} AND o.id = :org)"),
+                                             {"org": org_id}))
         return bool(await self.db.scalar(text(f"""
             SELECT {eligibility.sql_condition("booking")} FROM organizations o WHERE o.id = :org
         """), {"org": org_id}))

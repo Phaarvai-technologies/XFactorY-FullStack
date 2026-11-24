@@ -58,6 +58,19 @@ def _json(value):
     return value
 
 
+def _testing_note(org: dict, approval: str | None, completeness: int, imported: bool = False) -> str:
+    """TEMPORARY testing mode: why this manufacturer would NOT be shown under the real rule
+    (empty when it meets it): "Testing only: Not approved · Profile 60% complete · Demo record"."""
+    parts = ["Imported company, not verified"] if imported else []
+    if not imported and approval != "approved":
+        parts.append("Not approved")
+    if not imported and int(completeness or 0) < 100:
+        parts.append(f"Profile {int(completeness or 0)}% complete")
+    if (org.get("record_type") or "REAL") != "REAL":
+        parts.append(f'{org["record_type"].title()} record')
+    return f'Testing only: {" · ".join(parts)}' if parts else ""
+
+
 def match_key(value) -> str:
     """Matching key (same rule as repository._KEY): case, spacing and , . / ( ) _ - ignored."""
     return re.sub(r"[\s,./()_-]+", " ", str(value or "").lower()).strip()
@@ -108,7 +121,7 @@ def _availability(pref: dict | None) -> tuple[str, str, bool]:
 
 class VisionaryService:
     def __init__(self, session: AsyncSession, settings: Settings):
-        self.repo = VisionaryRepository(session)
+        self.repo = VisionaryRepository(session, settings.visionary_show_unverified_manufacturers)
         self.settings = settings
         self.storage = SupabaseStorage(settings)
 
@@ -246,7 +259,11 @@ class VisionaryService:
         """ManufacturerRecord for a not-yet-verified imported company (no machines, not bookable)."""
         record = self._record(org, [], [], None)
         record.update({"verified": False, "listing": True, "matchedMachines": [],
-                       "availability": "Not yet verified"})
+                       "availability": "Not yet verified",
+                       # TEMPORARY testing mode: the listing can be selected (Settings flag).
+                       "selectable": self.settings.visionary_show_unverified_manufacturers})
+        if self.settings.visionary_show_unverified_manufacturers:
+            record["testingNote"] = _testing_note(org, None, 0, imported=True)
         return record
 
     def _public_profile(self, org: dict, machines: list, certs: list, pref: dict | None) -> dict:
@@ -336,7 +353,13 @@ class VisionaryService:
                         "listings": [], "listingsTotal": 0}
             wanted = {match_key(m): m for m in requirements["machines"] if match_key(m)}
             location = match_key(requirements["manufacturing_location"])
-            orgs = await self.repo.matching_manufacturers(location, list(wanted))
+            testing = self.settings.visionary_show_unverified_manufacturers
+            if testing:
+                # TEMPORARY testing mode: every signed-up manufacturer, matching ones first (below).
+                orgs = await self.repo.testing_manufacturers()
+                statuses = await self.repo.testing_status([o["id"] for o in orgs])
+            else:
+                orgs = await self.repo.matching_manufacturers(location, list(wanted))
             machines, certs, availability = self._group(
                 await self.repo.manufacturer_details([o["id"] for o in orgs]))
             records = []
@@ -345,8 +368,17 @@ class VisionaryService:
                 record = self._record(org, own, certs.get(org["id"], []), availability.get(org["id"]))
                 offered = {match_key(m["name"]) for m in own} | {match_key(m["specs"].get("subcategory")) for m in own}
                 record["matchedMachines"] = [name for key, name in wanted.items() if key in offered]
+                if testing:
+                    approval, completeness = statuses.get(org["id"], (None, 0))
+                    record["testingNote"] = _testing_note(org, approval, completeness)
+                    record["_city"] = location and location in {
+                        match_key(org["city"]), match_key(f'{org["city"] or ""} {org["state_province"] or ""}')}
                 records.append(record)
-            records.sort(key=lambda r: -len(r["matchedMachines"]))  # stable: name order otherwise
+            if testing:
+                # same city and more of the needed machines first; then everyone else (name order)
+                records.sort(key=lambda r: (not r.pop("_city"), -len(r["matchedMachines"])))
+            else:
+                records.sort(key=lambda r: -len(r["matchedMachines"]))  # stable: name order otherwise
             applied = (["location"] if location else []) + (["machines"] if wanted else [])
             given = {"quantity": requirements["quantity"]["value"], "budget": requirements["budget"]["amount"],
                      "timeline": requirements["timeline"]}

@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # rate limited, not answering) after short retries. Set it empty for no fallback.
     visionary_ai_fallback_model: str = "gemini-3.1-flash-lite"
 
+    # TEMPORARY (testing only): VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true shows Visionaries EVERY
+    # signed-up manufacturer on "Find a Manufacturer" (approved or not, any % complete, Real or Demo,
+    # same city / machines first) with "Select Manufacturer", each card saying why it would be hidden
+    # under the real rule; the "Not yet verified" imported listings can be selected too. Archived and
+    # suspended companies stay hidden. Default false = the real rule (app/core/eligibility.py):
+    # approved + 100% complete + Real.
+    # Remove the variable (or set it false) to go back to the rule; no code change needed.
+    visionary_show_unverified_manufacturers: bool = False
+
     # Admin email + password sign-in (`python -m app.admin_account create ...`).
     # A session ends after ADMIN_SESSION_HOURS, or earlier after ADMIN_IDLE_MINUTES
     # without activity. After ADMIN_MAX_FAILED_LOGINS wrong passwords in a row the

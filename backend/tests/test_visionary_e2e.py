@@ -416,3 +416,72 @@ async def test_not_yet_verified_listings_from_the_import(client):
             "required_duration": "1_week", "manufacturing_location": city,
             "budget": {"amount": 1000, "currency": "INR"}, "timeline": "immediately"}
     assert (await client.post("/visionary/requests", headers=v, json=send)).status_code == 404
+
+
+async def test_temporary_testing_mode_shows_every_manufacturer(client, monkeypatch):
+    """VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true (temporary, for testing): Visionaries see EVERY
+    signed-up manufacturer (approved or not, any % complete, Real or Demo, any city; matching ones
+    first) and can select it; the "Not yet verified" imported listings (Real or Demo) can be selected
+    too. Each card says why it would be hidden under the real rule. Archived stays hidden.
+    Off = the real rule."""
+    from app.core.config import get_settings
+
+    t = uuid.uuid4().hex[:6]
+    city = f"Tempcity {t}"
+    approved = await _manufacturer(client, f"ta_{t}", f"Approved Maker {t}", city, "Tamil Nadu",
+                                   [{"type": "CNC Machining"}])
+    pending = await _manufacturer(client, f"tp_{t}", f"Pending Maker {t}", city, "Tamil Nadu",
+                                  [{"type": "CNC Machining"}])
+    # signed up, but not approved and its profile not complete (no FAQ answers)
+    await client.sql("UPDATE manufacturer_onboarding SET status='submitted' WHERE organization_id=CAST(:o AS uuid)",
+                     o=pending)
+    await client.sql("DELETE FROM manufacturer_faq_answers WHERE organization_id=CAST(:o AS uuid)", o=pending)
+    demo_signed = await _manufacturer(client, f"td_{t}", f"Demo Maker {t}", city, "Tamil Nadu",
+                                      [{"type": "CNC Machining"}])
+    await client.sql("UPDATE organizations SET record_type='DEMO' WHERE id=CAST(:o AS uuid)", o=demo_signed)
+    far = await _manufacturer(client, f"tf_{t}", f"Far Maker {t}", f"Farcity {t}", "Kerala",
+                              [{"type": "Welding"}])
+    listing = await _imported(client, f"Imported Maker {t}", city)
+    demo_listing = await _imported(client, f"Demo Imported {t}", city, record_type="DEMO")
+    gone = await _imported(client, f"Archived Imported {t}", city, archived=True)
+    v = auth(client, f"vis_{uuid.uuid4().hex[:10]}")
+    assert (await client.put("/visionary/project/idea", headers=v, json=IDEA)).status_code == 200
+    needs = {**NEEDS, "manufacturing_location": city, "machines": ["CNC Machining"]}
+    assert (await client.put("/visionary/project/requirements", headers=v, json=needs)).status_code == 200
+
+    async def find():
+        r = await client.get("/visionary/manufacturers/matches", headers=v)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # off (default): the real rule
+    res = await find()
+    assert [m["id"] for m in res["manufacturers"]] == [approved]
+    assert [m["id"] for m in res["listings"]] == [listing] and res["listings"][0]["selectable"] is False
+    assert "testingNote" not in res["manufacturers"][0]
+
+    # on: every signed-up manufacturer, same city + machine first, with the reason it would be hidden
+    monkeypatch.setattr(get_settings(), "visionary_show_unverified_manufacturers", True)
+    res = await find()
+    ids = [m["id"] for m in res["manufacturers"]]
+    assert {approved, pending, demo_signed, far} <= set(ids)
+    assert ids.index(far) > max(ids.index(approved), ids.index(pending), ids.index(demo_signed))
+    notes = {m["id"]: m["testingNote"] for m in res["manufacturers"]}
+    assert notes[approved] == ""
+    assert notes[pending] == "Testing only: Not approved · Profile 92% complete"
+    assert notes[demo_signed] == "Testing only: Demo record"
+    assert {m["id"] for m in res["listings"]} == {listing, demo_listing}
+    assert all(m["selectable"] for m in res["listings"])
+    assert {m["testingNote"] for m in res["listings"]} == {
+        "Testing only: Imported company, not verified",
+        "Testing only: Imported company, not verified · Demo record"}
+    for org in (pending, demo_signed, listing, demo_listing):
+        assert (await client.get(f"/visionary/manufacturers/{org}", headers=v)).status_code == 200
+    assert (await client.get(f"/visionary/manufacturers/{gone}", headers=v)).status_code == 404
+    send = {"manufacturer_id": demo_listing, "machine": "CNC Machining", "quantity": {"value": 10, "unit": "units"},
+            "required_duration": "1_week", "manufacturing_location": city,
+            "budget": {"amount": 1000, "currency": "INR"}, "timeline": "immediately"}
+    r = await client.post("/visionary/requests", headers=v, json=send)
+    assert r.status_code in (200, 201), r.text
+    send["manufacturer_id"] = gone
+    assert (await client.post("/visionary/requests", headers=v, json=send)).status_code == 404
