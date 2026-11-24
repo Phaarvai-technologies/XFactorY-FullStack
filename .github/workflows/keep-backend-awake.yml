@@ -1,0 +1,43 @@
+# Keeps the backend on Render Free from going to sleep (it sleeps after 15 minutes without
+# requests, and then takes about a minute to wake up, which made sign-up and sign-in fail).
+#
+# Every 10 minutes it calls the backend's /health address. Free for this public repository.
+# Notes:
+# - GitHub can start scheduled runs late (sometimes 10-30+ minutes), so the server may still
+#   fall asleep now and then. Render Starter is the permanent fix; then delete this file.
+# - Scheduled workflows only run from the default branch (main).
+# - GitHub pauses scheduled workflows after 60 days without commits to the repository;
+#   re-enable it under Actions -> "Keep backend awake" if that happens.
+# - A different backend address can be set without editing this file: repository
+#   Settings -> Secrets and variables -> Actions -> Variables -> BACKEND_HEALTH_URL.
+name: Keep backend awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}   # "Run workflow" button for a manual test
+
+permissions: {}
+
+concurrency:
+  group: keep-backend-awake
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call the backend health address
+        env:
+          HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL || 'https://xfactory-fullstack.onrender.com/health' }}
+        run: |
+          # Up to 3 tries; a sleeping server can take about a minute to answer the first time.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$HEALTH_URL" || echo "000")
+            echo "Attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          echo "::warning::The backend did not answer 200 at $HEALTH_URL"
+          exit 1

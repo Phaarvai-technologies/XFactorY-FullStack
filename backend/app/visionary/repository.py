@@ -32,9 +32,10 @@ _DISCOVERABLE_BASE = """
 """
 DISCOVERABLE = _DISCOVERABLE_BASE + f"""      AND {eligibility.sql_condition("visionary_visible")}
 """
-# TEMPORARY testing mode (settings.visionary_show_unverified_manufacturers): EVERY signed-up
-# manufacturer with an active owner - approved or not, complete or not, Real, Demo or Test.
-# Only archived, suspended / closed companies and suspended owners stay hidden.
+# TEMPORARY testing mode (settings.visionary_show_unverified_manufacturers): every signed-up
+# manufacturer with an active owner - approved or not, complete or not, Real, Demo or Test - can
+# match the Visionary's location and machines (the filters still apply). Archived, suspended /
+# closed companies and suspended owners stay hidden.
 DISCOVERABLE_TESTING = """
     FROM organizations o
     JOIN LATERAL (
@@ -333,12 +334,6 @@ class VisionaryRepository:
             SELECT {ORG_COLUMNS} {where} ORDER BY o.display_name, o.id LIMIT :limit OFFSET :offset
         """), {**params, "limit": limit, "offset": offset})).mappings()
         return [dict(r) for r in rows], int(total or 0)
-
-    async def testing_manufacturers(self) -> list[dict]:
-        """TEMPORARY testing mode: every signed-up manufacturer (see DISCOVERABLE_TESTING), whatever
-        its approval, completeness or Real / Demo type. The service puts the matching ones first."""
-        sql = f"SELECT {ORG_COLUMNS} {DISCOVERABLE_TESTING} ORDER BY o.display_name, o.id"
-        return [dict(r) for r in (await self.db.execute(text(sql))).mappings()]
 
     async def testing_status(self, org_ids: list[UUID]) -> dict:
         """TEMPORARY testing mode: {organization id: (approval status, completeness %)} for the notes

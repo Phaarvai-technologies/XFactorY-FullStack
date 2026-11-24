@@ -354,12 +354,11 @@ class VisionaryService:
             wanted = {match_key(m): m for m in requirements["machines"] if match_key(m)}
             location = match_key(requirements["manufacturing_location"])
             testing = self.settings.visionary_show_unverified_manufacturers
+            # Same filters as always (the Visionary's location and machines). In the TEMPORARY testing
+            # mode the repository also lets unapproved / incomplete / Demo manufacturers match.
+            orgs = await self.repo.matching_manufacturers(location, list(wanted))
             if testing:
-                # TEMPORARY testing mode: every signed-up manufacturer, matching ones first (below).
-                orgs = await self.repo.testing_manufacturers()
                 statuses = await self.repo.testing_status([o["id"] for o in orgs])
-            else:
-                orgs = await self.repo.matching_manufacturers(location, list(wanted))
             machines, certs, availability = self._group(
                 await self.repo.manufacturer_details([o["id"] for o in orgs]))
             records = []
@@ -371,14 +370,8 @@ class VisionaryService:
                 if testing:
                     approval, completeness = statuses.get(org["id"], (None, 0))
                     record["testingNote"] = _testing_note(org, approval, completeness)
-                    record["_city"] = location and location in {
-                        match_key(org["city"]), match_key(f'{org["city"] or ""} {org["state_province"] or ""}')}
                 records.append(record)
-            if testing:
-                # same city and more of the needed machines first; then everyone else (name order)
-                records.sort(key=lambda r: (not r.pop("_city"), -len(r["matchedMachines"])))
-            else:
-                records.sort(key=lambda r: -len(r["matchedMachines"]))  # stable: name order otherwise
+            records.sort(key=lambda r: -len(r["matchedMachines"]))  # stable: name order otherwise
             applied = (["location"] if location else []) + (["machines"] if wanted else [])
             given = {"quantity": requirements["quantity"]["value"], "budget": requirements["budget"]["amount"],
                      "timeline": requirements["timeline"]}

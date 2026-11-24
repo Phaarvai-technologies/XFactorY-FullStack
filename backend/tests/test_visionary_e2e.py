@@ -418,11 +418,11 @@ async def test_not_yet_verified_listings_from_the_import(client):
     assert (await client.post("/visionary/requests", headers=v, json=send)).status_code == 404
 
 
-async def test_temporary_testing_mode_shows_every_manufacturer(client, monkeypatch):
-    """VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true (temporary, for testing): Visionaries see EVERY
-    signed-up manufacturer (approved or not, any % complete, Real or Demo, any city; matching ones
-    first) and can select it; the "Not yet verified" imported listings (Real or Demo) can be selected
-    too. Each card says why it would be hidden under the real rule. Archived stays hidden.
+async def test_temporary_testing_mode_shows_unverified_manufacturers_that_match(client, monkeypatch):
+    """VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true (temporary, for testing): every signed-up
+    manufacturer (approved or not, any % complete, Real or Demo) that matches the Visionary's
+    location and machines is shown and can be selected; the "Not yet verified" imported listings
+    (Real or Demo, same city) can be selected too. Each card says why it would be hidden under the real rule. Archived stays hidden.
     Off = the real rule."""
     from app.core.config import get_settings
 
@@ -460,12 +460,11 @@ async def test_temporary_testing_mode_shows_every_manufacturer(client, monkeypat
     assert [m["id"] for m in res["listings"]] == [listing] and res["listings"][0]["selectable"] is False
     assert "testingNote" not in res["manufacturers"][0]
 
-    # on: every signed-up manufacturer, same city + machine first, with the reason it would be hidden
+    # on: the same filters (city + machines), any approval / completeness / Real or Demo
     monkeypatch.setattr(get_settings(), "visionary_show_unverified_manufacturers", True)
     res = await find()
     ids = [m["id"] for m in res["manufacturers"]]
-    assert {approved, pending, demo_signed, far} <= set(ids)
-    assert ids.index(far) > max(ids.index(approved), ids.index(pending), ids.index(demo_signed))
+    assert sorted(ids) == sorted([approved, pending, demo_signed])       # not "far": other city / machine
     notes = {m["id"]: m["testingNote"] for m in res["manufacturers"]}
     assert notes[approved] == ""
     assert notes[pending] == "Testing only: Not approved · Profile 92% complete"

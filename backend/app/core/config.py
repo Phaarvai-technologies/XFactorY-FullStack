@@ -96,10 +96,11 @@ class Settings(BaseSettings):
     # rate limited, not answering) after short retries. Set it empty for no fallback.
     visionary_ai_fallback_model: str = "gemini-3.1-flash-lite"
 
-    # TEMPORARY (testing only): VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true shows Visionaries EVERY
-    # signed-up manufacturer on "Find a Manufacturer" (approved or not, any % complete, Real or Demo,
-    # same city / machines first) with "Select Manufacturer", each card saying why it would be hidden
-    # under the real rule; the "Not yet verified" imported listings can be selected too. Archived and
+    # TEMPORARY (testing only): VISIONARY_SHOW_UNVERIFIED_MANUFACTURERS=true lets every signed-up
+    # manufacturer match the Visionary's location and machines on "Find a Manufacturer" (approved or
+    # not, any % complete, Real or Demo) with "Select Manufacturer", each card saying why it would be
+    # hidden under the real rule; the "Not yet verified" imported listings (same city) can be
+    # selected too. Archived and
     # suspended companies stay hidden. The real rule (app/core/eligibility.py) is approved + 100%
     # complete + Real.
     # ON BY DEFAULT FOR NOW (project testing phase). To revert after testing: change True to False
