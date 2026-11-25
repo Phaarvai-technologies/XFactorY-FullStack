@@ -4,7 +4,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invitationMessage, whatsappNumber, whatsappUrl } from "@/lib/admin/whatsapp";
+import { invitationMessage, respondByLabel, whatsappNumber, whatsappUrl } from "@/lib/admin/whatsapp";
 
 const h = vi.hoisted(() => ({ data: null as unknown, toasts: [] as string[] }));
 vi.mock("@/lib/admin/api", () => ({
@@ -61,6 +61,14 @@ describe("WhatsApp helpers", () => {
       "",
       "– XfactorY Team",
     ].join("\n"));
+  });
+
+  it("message: shows the confirm-by date in Indian time, like the email", () => {
+    // sent 25 Nov 2026 20:00 UTC = 26 Nov 01:30 IST → confirm by 3 Dec 2026
+    const text = invitationMessage("Lakshmi", "Nilgiri", LINK, "2026-12-02T20:00:00+00:00");
+    expect(text).toContain("press *Confirm details* within 7 days (by 3 Dec 2026).");
+    expect(text).toContain("The link works for 14 days.");
+    expect(respondByLabel("not a date")).toBeNull();
   });
 
   it("url: wa.me with the number and the encoded message; no number → WhatsApp asks whom", () => {

@@ -27,6 +27,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -40,6 +41,8 @@ from app.core.config import Settings
 from app.core.email import Mailer
 from app.manufacturer_approval import OWNER_ROLES
 from app.manufacturer_approval import record_event as _record_event
+
+INDIA = timezone(timedelta(hours=5, minutes=30), "IST")  # dates in emails and WhatsApp are Indian dates
 
 log = logging.getLogger("xy.invitations")
 
@@ -121,17 +124,24 @@ async def _active_owner(db: AsyncSession, org_id: UUID) -> UUID | None:
 def respond_by_date(settings: Settings, row: dict) -> str:
     """The date the invite asks the manufacturer to confirm by (7 days after the last send;
     the link itself keeps working for 14). Shown as e.g. "2 Dec 2026"."""
-    due = row["last_sent_at"] + timedelta(days=settings.manufacturer_invite_respond_days)
+    due = (row["last_sent_at"] + timedelta(days=settings.manufacturer_invite_respond_days)).astimezone(INDIA)
     return f"{due.day} {due:%b %Y}"
+
+
+def days_left(expires_at: datetime) -> int:
+    """Whole days the link still works, rounded up: a link made a moment ago shows 14, not 13."""
+    seconds = (expires_at - datetime.now(timezone.utc)).total_seconds()
+    return max(1, math.ceil(seconds / 86400))
 
 
 async def _send(db: AsyncSession, settings: Settings, row: dict, code: str, reminder: bool) -> dict:
     url = invite_url(settings, code)
-    days = max(1, (row["expires_at"] - datetime.now(timezone.utc)).days)
+    days = days_left(row["expires_at"])
     respond_by = respond_by_date(settings, row)
     first, _ = _split_name(row["contact_name"])
     subject, body, html = (email_templates.manufacturer_invite_reminder if reminder
-                           else email_templates.manufacturer_invite)(first, row["company_name"], url, days, respond_by)
+                           else email_templates.manufacturer_invite)(first, row["company_name"], url, days, respond_by,
+                                                     settings.manufacturer_invite_respond_days)
     return await Mailer(settings, db).send(
         row["email"], "manufacturer_invite_reminder" if reminder else "manufacturer_invite", subject, body, html,
         organization_id=row["organization_id"])

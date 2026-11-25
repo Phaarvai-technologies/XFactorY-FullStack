@@ -23,9 +23,19 @@ export function whatsappNumber(phone: string | null | undefined): string | null 
   return digits.length >= 10 && digits.length <= 15 ? digits : null;
 }
 
-/** The same content as the invitation email (backend email_templates.manufacturer_invite). */
-export function invitationMessage(contactName: string, companyName: string, link: string): string {
+/** "2 Dec 2026" in Indian time, the same date the invitation email shows. */
+export function respondByLabel(respondBy: string | null | undefined): string | null {
+  if (!respondBy) return null;
+  const date = new Date(respondBy);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+}
+
+/** The same content as the invitation email (backend email_templates.manufacturer_invite):
+ * confirm within 7 days (with the date when known), the link works for 14 days. */
+export function invitationMessage(contactName: string, companyName: string, link: string, respondBy?: string | null): string {
   const first = contactName.trim().split(/\s+/)[0] ?? "";
+  const by = respondByLabel(respondBy);
   return [
     `Hello ${first || "there"},`,
     `Thank you for speaking with the XfactorY team. Your account for *${companyName}* is ready.`,
@@ -33,7 +43,7 @@ export function invitationMessage(contactName: string, companyName: string, link
     "Open it here (no password needed):",
     link,
     "",
-    "Please check your details, add anything missing and press *Confirm details* within 7 days.",
+    `Please check your details, add anything missing and press *Confirm details* within 7 days${by ? ` (by ${by})` : ""}.`,
     "The link works for 14 days.",
     "",
     "– XfactorY Team",

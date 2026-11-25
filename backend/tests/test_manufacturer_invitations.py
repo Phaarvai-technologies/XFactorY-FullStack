@@ -324,3 +324,20 @@ async def test_invite_email_asks_for_a_reply_within_7_days():
     assert "by 2 Dec 2026" in text and "works for 14 days" in text and "2 Dec 2026" in html
     _, text, _ = email_templates.manufacturer_invite_reminder("Lakshmi", "Nilgiri", "https://x/invite/abc", 11, due)
     assert "by 2 Dec 2026" in text
+
+
+async def test_new_link_says_14_days_not_13_and_dates_are_indian():
+    from datetime import datetime, timedelta, timezone
+    from app.core import email_templates
+    from app.core.config import get_settings
+    from app.invitations import days_left, respond_by_date
+    now = datetime.now(timezone.utc)
+    assert days_left(now + timedelta(days=14) - timedelta(seconds=5)) == 14  # just sent
+    assert days_left(now + timedelta(days=2) - timedelta(hours=1)) == 2      # day-12 reminder
+    assert days_left(now - timedelta(days=1)) == 1
+    # sent at 20:00 UTC = 01:30 next day in India → the date is counted from the Indian date
+    assert respond_by_date(get_settings(), {"last_sent_at": datetime(2026, 11, 25, 20, tzinfo=timezone.utc)}) == \
+        "3 Dec 2026"
+    _, text, html = email_templates.manufacturer_invite("Lakshmi", "Nilgiri", "https://x/invite/abc", 14, "2 Dec 2026")
+    assert "within 7 days (by 2 Dec 2026)" in text and "works for 14 days" in text
+    assert "within 7 days" in html and "works for 14 days" in html

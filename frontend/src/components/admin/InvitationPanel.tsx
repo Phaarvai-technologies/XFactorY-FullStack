@@ -116,7 +116,7 @@ export function InvitationPanel({
   /** WhatsApp's official click-to-chat link: the message is typed, the team presses Send. */
   function sendOnWhatsApp(invitation: Invitation) {
     if (!invitation.link) return;
-    const url = whatsappUrl(invitation.phone, invitationMessage(invitation.contactName, invitation.companyName, invitation.link));
+    const url = whatsappUrl(invitation.phone, invitationMessage(invitation.contactName, invitation.companyName, invitation.link, invitation.respondBy));
     window.open(url, "_blank", "noopener,noreferrer");
     toast(
       whatsappNumber(invitation.phone)
