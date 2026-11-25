@@ -1,0 +1,37 @@
+# Manufacturer magic link: once a day the backend emails reminders for links nobody has used
+# (days 3, 7 and 12 after sending) and closes links older than 14 days (app/invitations.py).
+#
+# Setup (once):
+# - Render backend -> Environment: INVITATION_JOB_SECRET = a long random text.
+# - GitHub repository -> Settings -> Secrets and variables -> Actions -> Secrets:
+#   INVITATION_JOB_SECRET = the same text.
+# - Optional variable BACKEND_API_URL (default https://xfactory-fullstack.onrender.com/api/v1).
+name: Invitation reminders
+
+on:
+  schedule:
+    - cron: "17 4 * * *"     # 04:17 UTC = 09:47 India time
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send due reminders
+        env:
+          API_URL: ${{ vars.BACKEND_API_URL || 'https://xfactory-fullstack.onrender.com/api/v1' }}
+          JOB_SECRET: ${{ secrets.INVITATION_JOB_SECRET }}
+        run: |
+          if [ -z "$JOB_SECRET" ]; then echo "::warning::INVITATION_JOB_SECRET is not set"; exit 1; fi
+          # The free server may be asleep: up to 3 tries.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o response.json -w "%{http_code}" --max-time 120 -X POST \
+              -H "X-Job-Secret: $JOB_SECRET" "$API_URL/jobs/invitation-reminders" || echo "000")
+            echo "Attempt $attempt: HTTP $code $(cat response.json 2>/dev/null)"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 30
+          done
+          exit 1

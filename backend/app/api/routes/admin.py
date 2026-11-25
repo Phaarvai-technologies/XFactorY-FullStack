@@ -5,12 +5,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.admins import AdminManager
 from app.admin.auth import AdminContext, current_admin
 from app.admin.schemas import (AccountStatusIn, AdminAddIn, AdminDetailsIn, AdminFields, AdminRestoreIn, AdminRoleIn, ArchiveIn,
-                               BatchArchiveIn, CompanyCreate, FieldEdit, NoteIn, RecordTypeIn, TestEmailIn, UpdateRequestDecision,
+                               BatchArchiveIn, CompanyCreate, FieldEdit, NoteIn, OnboardForm, RecordTypeIn, TestEmailIn, UpdateRequestDecision,
                                UpdateRequestEdit)
 from app.admin.service import AdminService
 from app.core.config import Settings, get_settings
@@ -163,6 +164,112 @@ async def manufacturer_people(org_id: UUID, admin: Admin, svc: Svc):
 async def edit_field(org_id: UUID, body: FieldEdit, admin: Admin, svc: Svc):
     """XY-ADMIN-06: correct one manufacturer response; old/new value, admin, time and reason are recorded."""
     return await svc.edit_field(admin, str(org_id), body.field, body.value, body.reason)
+
+
+# ---------------------------------------------------------------- manufacturer magic link
+class InviteIn(BaseModel):
+    contactName: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=3, max_length=320)
+    phone: str | None = Field(default=None, max_length=40)
+
+
+class MachineIn(BaseModel):
+    type: str = Field(min_length=1, max_length=200)
+    industry: str = Field(default="", max_length=100)
+    subcategory: str = Field(default="", max_length=200)
+    capacity: str = Field(default="", max_length=200)
+    technical: str = Field(default="", max_length=2000)
+    status: Literal["Published", "Draft"] = "Published"
+    reason: str = Field(min_length=1, max_length=500)
+
+
+def _invite_refusal(exc):
+    return JSONResponse({"detail": exc.message, "code": exc.code}, status_code=exc.status)
+
+
+@router.post("/manufacturers/onboarding", status_code=201)
+async def create_onboarding(body: OnboardForm, admin: Admin, svc: Svc):
+    """"Add manufacturer" page, new company: created (Admin Entry, duplicate check), then the page saved."""
+    from app.admin.company_create import CreateError
+    try:
+        org_id = await svc.create_onboarding(admin, body.model_dump())
+    except CreateError as exc:
+        await svc.db.rollback()
+        return JSONResponse({"detail": exc.message, "code": exc.code, "existingId": exc.existing_id},
+                            status_code=exc.status)
+    return JSONResponse(jsonable(await svc.onboarding_form(org_id)), status_code=201)
+
+
+@router.get("/manufacturers/{org_id}/onboarding")
+async def onboarding_form(org_id: UUID, admin: Admin, svc: Svc):
+    """"Add manufacturer" page: company, location, contact person and machines of one company."""
+    return await svc.onboarding_form(str(org_id))
+
+
+@router.put("/manufacturers/{org_id}/onboarding")
+async def save_onboarding_form(org_id: UUID, body: OnboardForm, admin: Admin, svc: Svc):
+    """Saves the page (only what changed; same validation and history as single edits)."""
+    return await svc.save_onboarding_form(admin, str(org_id), body.model_dump())
+
+
+@router.get("/manufacturers/{org_id}/invitations")
+async def manufacturer_invitations(org_id: UUID, admin: Admin, svc: Svc):
+    """Magic-link invitations (newest first, each open one with its shareable link) and where the
+    company's details came from."""
+    from app import invitations
+    return {"invitations": await invitations.list_for_company(svc.db, svc.settings, org_id),
+            "details": await invitations.details_state(svc.db, org_id),
+            "canInvite": bool(set(admin.roles) & set(invitations.INVITE_ROLES))}
+
+
+@router.post("/manufacturers/{org_id}/invitations", status_code=201)
+async def invite_manufacturer(org_id: UUID, body: InviteIn, admin: Admin, svc: Svc):
+    """Creates the manufacturer's account (no password) and sends the magic link (administrators /
+    operators). Returns the shareable link once more for Copy link / WhatsApp."""
+    from app import invitations
+    from app.core.clerk import ClerkManagement
+    try:
+        return await invitations.create(svc.db, svc.settings, ClerkManagement(svc.settings), admin_id=admin.user_id,
+                                        roles=admin.roles, org_id=org_id, contact_name=body.contactName,
+                                        email=body.email, phone=body.phone)
+    except invitations.InvitationError as exc:
+        await svc.db.rollback()
+        return _invite_refusal(exc)
+
+
+@router.post("/invitations/{invitation_id}/resend")
+async def resend_invitation(invitation_id: UUID, admin: Admin, svc: Svc):
+    from app import invitations
+    try:
+        return await invitations.resend(svc.db, svc.settings, admin_id=admin.user_id, roles=admin.roles,
+                                        invitation_id=invitation_id)
+    except invitations.InvitationError as exc:
+        await svc.db.rollback()
+        return _invite_refusal(exc)
+
+
+@router.post("/invitations/{invitation_id}/cancel")
+async def cancel_invitation(invitation_id: UUID, admin: Admin, svc: Svc):
+    from app import invitations
+    try:
+        return await invitations.cancel(svc.db, svc.settings, admin_id=admin.user_id, roles=admin.roles,
+                                        invitation_id=invitation_id)
+    except invitations.InvitationError as exc:
+        await svc.db.rollback()
+        return _invite_refusal(exc)
+
+
+@router.post("/manufacturers/{org_id}/details-reviewed")
+async def details_reviewed(org_id: UUID, admin: Admin, svc: Svc):
+    """Quick review done for details the manufacturer confirmed."""
+    from app import invitations
+    return await invitations.mark_reviewed(svc.db, org_id, admin.user_id)
+
+
+@router.post("/manufacturers/{org_id}/machinery", status_code=201)
+async def add_machine(org_id: UUID, body: MachineIn, admin: Admin, svc: Svc):
+    """The team adds a machine for a manufacturer (e.g. after a call). Recorded in the change history."""
+    return await svc.add_machine(admin, str(org_id), body.model_dump())
 
 
 @router.patch("/manufacturers/{org_id}/admin-fields")

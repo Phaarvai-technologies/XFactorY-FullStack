@@ -29,6 +29,8 @@ type DashboardScreenProps = {
   onFixCompanyDetails?: () => void;
   /** Approval first: set while the application is awaiting review, needs corrections or was
    * rejected. Only the dashboard home stays open; every section shows `message` instead. */
+  /** Shown at the top of the dashboard (e.g. "Confirm details" after the XfactorY team filled them in). */
+  topNotice?: ReactNode;
   lock?: {
     message: string;
     detail?: string | null;
@@ -84,6 +86,7 @@ export function DashboardScreen({
   onOpenProfileWizard,
   onFixCompanyDetails,
   lock,
+  topNotice,
   profileLockedMessage,
   updateRequests = [],
   onOpenMachineryWizard,
@@ -161,6 +164,7 @@ export function DashboardScreen({
       </div>
 
       <div className="dash-main">
+        {topNotice}
         {lock ? (
   <div className="card" role="status" style={{ marginBottom: 20 }}>
     <h3>Manufacturer Application Status</h3>

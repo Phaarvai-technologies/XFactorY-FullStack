@@ -39,7 +39,7 @@ export type RegistrationCheck =
   | { state: "blocked"; message: string; code?: "identity_mismatch" }
   | { state: "error"; message: string };
 
-type Fetch = typeof fetch;
+export type Fetch = typeof fetch;
 
 /** Every request to the XfactorY backend gives up after this long: an answer or an error, never an
  * endless "Creating account…" / "Signing you in…". */
@@ -97,7 +97,7 @@ export function wakeBackend(fetchImpl: Fetch = fetch): void {
 
 const STARTING_STATUSES = new Set([502, 503, 504]);
 
-async function backendFetch(doFetch: Fetch, url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+export async function backendFetch(doFetch: Fetch, url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
   if (typeof window === "undefined" || signal) return doFetch(url, { ...init, signal: timeoutSignal(signal) });
   const deadline = Date.now() + BACKEND_WAKE.deadlineMs;
   let waking = false;

@@ -23,6 +23,7 @@ import { Analytics } from "@/components/admin/Analytics";
 import { ChangePasswordModal } from "@/components/admin/ChangePasswordModal";
 import { EditMyDetailsModal, savedMessage } from "@/components/admin/EditAdminDetails";
 import { ManufacturerDetail } from "@/components/admin/ManufacturerDetail";
+import { OnboardManufacturer } from "@/components/admin/OnboardManufacturer";
 import { Machinery } from "@/components/admin/Machinery";
 import { Manufacturers } from "@/components/admin/Manufacturers";
 import { Overview } from "@/components/admin/Overview";
@@ -61,10 +62,15 @@ export const useReloadAdminMe = () => useContext(AdminMeReloadContext);
 
 function route(path: string): { screen: string; id?: string } {
   const parts = path.replace(/\/+$/, "").split("/").filter(Boolean); // ["admin", ...]
-  const [, section, id] = parts;
+  const [, section, id, sub] = parts;
   if (!section) return { screen: "overview" };
   if (section === "login") return { screen: "login" };
-  if (section === "manufacturers") return id ? { screen: "manufacturer", id } : { screen: "manufacturers" };
+  if (section === "manufacturers") {
+    // "Add manufacturer" page: /admin/manufacturers/new, or /admin/manufacturers/{id}/onboard
+    if (id === "new") return { screen: "onboard" };
+    if (id && sub === "onboard") return { screen: "onboard", id };
+    return id ? { screen: "manufacturer", id } : { screen: "manufacturers" };
+  }
   if (section === "users") return id ? { screen: "user", id } : { screen: "users" };
   if (section === "visionaries") return id ? { screen: "visionary", id } : { screen: "visionaries" };
   if (["review", "analytics", "support", "admins", "machinery"].includes(section)) return { screen: section };
@@ -180,6 +186,9 @@ export function AdminShell() {
       break;
     case "manufacturer":
       content = <ManufacturerDetail id={id!} />;
+      break;
+    case "onboard":
+      content = <OnboardManufacturer key={id ?? "new"} id={id} />;
       break;
     case "machinery":
       content = <Machinery />;

@@ -1091,8 +1091,10 @@ class ManufacturerRepository:
                 """), {"machine": machine_id, "file": file_id, "order": 0 if primary else order + 1})
 
     # ------------------------------------------------------------------ machinery
-    async def create_machinery(self, actor: Actor, data: dict, images: list[tuple[UUID, bool]]) -> str:
-        ctx = await self.context(actor)
+    async def create_machinery(self, actor: Actor | None, data: dict, images: list[tuple[UUID, bool]],
+                               ctx: dict | None = None) -> str:
+        """`ctx` (admin work, context_for_org) replaces the signed-in manufacturer's context."""
+        ctx = ctx or await self.context(actor)
         term_id = await self.db.scalar(text("""
             INSERT INTO taxonomy_terms(term_type,term,code,status)
             VALUES ('machinery',:term,:code,'active')
@@ -1218,6 +1220,8 @@ class ManufacturerRepository:
                    mo.personal_information_completed,mo.company_information_completed,mo.location_completed,
                    mo.certification_completed,mo.infrastructure_completed,mo.faq_completed,mo.completion_percentage,
                    mo.status approval_status, o.record_type,
+                   -- magic-link flow: where the details came from (app/invitations.py details_state)
+                   o.details_source, o.details_source_at, o.details_reviewed_at, mo.rejection_reason,
                    -- approval-first access of this user (app/manufacturer_access.py), same query
                    (SELECT row_to_json(x) FROM (__ACCESS_ROW__) x) AS access_row,
                    (SELECT ov.completeness FROM admin_manufacturer_overview ov

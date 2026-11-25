@@ -512,6 +512,161 @@ class AdminService:
             raise ValueError(str(first.get("msg", "Invalid value")).removeprefix("Value error, ")) from exc
         raise ValueError("This field cannot be edited")
 
+    # ------------------------------------------------------------------ "Add manufacturer" page
+    # (form section, key) -> the editable field it saves through (same rules and history as edit_field)
+    ONBOARD_FIELDS = (
+        ("company", "name", "company.name"), ("company", "category", "account.companyType"),
+        ("company", "about", "company.about"), ("company", "estYear", "company.estYear"),
+        ("company", "employees", "company.employees"), ("company", "businessType", "company.businessType"),
+        ("company", "orgSize", "company.orgSize"), ("company", "capacity", "account.capacity"),
+        ("location", "address", "location.address"), ("location", "city", "location.city"),
+        ("location", "state", "location.state"), ("location", "country", "location.country"),
+        ("location", "zip", "location.zip"),
+        ("contact", "email", "contact.email"), ("contact", "phone", "contact.phone"),
+    )
+    ONBOARD_MACHINE_KEYS = ("type", "industry", "subcategory", "capacity", "technical")
+
+    @staticmethod
+    def _form_text(value: Any) -> str:
+        return "" if value is None else str(value).strip()
+
+    async def onboarding_form(self, org_id: str) -> dict:
+        """The "Add manufacturer" page: company, location, contact person and machines in one form."""
+        ctx = await self._ctx(org_id)
+        raw, view = await self._view(ctx)
+        form: dict = {"company": {}, "location": {}, "contact": {}}
+        for section, key, field in self.ONBOARD_FIELDS:
+            form[section][key] = self._form_text(self._current_value(field, raw, view))
+        extra = await self.repo.row("""
+            SELECT op.contact_person_name, o.record_type,
+                   EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id = o.id AND m.status = 'active'
+                             AND m.membership_role IN ('owner', 'admin')) AS has_owner
+            FROM organizations o LEFT JOIN organization_profiles op ON op.organization_id = o.id
+            WHERE o.id = CAST(:o AS uuid)
+        """, {"o": org_id}) or {}
+        form["contact"]["personName"] = extra.get("contact_person_name") or ""
+        form["machines"] = [{"id": m["id"], **{k: self._form_text(m.get(k)) for k in self.ONBOARD_MACHINE_KEYS},
+                             "status": m.get("status") or ""}
+                            for m in view["state"]["machinery"] if (m.get("status") or "") != "Archived"]
+        return {"id": org_id, **form, "recordType": extra.get("record_type") or "REAL",
+                "hasOwner": bool(extra.get("has_owner"))}
+
+    def _require_onboard_role(self, admin: AdminContext) -> None:
+        from app import invitations
+        if not set(admin.roles) & set(invitations.INVITE_ROLES):
+            raise HTTPException(403, "Only administrators and operators can add manufacturers and edit their details here.")
+
+    async def save_onboarding_form(self, admin: AdminContext, org_id: str, body: dict) -> dict:
+        """Saves what changed on the page. Every change goes through the same validation and change
+        history as a single field edit; nothing is saved when any value is invalid."""
+        from app import invitations
+        self._require_onboard_role(admin)
+        reason = (body.get("reason") or "").strip() or "Details from a call with the manufacturer"
+        current = await self.onboarding_form(org_id)
+        edits: list[tuple[str, Any]] = []
+        for section, key, field in self.ONBOARD_FIELDS:
+            new = self._form_text((body.get(section) or {}).get(key))
+            old = current[section][key]
+            if new == old or (new == "" and field in REQUIRED_KEYS):
+                continue                     # a required value is never cleared from this page
+            edits.append((field, new))
+        country = self._form_text((body.get("location") or {}).get("country"))
+        if country:
+            ctx = await self._ctx(org_id)
+            raw, view = await self._view(ctx)
+            if self._form_text(self._current_value("account.country", raw, view)) != country:
+                edits.append(("account.country", country))
+        machines = body.get("machines") or []
+        known = {m["id"]: m for m in current["machines"]}
+        for m in machines:
+            if m.get("id") and m["id"] in known and not m.get("remove"):
+                for key in self.ONBOARD_MACHINE_KEYS:
+                    new = self._form_text(m.get(key))
+                    if new != known[m["id"]][key] and not (key == "type" and not new):
+                        edits.append((f"machinery.{m['id']}.{key}", new))
+        # validate everything first (all or nothing)
+        problems = []
+        for field, value in edits:
+            try:
+                self._validate(field, value)
+            except (ValueError, LookupError) as exc:
+                problems.append(f"{self._label(field)}: {exc}")
+        for m in machines:
+            if not m.get("id") and not m.get("remove") and not self._form_text(m.get("type")) and any(
+                    self._form_text(m.get(k)) for k in self.ONBOARD_MACHINE_KEYS):
+                problems.append("Machines: every machine needs a name.")
+        if problems:
+            raise HTTPException(422, " ".join(problems))
+        for field, value in edits:
+            try:
+                await self.edit_field(admin, org_id, field, value, reason)
+            except HTTPException as exc:
+                if exc.status_code == 422 and "same as the current value" in str(exc.detail):
+                    continue
+                raise
+        person = self._form_text((body.get("contact") or {}).get("personName"))
+        if person != current["contact"]["personName"]:
+            await self.db.execute(text("""
+                INSERT INTO organization_profiles (organization_id, contact_person_name) VALUES (CAST(:o AS uuid), :n)
+                ON CONFLICT (organization_id) DO UPDATE SET contact_person_name = EXCLUDED.contact_person_name,
+                  updated_at = now()
+            """), {"o": org_id, "n": person or None})
+            await self.repo.add_history(org_id, "Contact person", current["contact"]["personName"], person,
+                                        admin.user_id, reason)
+            await invitations.mark_entered_by_xfactory(self.db, org_id, admin.user_id)
+            await self.db.commit()
+        for m in machines:
+            if m.get("remove") and m.get("id") in known:
+                await self.db.execute(text("""
+                    UPDATE machines SET status = 'archived', publication_status = 'hidden', version = version + 1
+                    WHERE id = CAST(:m AS uuid) AND organization_id = CAST(:o AS uuid)
+                """), {"m": m["id"], "o": org_id})
+                await self.repo.add_history(org_id, "Machinery removed", known[m["id"]]["type"], None,
+                                            admin.user_id, reason)
+                await self.db.commit()
+            elif not m.get("id") and not m.get("remove") and self._form_text(m.get("type")):
+                await self.add_machine(admin, org_id, {
+                    **{k: self._form_text(m.get(k)) for k in self.ONBOARD_MACHINE_KEYS},
+                    "status": "Published", "reason": reason})
+        return await self.onboarding_form(org_id)
+
+    async def create_onboarding(self, admin: AdminContext, body: dict) -> str:
+        """A new company from the "Add manufacturer" page: created as an Admin Entry (same rules and
+        duplicate check as Add company), then the rest of the page is saved. Returns its id."""
+        from app.admin.company_create import create_company
+        self._require_onboard_role(admin)
+        company, location, contact = body["company"], body.get("location") or {}, body.get("contact") or {}
+        org_id, _ = await create_company(self.db, admin_id=admin.user_id, roles=admin.roles, data={
+            "name": company["name"], "country": location.get("country") or "", "state": location.get("state") or "",
+            "city": location.get("city") or "", "address": location.get("address") or "",
+            "category": company.get("category") or "", "website": "", "registration_id": "",
+            "email": contact.get("email") or "", "phone": contact.get("phone") or "",
+            "capacity": company.get("capacity") or "", "reason": body.get("reason") or "",
+            "record_type": body.get("record_type") or "REAL"}, idempotency_key=None)
+        await self.db.commit()
+        await self.save_onboarding_form(admin, org_id, body)
+        from app import invitations
+        await invitations.mark_entered_by_xfactory(self.db, org_id, admin.user_id)
+        await self.db.commit()
+        return org_id
+
+    async def add_machine(self, admin: AdminContext, org_id: str, data: dict) -> dict:
+        """A machine added by the team (magic-link flow): saved like the manufacturer's own form,
+        recorded in the change history, the company marked as entered by XfactorY when it has no
+        owner yet."""
+        from app import invitations
+        reason = data.pop("reason").strip()
+        ctx = await self._ctx(org_id)
+        data = {k: (v.strip() if isinstance(v, str) else v) for k, v in data.items()}
+
+        async def apply():
+            await self.mrepo.create_machinery(None, {**data, "images": []}, [], ctx=ctx)
+            await self.repo.add_history(org_id, "Machinery added", None, data["type"], admin.user_id, reason)
+            await invitations.mark_entered_by_xfactory(self.db, org_id, admin.user_id)
+            await self.db.commit()
+        await self._run(apply())
+        return await self.detail(org_id)
+
     async def edit_field(self, admin: AdminContext, org_id: str, field: str, value: Any, reason: str) -> dict:
         ctx = await self._ctx(org_id)
         raw, view = await self._view(ctx)
@@ -538,6 +693,10 @@ class AdminService:
                     raise LookupError("Machinery listing not found")
                 await self.mrepo._apply_machinery_changes(machine_id, changes, None)
             await self.repo.add_history(org_id, self._label(field), old, new, admin.user_id, reason)
+            # The team filling in a company that has no owner yet (magic-link flow): marked, so the
+            # manufacturer confirms it later. Corrections to an owned company are not marked.
+            from app import invitations
+            await invitations.mark_entered_by_xfactory(self.db, org_id, admin.user_id)
             label = self._label(field)
             await notifications.notify_company(
                 self.db, org_id, "profile_edit",

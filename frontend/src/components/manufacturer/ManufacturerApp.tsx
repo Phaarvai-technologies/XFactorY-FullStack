@@ -16,6 +16,7 @@ import {
   type SetStateAction,
 } from "react";
 import { AccountScreen, type AccountSubmission } from "@/components/manufacturer/AccountScreen";
+import { ConfirmDetailsBanner, confirmCardMode, type DetailsState } from "@/components/manufacturer/ConfirmDetailsBanner";
 import { DashboardScreen } from "@/components/manufacturer/DashboardScreen";
 import { LandingScreen } from "@/components/manufacturer/LandingScreen";
 import { MachineryWizard, type MachineryDraft } from "@/components/manufacturer/MachineryWizard";
@@ -77,6 +78,8 @@ type ServerSnapshot = {
   };
   /** What the account form submission became (set on POST /manufacturer/account). */
   submitted?: { kind: string; companyId: string; companyName: string; requestId: string | null } | null;
+  /** Magic-link flow: where the company's details came from (backend app/invitations.py). */
+  details?: DetailsState | null;
 };
 
 /** The user's manufacturer application and what it unlocks (backend app/manufacturer_access.py). */
@@ -215,6 +218,8 @@ export function ManufacturerApp() {
     path?: string;
     /** Admin approval of the submitted details; corrections reopen the details form. */
     approval?: ServerSnapshot["approval"] | null;
+    /** Details the XfactorY team entered after a call, waiting for "Confirm details". */
+    details?: DetailsState | null;
   } | null>(null);
   const checked =
     server !== null && server.userId === userId && (!server.failed || server.path === pathname);
@@ -416,7 +421,7 @@ export function ManufacturerApp() {
         applySnapshot(snapshot);
         if (snapshot.accountExists) markManufacturerProfileComplete();
         setServer({ userId, accountExists: snapshot.accountExists, failed: false,
-                    approval: snapshot.approval ?? null });
+                    approval: snapshot.approval ?? null, details: snapshot.details ?? null });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -872,6 +877,15 @@ export function ManufacturerApp() {
       {screen === "dashboard" ? (
         <>
           <DashboardScreen
+            topNotice={
+              server?.details && confirmCardMode(server.details) && access?.canEditProfile !== false ? (
+                <ConfirmDetailsBanner
+                  details={server.details}
+                  confirm={() => request<DetailsState>("/manufacturer/details/confirm", { method: "POST" })}
+                  onConfirmed={(details) => setServer((current) => (current ? { ...current, details } : current))}
+                />
+              ) : null
+            }
             state={state}
             pct={pct}
             flags={flags}

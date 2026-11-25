@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes.admin import router as admin_router
 from app.api.routes.admin_auth import router as admin_auth_router
 from app.api.routes.identity import router as identity_router
+from app.api.routes.invitations import router as invitations_router
 from app.api.routes.manufacturer import router as manufacturer_router
 from app.api.routes.visionary import router as visionary_router
 from app.api.routes.webhooks import router as clerk_webhook_router
@@ -70,6 +71,7 @@ async def registration_required(_request, _exc):
 
 app.include_router(manufacturer_router, prefix="/api/v1")
 app.include_router(identity_router, prefix="/api/v1")
+app.include_router(invitations_router, prefix="/api/v1")
 app.include_router(visionary_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(admin_auth_router, prefix="/api/v1")

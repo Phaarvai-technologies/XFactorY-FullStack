@@ -134,3 +134,49 @@ class CompanyCreate(_Model):
     reason: str = Field(default="", max_length=500)
     # Real company or demo (sample) data; TEST is never entered by hand. Default: REAL.
     record_type: Literal["REAL", "DEMO"] = "REAL"
+
+
+# ---------------------------------------------------------------- "Add manufacturer" page (magic link)
+class OnboardCompany(_Model):
+    name: str = Field(min_length=1, max_length=200)
+    category: str = Field(default="", max_length=150)
+    about: str = Field(default="", max_length=2000)
+    estYear: str = Field(default="", max_length=10)
+    employees: str = Field(default="", max_length=10)
+    businessType: str = Field(default="", max_length=100)
+    orgSize: str = Field(default="", max_length=100)
+    capacity: str = Field(default="", max_length=100)
+
+
+class OnboardLocation(_Model):
+    address: str = Field(default="", max_length=300)
+    city: str = Field(default="", max_length=100)
+    state: str = Field(default="", max_length=100)
+    country: str = Field(default="India", max_length=100)
+    zip: str = Field(default="", max_length=20)
+
+
+class OnboardContact(_Model):
+    personName: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=30)
+
+
+class OnboardMachine(_Model):
+    id: str | None = Field(default=None, max_length=64)   # existing machine; None = new
+    type: str = Field(default="", max_length=200)
+    industry: str = Field(default="", max_length=100)
+    subcategory: str = Field(default="", max_length=200)
+    capacity: str = Field(default="", max_length=200)
+    technical: str = Field(default="", max_length=2000)
+    remove: bool = False
+
+
+class OnboardForm(_Model):
+    """One page for what the team learns on the call: company, contact person, machines."""
+    company: OnboardCompany
+    location: OnboardLocation = OnboardLocation()
+    contact: OnboardContact = OnboardContact()
+    machines: list[OnboardMachine] = Field(default_factory=list, max_length=30)
+    record_type: Literal["REAL", "DEMO"] = "REAL"
+    reason: str = Field(default="Details from a call with the manufacturer", max_length=500)

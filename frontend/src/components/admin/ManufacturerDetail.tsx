@@ -15,6 +15,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import { EditFieldModal, type EditTarget } from "@/components/admin/EditFieldModal";
+import { InvitationPanel } from "@/components/admin/InvitationPanel";
 import { RegisteredUsers } from "@/components/admin/RegisteredUsers";
 import {
   ActionsMenu,
@@ -260,6 +261,10 @@ export function ManufacturerDetail({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      {/* Magic link: invite the manufacturer after a call (the backend checks who may invite). */}
+      <InvitationPanel orgId={id} hasOwner={!!m.ownerUserId} onChanged={reload}
+        onEditDetails={() => go(`/admin/manufacturers/${id}/onboard`)} />
 
       {m.missingFields.length > 0 && (
         <div className="adm-missing-banner" role="note">

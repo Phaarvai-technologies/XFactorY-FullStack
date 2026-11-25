@@ -39,7 +39,7 @@ function serve(reply: (c: Call) => [unknown, number]) {
 
 const LIST = { total: 0, page: 1, pageSize: 25, rows: [], facets: { industries: [], countries: [] } };
 
-describe("Add company button", () => {
+describe("Add manufacturer button", () => {
   it.each([
     [["platform_administrator"], true],
     [["platform_operator"], true],
@@ -50,16 +50,16 @@ describe("Add company button", () => {
     serve(() => [LIST, 200]);
     render(<AdminHostContext.Provider value={host()}><Manufacturers /></AdminHostContext.Provider>);
     await screen.findByText(/No manufacturers|match/i).catch(() => undefined);
-    expect(!!screen.queryByRole("button", { name: /Add company/ })).toBe(visible);
+    expect(!!screen.queryByRole("button", { name: /Add manufacturer/ })).toBe(visible);
   });
 
-  it("opens the form", async () => {
+  it("opens the one-page Add manufacturer form", async () => {
     me.current = { roles: ["platform_administrator"] };
     serve(() => [LIST, 200]);
-    render(<AdminHostContext.Provider value={host()}><Manufacturers /></AdminHostContext.Provider>);
-    fireEvent.click(await screen.findByRole("button", { name: /Add company/ }));
-    expect(screen.getByLabelText(/Company name/)).toBeInTheDocument();
-    expect(screen.getByText(/recorded as/)).toHaveTextContent("Admin Entry");
+    const h = host();
+    render(<AdminHostContext.Provider value={h}><Manufacturers /></AdminHostContext.Provider>);
+    fireEvent.click(await screen.findByRole("button", { name: /Add manufacturer/ }));
+    expect(h.went).toEqual(["/admin/manufacturers/new"]);
   });
 });
 

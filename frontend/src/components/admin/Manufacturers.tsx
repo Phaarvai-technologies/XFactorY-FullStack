@@ -2,7 +2,6 @@
 
 import { Archive, ArchiveRestore, ClipboardCheck, Cog, Eye, FlaskConical, Pencil, Plus, SlidersHorizontal } from "lucide-react";
 import { useCallback, useState } from "react";
-import { AddCompanyModal } from "@/components/admin/AddCompany";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import {
   ActionsMenu,
@@ -56,7 +55,6 @@ export function Manufacturers() {
   const [confirm, setConfirm] = useState<{ ids: string[]; archive: boolean; batch: boolean } | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [adding, setAdding] = useState(false);
   // Admin Entry: administrators / operators only (the backend checks the same roles).
   const me = useAdminMe();
   const canAdd = !!me?.roles.some((r) => r === "platform_administrator" || r === "platform_operator");
@@ -155,12 +153,11 @@ export function Manufacturers() {
         title="Manufacturers"
         subtitle="Approved companies and those added by admins. New submissions wait in Onboarding & review."
         actions={canAdd ? (
-          <button type="button" className="btn-primary adm-btn-md" onClick={() => setAdding(true)}>
-            <Plus size={15} /> Add company
+          <button type="button" className="btn-primary adm-btn-md" onClick={() => go("/admin/manufacturers/new")}>
+            <Plus size={15} /> Add manufacturer
           </button>
         ) : undefined}
       />
-      {adding && <AddCompanyModal onClose={() => setAdding(false)} />}
 
       <div className="card adm-toolbar">
         <div className="adm-toolbar-row">

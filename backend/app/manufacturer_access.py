@@ -134,6 +134,9 @@ STATE_SQL = """
       EXISTS (SELECT 1 FROM manufacturer_submissions s
               WHERE s.organization_id = {o} AND s.kind <> 'update_request') AS has_submission,
       (SELECT __WORKSPACE__ FROM organizations ws WHERE ws.id = {o}) AS applicant_workspace,
+      -- magic link (app/invitations.py): the owner the XfactorY team invited may edit before approval
+      EXISTS (SELECT 1 FROM manufacturer_invitations i
+              WHERE i.organization_id = {o} AND i.accepted_user_id = {u} AND i.status = 'accepted') AS invited,
       (SELECT row_to_json(a) FROM (
          SELECT s.id, s.kind, s.status, s.target_organization_id, s.review_feedback, s.reviewed_at,
                 s.correction_fields, s.submitted_at, s.created_at, t.display_name AS company_name
@@ -167,7 +170,11 @@ async def state(db: AsyncSession, ctx: dict, settings, row: dict | None = None) 
     # Accounts that completed the details form before approvals existed: unchanged behaviour.
     legacy = app is None and bool(row.get("details_sent")) and not row.get("has_submission")
     own_approved = bool(app and app["status"] == "approved" and str(app["target_organization_id"]) == str(org))
-    unlocked = org_approved or legacy or own_approved
+    # Invited by the XfactorY team after a call (magic link): the owner checks and completes the
+    # details the team entered, then presses "Confirm details", which sends them for approval.
+    # Their sections stay open meanwhile (not after a rejection).
+    invited = bool(row.get("invited")) and row.get("org_status") != "rejected"
+    unlocked = org_approved or legacy or own_approved or invited
     role = row.get("membership_role")
     status = "approved" if unlocked else (app["status"] if app else "not_submitted")
     hours = int(getattr(settings, "manufacturer_reapply_after_hours", 24))

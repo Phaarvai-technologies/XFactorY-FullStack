@@ -1,5 +1,6 @@
 """Email texts. Each function returns (subject, plain_text, html).
-Values from users (names, notes) are HTML-escaped; no passwords or tokens are ever included."""
+Values from users (names, notes) are HTML-escaped; no passwords or tokens are ever included,
+except the manufacturer magic link, whose whole purpose is to sign the recipient in."""
 from html import escape
 
 BLUE = "#2563eb"
@@ -137,4 +138,42 @@ def test_email(admin_name):
             f"If you can read this, outgoing email works.")
     html = _html("Test email", [f"This is a test email sent by <b>{escape(admin_name or 'an XfactorY admin')}</b> "
                                 f"from the XfactorY admin dashboard.", "If you can read this, outgoing email works."])
+    return subject, text, html
+
+
+def manufacturer_invite(name, company, url, days, respond_by):
+    """`days`: how long the link works (14); `respond_by`: the date we ask them to finish by (7 days)."""
+    subject = f"Your XfactorY account for {company} is ready"
+    text = (f"{_hello(name)}\n\nThank you for speaking with the XfactorY team. We have set up an account for "
+            f"{company} with the details you shared.\n\n"
+            f"Open your account (no password needed): {url}\n\n"
+            f"Check your details, add anything missing and press \"Confirm details\". "
+            f"Please do this by {respond_by}.\n\n"
+            f"The link works for {days} days. When you first open it you can set a password or choose "
+            f"Google sign-in for next time.\n\nThe XfactorY team")
+    html = _html(f"Your XfactorY account for {company} is ready",
+                 [escape(_hello(name)),
+                  f"Thank you for speaking with the XfactorY team. We have set up an account for "
+                  f"<b>{escape(company)}</b> with the details you shared.",
+                  "Open it with the button below; no password is needed. Check your details, add anything "
+                  f"missing and press <b>Confirm details</b>. Please do this by <b>{escape(respond_by)}</b>."],
+                 ("Open my account", url),
+                 f"This link works for {days} days and opens your account only. When you first open it you can "
+                 f"set a password or choose Google sign-in for next time.")
+    return subject, text, html
+
+
+def manufacturer_invite_reminder(name, company, url, days, respond_by):
+    subject = f"Reminder: your XfactorY account for {company} is waiting"
+    text = (f"{_hello(name)}\n\nYour XfactorY account for {company} is ready but not set up yet. "
+            f"Please check your details and press \"Confirm details\" by {respond_by}.\n\n"
+            f"Open your account (no password needed): {url}\n\n"
+            f"The link works for {days} more days.\n\nThe XfactorY team")
+    html = _html(f"Your XfactorY account for {company} is waiting",
+                 [escape(_hello(name)),
+                  f"Your XfactorY account for <b>{escape(company)}</b> is ready but not set up yet. "
+                  "It takes a few minutes: open it, check your details and press <b>Confirm details</b>"
+                  f" by <b>{escape(respond_by)}</b>."],
+                 ("Open my account", url),
+                 f"This link works for {days} more days. No password is needed.")
     return subject, text, html

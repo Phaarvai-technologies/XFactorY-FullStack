@@ -128,6 +128,15 @@ class Settings(BaseSettings):
     # Links in emails point here (the frontend), e.g. https://your-app.vercel.app
     app_base_url: str = "http://localhost:3000"
 
+    # Manufacturer magic link (app/invitations.py): the shareable link signs the manufacturer in
+    # until the account is set up, for this many days; reminders go out on these days after it
+    # was sent. INVITATION_JOB_SECRET protects the daily reminder call (empty = reminders off).
+    manufacturer_invite_days: int = 14
+    # The invite email asks the manufacturer to confirm their details within this many days.
+    manufacturer_invite_respond_days: int = 7
+    manufacturer_invite_reminder_days: list[int] = [3, 7, 12]
+    invitation_job_secret: str = ""
+
     admin_session_hours: int = 12
     admin_idle_minutes: int = 60
     admin_max_failed_logins: int = 5

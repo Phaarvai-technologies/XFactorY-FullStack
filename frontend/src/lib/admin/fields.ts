@@ -137,3 +137,12 @@ export function displayValue(value: unknown): string {
   }
   return String(value);
 }
+
+/** Option lists for the admin "Add manufacturer" page (same choices as the onboarding forms). */
+export const ONBOARD_OPTIONS = {
+  businessTypes: BUSINESS_TYPES,
+  orgSizes: ORG_SIZES,
+  countries: LOCATION_COUNTRIES,
+  companyTypes: COMPANY_TYPES,
+  machineIndustries: MACHINE_INDUSTRIES,
+};

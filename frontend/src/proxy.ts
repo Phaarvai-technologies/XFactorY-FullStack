@@ -8,6 +8,8 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/sso-callback(.*)",
+  // Manufacturer magic link: the link itself signs the manufacturer in (app/invitations.py).
+  "/invite(.*)",
   // Public Manufacturer overview. Account page redirects signed-out users to /sign-up.
   // /manufacturer/dashboard stays Clerk-protected.
   "/manufacturer",

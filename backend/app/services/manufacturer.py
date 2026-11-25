@@ -205,7 +205,21 @@ class ManufacturerService:
         # Approval-first: what this user may use now (remaining sections stay locked until approval).
         row = _json_or_none(raw["profile"].get("access_row")) or None
         snapshot["approval"]["access"] = await self._run(access.state(self.repo.db, raw["context"], self.settings, row))
+        # Magic-link flow: details the XfactorY team entered wait for "Confirm details" (from the
+        # same snapshot query: no extra database round trip).
+        p = raw["profile"]
+        snapshot["details"] = {"source": p.get("details_source"), "at": p.get("details_source_at"), "by": "",
+                               "reviewedAt": p.get("details_reviewed_at"), "reviewedBy": "",
+                               "approvalStatus": p.get("approval_status"),
+                               "feedback": p.get("rejection_reason")
+                               if p.get("approval_status") == "changes_requested" else None}
         return snapshot
+
+    async def confirm_details(self, actor: Actor) -> dict:
+        """The manufacturer checked the details the XfactorY team entered for them."""
+        from app import invitations
+        ctx = await self._gated(actor, profile=True)
+        return await self._run(invitations.confirm_details(self.repo.db, ctx["organization_id"], ctx["user_id"]))
 
     async def _gated(self, actor: Actor, profile: bool = False) -> dict:
         """Context for a write below the basic details form. Never creates anything: a user without a

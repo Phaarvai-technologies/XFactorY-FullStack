@@ -41,6 +41,12 @@ async def create_account(body: AccountPayload, actor: Actor = Depends(registered
     """AccountScreen submit."""
     return await svc.create_account(actor, body.model_dump(mode="json"))
 
+@router.post("/details/confirm")
+async def confirm_details(actor: Actor = Depends(registered_actor), svc: ManufacturerService = Depends(service)):
+    """"Confirm details": the details the XfactorY team entered after the call are correct."""
+    return await svc.confirm_details(actor)
+
+
 @router.get("/companies/search")
 async def search_companies(
     q: str = Query(min_length=2, max_length=100),
