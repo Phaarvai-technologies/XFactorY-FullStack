@@ -475,7 +475,7 @@ function Row({
             <button type="button" className="adm-link adm-truncate" title={name} onClick={() => onOpen()}>
               {name}
             </button>
-            <RecordBadge type={r.recordType} />
+            <RecordBadge type={r.recordType} hideReal />
             {r.isArchived && <span className="badge badge-neutral">Archived</span>}
           </div>
           {(r.location || r.industry) && (
@@ -531,7 +531,7 @@ function Row({
             ["Onboarding source", `${sourceText(r.onboardingSource, r.stagedSource)}${r.onboardingSourceNote ? ` — ${r.onboardingSourceNote}` : ""}`],
             ["Record type / entry source (admin)", (
               <span key="source" className="adm-badge-row">
-                <RecordBadge type={r.recordType} />
+                <RecordBadge type={r.recordType} hideReal />
                 <EntryBadge source={r.entrySource} />
               </span>
             )],

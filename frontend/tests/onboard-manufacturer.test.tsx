@@ -133,7 +133,7 @@ describe("existing manufacturer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Invite manufacturer" }));
     const dialog = within(screen.getByRole("dialog"));
-    expect(dialog.getByLabelText(/Contact name/)).toHaveValue("Rahul Deshmukh");
+    expect(dialog.getByLabelText(/^Name/)).toHaveValue("Rahul Deshmukh");
     expect(dialog.getByLabelText(/Email \(their login\)/)).toHaveValue("rahul@sahyadri.in");
     expect(dialog.getByLabelText(/Phone \(WhatsApp\)/)).toHaveValue("+91 98220 99001");
   });

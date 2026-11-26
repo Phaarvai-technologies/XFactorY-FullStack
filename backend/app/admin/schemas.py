@@ -19,6 +19,17 @@ class FieldEdit(_Model):
     reason: str = Field(min_length=3, max_length=500)
 
 
+class FieldChange(_Model):
+    field: str = Field(min_length=3, max_length=120)
+    value: Any = None
+
+
+class FieldsEdit(_Model):
+    """The editable company page: several fields saved together; the reason is optional."""
+    changes: list[FieldChange] = Field(min_length=1, max_length=200)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class AdminFields(_Model):
     """XY-ADMIN-07/08: admin-owned fields. Only the keys sent are changed."""
     record_type: RecordType | None = None

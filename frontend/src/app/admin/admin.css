@@ -960,3 +960,24 @@
 .adm-root .adm-me-chip:disabled { cursor: default; }
 .adm-root .adm-pw-link { margin-top: 12px; }
 .adm-root .adm-readonly { background: var(--slate-50, #f8fafc); color: var(--slate-500); cursor: not-allowed; }
+
+/* Magic link (inside Registered Users) and the editable company page (daily check-in 26 Nov 2026) */
+.adm-root .adm-btn-row .btn-secondary-full.adm-btn-sm { width: auto; margin-top: 0; }
+.adm-root .adm-invite-embedded { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--slate-200); }
+.adm-root .adm-invite-embedded h4 { margin: 0; font-size: 15px; }
+.adm-root .adm-invite-row { padding: 10px 0; border-bottom: 1px dashed var(--slate-200); }
+.adm-root .adm-invite-row:last-child { border-bottom: 0; }
+.adm-root .adm-invite-row .adm-btn-row { margin-top: 8px; }
+.adm-root .adm-inline-input { width: 100%; margin-top: 4px; }
+.adm-root .adm-inline-input.adm-changed { border-color: var(--blue-500, #3b82f6); background: #eff6ff; }
+.adm-root .adm-savebar {
+  position: sticky; bottom: 0; z-index: 20; margin-top: 16px;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: #fff; border: 1px solid var(--slate-200); border-radius: 12px;
+  box-shadow: 0 -6px 20px -10px rgba(15, 23, 42, 0.25);
+}
+.adm-root .adm-savebar input { flex: 1 1 220px; min-width: 0; }
+.adm-root .adm-savebar .adm-btn-row { margin-top: 0; }
+@media (max-width: 640px) {
+  .adm-root .adm-savebar { flex-direction: column; align-items: stretch; }
+}

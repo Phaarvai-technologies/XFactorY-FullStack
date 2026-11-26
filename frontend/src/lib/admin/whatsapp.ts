@@ -33,14 +33,21 @@ export function respondByLabel(respondBy: string | null | undefined): string | n
 
 /** The same content as the invitation email (backend email_templates.manufacturer_invite):
  * confirm within 7 days (with the date when known), the link works for 14 days. */
-export function invitationMessage(contactName: string, companyName: string, link: string, respondBy?: string | null): string {
+export function invitationMessage(
+  contactName: string,
+  companyName: string,
+  link: string,
+  respondBy?: string | null,
+  /** A link made without an email: they enter their email and a code when they open it. */
+  withoutEmail = false,
+): string {
   const first = contactName.trim().split(/\s+/)[0] ?? "";
   const by = respondByLabel(respondBy);
   return [
     `Hello ${first || "there"},`,
     `Thank you for speaking with the XfactorY team. Your account for *${companyName}* is ready.`,
     "",
-    "Open it here (no password needed):",
+    withoutEmail ? "Open it here, enter your email and the code we email you (no password needed):" : "Open it here (no password needed):",
     link,
     "",
     `Please check your details, add anything missing and press *Confirm details* within 7 days${by ? ` (by ${by})` : ""}.`,

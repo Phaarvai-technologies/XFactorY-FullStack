@@ -2,13 +2,16 @@
  * "Send on WhatsApp" on the admin Magic link card: WhatsApp's free click-to-chat link opens with the
  * manufacturer's number and the invitation message (same content as the email); the team presses Send.
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invitationMessage, respondByLabel, whatsappNumber, whatsappUrl } from "@/lib/admin/whatsapp";
 
-const h = vi.hoisted(() => ({ data: null as unknown, toasts: [] as string[] }));
+const h = vi.hoisted(() => ({ data: null as unknown, toasts: [] as string[], calls: [] as { path: string; init: unknown }[] }));
 vi.mock("@/lib/admin/api", () => ({
-  useAdminApi: () => vi.fn(),
+  useAdminApi: () => async (path: string, init: unknown) => {
+    h.calls.push({ path, init });
+    return { link: "https://x/invite/NEW", email: "none", invitation: { email: "" } };
+  },
   useResource: () => ({ data: h.data, reload: () => undefined }),
   jsonBody: (method: string, body: unknown) => ({ method, body: JSON.stringify(body) }),
 }));
@@ -30,6 +33,7 @@ let opened: string[];
 beforeEach(() => {
   opened = [];
   h.toasts = [];
+  h.calls = [];
   vi.stubGlobal("open", (url: string) => { opened.push(url); return null; });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -108,5 +112,33 @@ describe("Magic link card", () => {
     h.data = { invitations: [invitation("+91 98430 23456")], details, canInvite: false };
     render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined} />);
     expect(screen.queryByRole("button", { name: "Send on WhatsApp" })).toBeNull();
+  });
+
+  it("26 Nov: a company that already has an owner can still get a link (another login)", () => {
+    h.data = { invitations: [{ ...invitation("+91 98430 23456"), status: "accepted", link: null, acceptedRole: "owner" }], details, canInvite: true };
+    render(<InvitationPanel orgId="org-1" hasOwner={true} onChanged={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Invite another user" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Generate link without email" })).toBeEnabled();
+  });
+
+  it("26 Nov: Generate link without email asks only for name / phone and creates the link", async () => {
+    h.data = { invitations: [], details, canInvite: true };
+    vi.stubGlobal("navigator", { clipboard: { writeText: async () => undefined } });
+    render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined} />);
+    fireEvent.click(screen.getByRole("button", { name: "Generate link without email" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.queryByLabelText(/Email/)).toBeNull();
+    fireEvent.change(dialog.getByLabelText(/Phone/), { target: { value: "+91 98400 11223" } });
+    await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Generate link" })));
+    expect(h.calls[0].path).toBe("/manufacturers/org-1/invitations");
+    expect(JSON.parse((h.calls[0].init as { body: string }).body)).toEqual({ contactName: null, email: null, phone: "+91 98400 11223" });
+  });
+
+  it("a link without email: the WhatsApp message tells them to enter their email and the code", () => {
+    h.data = { invitations: [{ ...invitation("+91 98430 23456"), email: "", contactName: "", withoutEmail: true }], details, canInvite: true };
+    render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined} />);
+    expect(screen.getByText("Link without email")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send on WhatsApp" }));
+    expect(new URL(opened[0]).searchParams.get("text")).toContain("enter your email and the code we email you");
   });
 });

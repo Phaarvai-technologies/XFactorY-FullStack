@@ -71,6 +71,10 @@ beforeEach(() => {
     h.requests.push({ url: String(input), auth: headers.Authorization ?? null, body: init.body ? JSON.parse(String(init.body)) : null });
     if (String(input).endsWith("/open")) return new Response(JSON.stringify(h.open), { status: 200 });
     if (String(input).endsWith("/accept")) return new Response(JSON.stringify(h.accept.json), { status: h.accept.status });
+    if (String(input).endsWith("/claim")) {
+      const body = JSON.parse(String(init.body)) as { email: string };
+      return new Response(JSON.stringify({ status: "verify", email: body.email.toLowerCase() }), { status: 200 });
+    }
     throw new Error(`unexpected ${input}`);
   });
 });
@@ -207,5 +211,44 @@ describe("Manufacturer magic link page", () => {
     await openPage();
     expect(await screen.findByText(/couldn't sign you in automatically/)).toBeInTheDocument();
     expect(h.setActive).not.toHaveBeenCalled();
+  });
+
+  it("link made without an email: they enter their email, confirm the code Clerk sends, then the Terms", async () => {
+    h.open = { status: "claim", companyName: "Vaigai Polymers", email: "", contactName: "" };
+    const create = vi.fn(async () => ({
+      supportedFirstFactors: [{ strategy: "email_code", emailAddressId: "idn_selvi" }],
+    }));
+    const prepareFirstFactor = vi.fn(async () => ({}));
+    const attemptFirstFactor = vi.fn(async () => {
+      h.session = { getToken: async () => "token-selvi" };
+      return { status: "complete", createdSessionId: "sess_selvi" };
+    });
+    h.signIn = { create, prepareFirstFactor, attemptFirstFactor };
+    await openPage();
+    expect(await screen.findByText(/set up an account for/)).toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();                       // no ticket, nobody signed in yet
+
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Selvi Arun" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "Selvi@Vaigai.in" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Email me a code" })));
+    const claim = h.requests.find((r) => r.url.endsWith("/claim"))!;
+    expect(claim.body).toEqual({ email: "Selvi@Vaigai.in", name: "Selvi Arun" });
+    expect(create).toHaveBeenCalledWith({ identifier: "selvi@vaigai.in" });
+    expect(prepareFirstFactor).toHaveBeenCalledWith({ strategy: "email_code", emailAddressId: "idn_selvi" });
+
+    expect(await screen.findByText(/We sent a code to/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "424242" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+    expect(attemptFirstFactor).toHaveBeenCalledWith({ strategy: "email_code", code: "424242" });
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_selvi" });
+    expect(await screen.findByText(/You are signed in as selvi@vaigai.in/)).toBeInTheDocument();
+  });
+
+  it("a claimed link opened again asks for the email code, never signs in by itself", async () => {
+    h.open = { status: "verify", companyName: "Vaigai Polymers", email: "selvi@vaigai.in", contactName: "Selvi" };
+    await openPage();
+    expect(await screen.findByText("Check your email")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send code" })).toBeInTheDocument();
+    expect(h.signIn.create).not.toHaveBeenCalled();
   });
 });

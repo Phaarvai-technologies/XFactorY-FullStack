@@ -191,14 +191,33 @@ async def test_magic_link_end_to_end(client, clerk_stub, monkeypatch):
     assert r.json()["details"]["source"] == "confirmed_by_manufacturer"
     assert r.json()["invitations"][0]["status"] == "accepted" and r.json()["invitations"][0]["link"] is None
 
-    # after set-up the link only says so (no ticket), and the company cannot be invited again
+    # after set-up the link only says so (no ticket)
     done = (await client.post(f"/invitations/{code}/open", headers={"Authorization": ""})).json()
     assert done["status"] == "accepted" and "ticket" not in done
-    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin,
-                          json={"contactName": "Someone", "email": f"other.{t}@example.com"})
-    assert r.status_code == 409 and r.json()["code"] == "has_owner"
     r = await client.post(f"/invitations/{code}/accept", headers=auth(client, invitee), json=terms)
     assert r.status_code == 200 and r.json()["alreadyAccepted"] is True
+    # the owner cannot be invited again to the same company
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin,
+                          json={"contactName": "Meena", "email": email})
+    assert r.status_code == 409 and r.json()["code"] == "already_member"
+
+    # 26 Nov: any company, also an approved one with an owner, can get a link for another login
+    other_email = f"ravi.{t}@example.com"
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin,
+                          json={"contactName": "Ravi Kumar", "email": other_email})
+    assert r.status_code == 201, r.text
+    other = accounts[other_email]
+    client.unregistered.add(other)
+    other_code = code_of(r.json()["link"])
+    assert (await client.post(f"/invitations/{other_code}/open", headers={"Authorization": ""})).json()["status"] == "open"
+    r = await client.post(f"/invitations/{other_code}/accept", headers=auth(client, other), json=terms)
+    assert r.status_code == 200 and r.json()["role"] == "admin", r.text
+    rows = await client.sql("""SELECT u.clerk_user_id, m.membership_role FROM memberships m JOIN users u ON u.id = m.user_id
+                               WHERE m.organization_id = CAST(:o AS uuid) AND m.status = 'active'
+                               ORDER BY m.membership_role DESC""", o=org)
+    assert sorted(rows) == sorted([(invitee, "owner"), (other, "admin")])
+    status = await client.sql("SELECT status FROM manufacturer_onboarding WHERE organization_id = CAST(:o AS uuid)", o=org)
+    assert status[0][0] == "approved"                                # the company stays approved
 
 
 async def test_resend_cancel_expiry_and_roles(client, clerk_stub):
@@ -341,3 +360,66 @@ async def test_new_link_says_14_days_not_13_and_dates_are_indian():
     _, text, html = email_templates.manufacturer_invite("Lakshmi", "Nilgiri", "https://x/invite/abc", 14, "2 Dec 2026")
     assert "within 7 days (by 2 Dec 2026)" in text and "works for 14 days" in text
     assert "within 7 days" in html and "works for 14 days" in html
+
+
+async def test_link_without_email_person_enters_their_email(client, clerk_stub):
+    """26 Nov: "generate magic link without email address" (sent by WhatsApp). Whoever opens it
+    gives their email, confirms it with Clerk's email code, then accepts as usual."""
+    accounts, tickets = clerk_stub
+    t = uuid.uuid4().hex[:6]
+    admin = await admin_headers(client)
+    org = await imported(client, f"Vaigai Polymers {t}")
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin, json={"phone": "+91 98400 11223"})
+    assert r.status_code == 201, r.text
+    assert r.json()["email"] == "none" and r.json()["invitation"]["withoutEmail"] is True
+    assert accounts == {}                                            # nothing created in Clerk yet
+    code = code_of(r.json()["link"])
+
+    opened = (await client.post(f"/invitations/{code}/open", headers={"Authorization": ""})).json()
+    assert opened["status"] == "claim" and "ticket" not in opened and opened["companyName"] == f"Vaigai Polymers {t}"
+    r = await client.post(f"/invitations/{code}/claim", json={"email": "not-an-email"})
+    assert r.status_code == 422
+    email = f"selvi.{t}@example.com"
+    r = await client.post(f"/invitations/{code}/claim", json={"email": email, "name": "Selvi Arun"})
+    assert r.status_code == 200 and r.json() == {"status": "verify", "email": email}, r.text
+    person = accounts[email]
+    client.unregistered.add(person)
+    # a claimed link never hands out a sign-in ticket: the person signs in with Clerk's email code
+    again = (await client.post(f"/invitations/{code}/open", headers={"Authorization": ""})).json()
+    assert again["status"] == "verify" and again["email"] == email and "ticket" not in again
+    assert tickets == []
+    terms = {"termsAccepted": True, "termsVersion": "terms-1.2;privacy-1.4"}
+    r = await client.post(f"/invitations/{code}/accept", headers=auth(client, person), json=terms)
+    assert r.status_code == 200 and r.json()["role"] == "owner", r.text
+    rows = await client.sql("""SELECT contact_name, email, status FROM manufacturer_invitations
+                               WHERE organization_id = CAST(:o AS uuid)""", o=org)
+    assert rows[0] == ("Selvi Arun", email, "accepted")
+    # no reminders for a link without email (nothing to send to)
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin, json={})
+    assert r.status_code == 201
+    other = code_of(r.json()["link"])
+    r = await client.post(f"/invitations/{other}/claim", json={"email": email})
+    assert r.status_code == 409 and "already" in r.json()["detail"]
+
+
+async def test_editable_page_saves_several_fields_at_once(client):
+    """26 Nov: the company page is editable in place with one Save (all or nothing)."""
+    t = uuid.uuid4().hex[:6]
+    admin = await admin_headers(client)
+    org = await imported(client, f"Palar Foundry {t}")
+    bad = [{"field": "company.about", "value": "Castings."}, {"field": "contact.email", "value": "nope"}]
+    r = await client.patch(f"/admin/manufacturers/{org}/fields/batch", headers=admin, json={"changes": bad})
+    assert r.status_code == 422 and "email" in r.json()["detail"].lower()
+    r = await client.get(f"/admin/manufacturers/{org}", headers=admin)
+    assert "Castings." not in str(r.json()["profile"])               # nothing saved
+    good = [{"field": "company.about", "value": "Grey iron castings."},
+            {"field": "contact.email", "value": f"sales.{t}@example.com"},
+            {"field": "location.city", "value": "Chennai"}]               # unchanged: skipped
+    r = await client.patch(f"/admin/manufacturers/{org}/fields/batch", headers=admin, json={"changes": good})
+    assert r.status_code == 200, r.text
+    assert r.json()["profile"]["profileData"]["company"]["about"] == "Grey iron castings."
+    assert r.json()["contacts"]["email"] == f"sales.{t}@example.com"
+    labels = [h["field_changed"] for h in r.json()["history"]]
+    assert "About the company" in labels and "City" not in labels
+    r = await client.patch(f"/admin/manufacturers/{org}/fields/batch", headers=admin, json={"changes": good})
+    assert r.status_code == 422                                      # nothing changed

@@ -26,6 +26,11 @@ class AcceptIn(BaseModel):
     termsVersion: str = Field(min_length=1, max_length=100)
 
 
+class ClaimIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    name: str | None = Field(default=None, max_length=200)
+
+
 def refusal(exc: invitations.InvitationError) -> JSONResponse:
     return JSONResponse({"detail": exc.message, "code": exc.code}, status_code=exc.status)
 
@@ -39,6 +44,20 @@ async def open_invitation(code: str, db: Db, settings: Conf):
     try:
         return await invitations.open_link(db, settings, ClerkManagement(settings), code)
     except invitations.InvitationError as exc:
+        return refusal(exc)
+
+
+@router.post("/invitations/{code}/claim")
+async def claim_invitation(code: str, body: ClaimIn, db: Db, settings: Conf):
+    """Public. A link made without an email: the person gives their email; they confirm it with
+    the code Clerk emails them (on the page), then accept as usual."""
+    if len(code) > 200:
+        return JSONResponse({"detail": "This link is not valid.", "code": "invalid"}, status_code=404)
+    try:
+        return await invitations.claim(db, settings, ClerkManagement(settings), code=code, email=body.email,
+                                       name=body.name)
+    except invitations.InvitationError as exc:
+        await db.rollback()
         return refusal(exc)
 
 

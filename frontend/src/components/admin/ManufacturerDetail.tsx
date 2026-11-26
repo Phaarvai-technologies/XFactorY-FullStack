@@ -12,7 +12,7 @@ import {
   ImageIcon,
   Pencil,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAdminMe, useToast } from "@/components/admin/AdminShell";
 import { EditFieldModal, type EditTarget } from "@/components/admin/EditFieldModal";
 import { InvitationPanel } from "@/components/admin/InvitationPanel";
@@ -30,7 +30,7 @@ import {
 } from "@/components/admin/ui";
 import { jsonBody, useAdminApi, useAdminHost, useResource } from "@/lib/admin/api";
 import { ApiError } from "@/lib/api";
-import { displayValue } from "@/lib/admin/fields";
+import { displayValue, fieldSpec } from "@/lib/admin/fields";
 import {
   ENTRY_LABELS,
   ENTRY_ORDER,
@@ -85,7 +85,16 @@ type Ctx = {
   d: Detail;
   missing: Set<string>;
   edit: (field: string, label: string, value: unknown) => void;
+  /** Editable page (daily check-in 26 Nov): typed-in values not saved yet, by field. */
+  drafts: Record<string, string>;
+  setDraft: (field: string, value: string, original: unknown) => void;
+  /** Magic link inside Registered Users. */
+  invite: { orgId: string; hasOwner: boolean; onChanged: () => void; onEditDetails: () => void };
 };
+
+/** Fields typed straight into their box (the rest, lists like FAQs, keep their Edit window). */
+const INLINE_KINDS = new Set(["text", "textarea", "select"]);
+const asText = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
 function isEmpty(v: unknown) {
   return v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
@@ -112,6 +121,36 @@ function Resp({
   const reqKey = requiredKey ?? (field ? REQUIRED_BY_FIELD[field] : undefined);
   const missing = !!reqKey && ctx.missing.has(reqKey) && isEmpty(value);
   const text = displayValue(value);
+  const spec = field ? fieldSpec(field) : null;
+  if (field && !readOnly && spec && INLINE_KINDS.has(spec.kind) && !Array.isArray(value) && typeof value !== "object") {
+    const id = `inline-${field.replace(/[^a-zA-Z0-9]+/g, "-")}`;
+    const changed = field in ctx.drafts;
+    const current = changed ? ctx.drafts[field] : asText(value);
+    const cls = `adm-inline-input${changed ? " adm-changed" : ""}`;
+    const onChange = (e: { target: { value: string } }) => ctx.setDraft(field, e.target.value, value);
+    const options = spec.options ? Array.from(new Set([...spec.options, ...(asText(value) ? [asText(value)] : [])])) : [];
+    return (
+      <div className={`detail-item adm-resp${missing && !changed ? " adm-missing" : ""}`}>
+        <label className="detail-label" htmlFor={id}>
+          {label}
+          {reqKey && <span className="adm-req"> *</span>}
+        </label>
+        {spec.kind === "textarea" ? (
+          <textarea id={id} className={cls} rows={multiline ? 3 : 2} value={current} onChange={onChange} />
+        ) : spec.kind === "select" ? (
+          <select id={id} className={cls} value={current} onChange={onChange}>
+            <option value="">{reqKey ? "Select…" : "— None —"}</option>
+            {options.map((o) => (
+              <option key={o}>{o}</option>
+            ))}
+          </select>
+        ) : (
+          <input id={id} className={cls} type="text" value={current} placeholder={spec.placeholder} onChange={onChange} />
+        )}
+        {missing && !changed ? <p className="adm-missing-text adm-cell-sub">Missing — required</p> : null}
+      </div>
+    );
+  }
   return (
     <div className={`detail-item adm-resp${missing ? " adm-missing" : ""}`}>
       <div className="adm-resp-head">
@@ -161,6 +200,18 @@ export function ManufacturerDetail({ id }: { id: string }) {
   const tab = (TABS.find((t) => t.key === search.get("tab"))?.key ?? "company") as TabKey;
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saveReason, setSaveReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const dirty = Object.keys(drafts).length > 0;
+  // Leaving the page with typed-in changes not saved: the browser asks first.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const me = useAdminMe();
   // Archive / restore: administrators and operators (the backend checks the same roles).
   const canArchive = !!me?.roles.some((r) => r === "platform_administrator" || r === "platform_operator");
@@ -174,7 +225,46 @@ export function ManufacturerDetail({ id }: { id: string }) {
     d,
     missing,
     edit: (field, label, value) => setEditing({ field, label, value, required: required.has(field) }),
+    drafts,
+    setDraft: (field, value, original) =>
+      setDrafts((cur) => {
+        const next = { ...cur };
+        if (value === asText(original)) delete next[field];
+        else next[field] = value;
+        return next;
+      }),
+    invite: {
+      orgId: id,
+      hasOwner: !!m.ownerUserId,
+      onChanged: reload,
+      onEditDetails: () => go(`/admin/manufacturers/${id}/onboard`),
+    },
   };
+
+  /** One Save for everything typed in (all checked first: nothing is saved if one value is wrong). */
+  async function saveAll() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const next = await call<Detail>(
+        `/manufacturers/${id}/fields/batch`,
+        jsonBody("PATCH", {
+          changes: Object.entries(drafts).map(([field, value]) => ({ field, value })),
+          reason: saveReason.trim() || null,
+        }),
+      );
+      const n = Object.keys(drafts).length;
+      setData(next);
+      setDrafts({});
+      setSaveReason("");
+      toast(`${n} change${n === 1 ? "" : "s"} saved — recorded in History`);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Could not save the changes.");
+    } finally {
+      setSaving(false);
+    }
+  }
   const setTab = (key: TabKey) => go(`/admin/manufacturers/${id}?tab=${key}`, { replace: true });
 
   return (
@@ -207,7 +297,7 @@ export function ManufacturerDetail({ id }: { id: string }) {
       <div className="card adm-summary">
         <div className="adm-summary-badges">
           <ReviewBadge status={m.reviewStatus} />
-          <RecordBadge type={m.recordType} />
+          <RecordBadge type={m.recordType} hideReal />
           <EntryBadge source={m.entrySource} />
           {m.isArchived && <span className="badge badge-neutral">Archived {fmtDate(m.archivedAt)}</span>}
         </div>
@@ -262,10 +352,6 @@ export function ManufacturerDetail({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Magic link: invite the manufacturer after a call (the backend checks who may invite). */}
-      <InvitationPanel orgId={id} hasOwner={!!m.ownerUserId} onChanged={reload}
-        onEditDetails={() => go(`/admin/manufacturers/${id}/onboard`)} />
-
       {m.missingFields.length > 0 && (
         <div className="adm-missing-banner" role="note">
           <AlertTriangle size={18} />
@@ -299,6 +385,29 @@ export function ManufacturerDetail({ id }: { id: string }) {
       {tab === "documents" && <DocumentsTab d={d} />}
       {tab === "onboarding" && <OnboardingTab d={d} onChange={setData} />}
       {tab === "history" && <HistoryTab d={d} />}
+
+      {dirty && (
+        <div className="adm-savebar" role="region" aria-label="Unsaved changes">
+          <b>
+            {Object.keys(drafts).length} unsaved change{Object.keys(drafts).length === 1 ? "" : "s"}
+          </b>
+          <input
+            aria-label="Reason (optional)"
+            placeholder="Reason (optional), e.g. Confirmed on call"
+            value={saveReason}
+            onChange={(e) => setSaveReason(e.target.value)}
+          />
+          <div className="adm-btn-row">
+            <button type="button" className="btn-secondary-full adm-btn-sm" disabled={saving} onClick={() => { setDrafts({}); setSaveError(""); }}>
+              Discard
+            </button>
+            <button type="button" className="btn-primary adm-btn-sm" disabled={saving} onClick={() => void saveAll()}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+          {saveError ? <p className="field-error" role="alert" style={{ flexBasis: "100%", margin: 0 }}>{saveError}</p> : null}
+        </div>
+      )}
 
       {editing && (
         <EditFieldModal
@@ -390,7 +499,10 @@ function CompanyTab({ ctx }: { ctx: Ctx }) {
   const done = (s: string) => d.manufacturer.sections.find((x) => x.name === s)?.complete ?? false;
   return (
     <div className="adm-tab-body">
-      <RegisteredUsers orgId={d.manufacturer.id} refreshKey={d} />
+      <RegisteredUsers orgId={d.manufacturer.id} refreshKey={d}>
+        {/* Magic link: add a user with or without an email (the backend checks who may invite). */}
+        <InvitationPanel embedded {...ctx.invite} />
+      </RegisteredUsers>
 
       <Section title="Personal info" note={<SectionState done={done("Personal info")} />}>
         <div className="details-grid">
@@ -546,7 +658,8 @@ function CapabilitiesTab({ ctx }: { ctx: Ctx }) {
 
 function MachineCard({ ctx, m }: { ctx: Ctx; m: Machine & { draft?: boolean } }) {
   const [open, setOpen] = useState(false);
-  const f = (key: string) => `machinery.${m.id}.${key}`;
+  // An unfinished draft of the manufacturer's is shown, not edited (it is not a listing yet).
+  const f = (key: string) => (m.draft ? undefined : `machinery.${m.id}.${key}`);
   return (
     <div className="adm-machine">
       <button type="button" className="adm-machine-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

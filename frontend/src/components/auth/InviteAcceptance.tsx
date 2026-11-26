@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   acceptInvitation,
+  claimInvitation,
   INVITE_MESSAGES,
   INVITE_UNAVAILABLE,
   openInvitation,
@@ -17,6 +18,10 @@ import { withBase } from "@/lib/basePath";
 type Phase =
   | { kind: "loading" }
   | { kind: "terms"; companyName: string; contactName: string; email: string }
+  /** A link made without an email: the person enters their own email and name. */
+  | { kind: "claim"; companyName: string; contactName: string }
+  /** Confirm the email with the code Clerk sends (links made without an email). */
+  | { kind: "verify"; companyName: string; contactName: string; email: string }
   | { kind: "message"; tone: "ok" | "warn" | "error"; text: string; signIn?: boolean; retry?: boolean }
   /** After the Terms: how they want to sign in next time (password, Google, or later). */
   | { kind: "sign-in-choice"; returnPath: string; email: string };
@@ -29,6 +34,8 @@ type Phase =
  * 3. the manufacturer accepts the Terms; the backend makes them owner of their company;
  * 4. they choose how to sign in next time: set a password, use Google, or decide later;
  * 5. on to the dashboard, where they check the details the XfactorY team entered.
+ * A link made without an email (sent by WhatsApp) first asks for the person's email and name, and
+ * signs in with the code Clerk emails to that address instead of step 2.
  */
 export function InviteAcceptance({ code }: { code: string }) {
   const router = useRouter();
@@ -53,6 +60,20 @@ export function InviteAcceptance({ code }: { code: string }) {
         opened = await openInvitation(code);
       } catch (caught) {
         setPhase({ kind: "message", tone: "error", text: (caught as Error).message || INVITE_UNAVAILABLE, retry: true });
+        return;
+      }
+      if (opened.status === "claim" || opened.status === "verify") {
+        const who = { companyName: opened.companyName, contactName: opened.contactName };
+        const current = clerk.user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null;
+        if (opened.status === "verify" && clerk.session && current === opened.email.toLowerCase()) {
+          setPhase({ kind: "terms", ...who, email: opened.email });
+          return;
+        }
+        if (clerk.session) {
+          await clerk.signOut({ redirectUrl: window.location.href });
+          return;
+        }
+        setPhase(opened.status === "claim" ? { kind: "claim", ...who } : { kind: "verify", ...who, email: opened.email });
         return;
       }
       if (opened.status !== "open") {
@@ -113,6 +134,17 @@ export function InviteAcceptance({ code }: { code: string }) {
       setError((caught as Error).message || INVITE_UNAVAILABLE);
       setBusy(false);
     }
+  }
+
+  if (phase.kind === "claim" || phase.kind === "verify") {
+    return (
+      <EmailStep
+        code={code}
+        phase={phase}
+        onVerify={(email) => setPhase({ kind: "verify", companyName: phase.companyName, contactName: phase.contactName, email })}
+        onSignedIn={(email) => setPhase({ kind: "terms", companyName: phase.companyName, contactName: phase.contactName, email })}
+      />
+    );
   }
 
   if (phase.kind === "sign-in-choice") {
@@ -184,6 +216,148 @@ export function InviteAcceptance({ code }: { code: string }) {
       <button className={`primary-cta${busy ? " loading" : ""}`} disabled={busy}>
         {busy ? "Opening…" : "Open my account"}
       </button>
+    </form>
+  );
+}
+
+/**
+ * Links made without an email. "claim": the person enters their email and name (the backend ties
+ * the link to that account). "verify": Clerk emails a code to that address; the code signs them in.
+ */
+function EmailStep({
+  code,
+  phase,
+  onVerify,
+  onSignedIn,
+}: {
+  code: string;
+  phase: { kind: "claim"; companyName: string; contactName: string } | { kind: "verify"; companyName: string; contactName: string; email: string };
+  onVerify: (email: string) => void;
+  onSignedIn: (email: string) => void;
+}) {
+  const { isLoaded, signIn, setActive } = useSignIn();
+  const [email, setEmail] = useState(phase.kind === "verify" ? phase.email : "");
+  const [name, setName] = useState(phase.contactName);
+  const [otp, setOtp] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function sendCode(address: string) {
+    if (!isLoaded || !signIn) throw new Error(INVITE_UNAVAILABLE);
+    const attempt = await signIn.create({ identifier: address });
+    const factor = attempt.supportedFirstFactors?.find((f) => f.strategy === "email_code") as
+      | { strategy: "email_code"; emailAddressId: string }
+      | undefined;
+    if (!factor) throw new Error("Sign-in with an email code is not available. Please contact XfactorY.");
+    await signIn.prepareFirstFactor({ strategy: "email_code", emailAddressId: factor.emailAddressId });
+    setSent(true);
+  }
+
+  async function submitEmail(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return setError("Please enter a valid email address.");
+    setBusy(true);
+    setError("");
+    try {
+      const { email: claimed } = await claimInvitation(code, email.trim(), name.trim());
+      onVerify(claimed);
+      await sendCode(claimed);
+    } catch (caught) {
+      setError(clerkMessage(caught, (caught as Error)?.message || INVITE_UNAVAILABLE));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCode(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy || !signIn || !setActive) return;
+    if (!otp.trim()) return setError("Please enter the code from the email.");
+    setBusy(true);
+    setError("");
+    try {
+      const result = await signIn.attemptFirstFactor({ strategy: "email_code", code: otp.trim() });
+      if (result.status === "complete" && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId });
+        onSignedIn(phase.kind === "verify" ? phase.email : email.trim().toLowerCase());
+        return;
+      }
+      setError("We couldn't sign you in with this code. Please ask XfactorY for help.");
+    } catch (caught) {
+      setError(clerkMessage(caught, "That code didn't work. Check it, or send a new one."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resend() {
+    if (busy || phase.kind !== "verify") return;
+    setBusy(true);
+    setError("");
+    try {
+      await sendCode(phase.email);
+    } catch (caught) {
+      setError(clerkMessage(caught, (caught as Error)?.message || INVITE_UNAVAILABLE));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (phase.kind === "claim") {
+    return (
+      <form className="auth-form" onSubmit={submitEmail}>
+        <h1 className="auth-card-heading">Welcome to XfactorY</h1>
+        <p className="auth-description">
+          The XfactorY team set up an account for <b>{phase.companyName}</b>. Enter your email: it will be your login.
+          We&apos;ll email you a code to confirm it.
+        </p>
+        <div className={`status-box status-error${error ? " show" : ""}`} role="alert">
+          <span>{error}</span>
+        </div>
+        <div className="field">
+          <label htmlFor="claim-name">Your name</label>
+          <input id="claim-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="claim-email">Email</label>
+          <input id="claim-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <button className={`primary-cta${busy ? " loading" : ""}`} disabled={busy || !isLoaded}>
+          {busy ? "Sending…" : "Email me a code"}
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <form className="auth-form" onSubmit={submitCode}>
+      <h1 className="auth-card-heading">Check your email</h1>
+      <p className="auth-description">
+        {sent ? <>We sent a code to <b>{phase.email}</b>. Enter it below.</> : <>Press &quot;Send code&quot; and we&apos;ll email a code to <b>{phase.email}</b>.</>}
+      </p>
+      <div className={`status-box status-error${error ? " show" : ""}`} role="alert">
+        <span>{error}</span>
+      </div>
+      {sent ? (
+        <>
+          <div className="field">
+            <label htmlFor="claim-code">Code</label>
+            <input id="claim-code" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value)} />
+          </div>
+          <button className={`primary-cta${busy ? " loading" : ""}`} disabled={busy}>
+            {busy ? "Checking…" : "Continue"}
+          </button>
+          <button type="button" className="auth-link-button" disabled={busy} onClick={() => void resend()}>
+            Send a new code
+          </button>
+        </>
+      ) : (
+        <button type="button" className={`primary-cta${busy ? " loading" : ""}`} disabled={busy || !isLoaded} onClick={() => void resend()}>
+          {busy ? "Sending…" : "Send code"}
+        </button>
+      )}
     </form>
   );
 }

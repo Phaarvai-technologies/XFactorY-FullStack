@@ -51,11 +51,11 @@ function serveList(counts = { REAL: 12, DEMO: 5, TEST: 1 }) {
 }
 
 describe("Manufacturers list: All / Real / Demo", () => {
-  it("shows a Real or Demo badge on every row and counts on each tab", async () => {
+  it("shows a Demo badge on demo rows (no Real tag: Praveen, 26 Nov) and counts on each tab", async () => {
     me.current = { id: "a", roles: ["support_specialist"] };
     serveList();
     render(<AdminHostContext.Provider value={host("/admin/manufacturers")}><Manufacturers /></AdminHostContext.Provider>);
-    expect(within((await screen.findByText("Real Forge")).closest("tr")!).getByText("Real")).toHaveClass("badge-info");
+    expect(within((await screen.findByText("Real Forge")).closest("tr")!).queryByText("Real")).toBeNull();
     expect(within(screen.getByText("Demo Forge").closest("tr")!).getByText("Demo")).toHaveClass("badge-purple");
     const tabs = within(screen.getByRole("tablist", { name: /Real or demo/ }));
     expect(tabs.getByRole("tab", { name: "All (18)" })).toHaveAttribute("aria-selected", "true");

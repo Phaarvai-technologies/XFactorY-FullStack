@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin.admins import AdminManager
 from app.admin.auth import AdminContext, current_admin
 from app.admin.schemas import (AccountStatusIn, AdminAddIn, AdminDetailsIn, AdminFields, AdminRestoreIn, AdminRoleIn, ArchiveIn,
-                               BatchArchiveIn, CompanyCreate, FieldEdit, NoteIn, OnboardForm, RecordTypeIn, TestEmailIn, UpdateRequestDecision,
+                               BatchArchiveIn, CompanyCreate, FieldEdit, FieldsEdit, NoteIn, OnboardForm, RecordTypeIn, TestEmailIn, UpdateRequestDecision,
                                UpdateRequestEdit)
 from app.admin.service import AdminService
 from app.core.config import Settings, get_settings
@@ -166,10 +166,18 @@ async def edit_field(org_id: UUID, body: FieldEdit, admin: Admin, svc: Svc):
     return await svc.edit_field(admin, str(org_id), body.field, body.value, body.reason)
 
 
+@router.patch("/manufacturers/{org_id}/fields/batch")
+async def edit_fields(org_id: UUID, body: FieldsEdit, admin: Admin, svc: Svc):
+    """The editable company page: several fields with one Save (all checked first, all or nothing)."""
+    return await svc.edit_fields(admin, str(org_id), [c.model_dump() for c in body.changes], body.reason)
+
+
 # ---------------------------------------------------------------- manufacturer magic link
 class InviteIn(BaseModel):
-    contactName: str = Field(min_length=1, max_length=200)
-    email: str = Field(min_length=3, max_length=320)
+    """Email given: the account is created and the link emailed. No email: only the link
+    (WhatsApp / Copy link); the person enters their email when they open it."""
+    contactName: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
     phone: str | None = Field(default=None, max_length=40)
 
 

@@ -20,6 +20,14 @@ until the manufacturer presses "Confirm details" ('confirmed_by_manufacturer'), 
 profile to admin approval as a separate step (review status Submitted; the admin approves, asks for
 corrections or rejects with the usual Review status control). Accepting the invite does not approve:
 the invited owner may edit their sections meanwhile. The 100% rule for Visionaries is unchanged.
+
+Daily check-in with Praveen (26 Nov 2026):
+* Any company can get a link, also one that already has an owner or is approved: the person then
+  joins as an additional login (membership role 'admin'); the company's approval is not touched.
+  The first person to accept on a company without an owner becomes its owner.
+* A link can be generated without an email (sent by WhatsApp / Copy link). Whoever opens it enters
+  their own email and confirms it with a code Clerk emails them (`claim`), so a link holder can
+  never sign in to somebody else's existing account. Then the usual Terms and sign-in choice.
 """
 from __future__ import annotations
 
@@ -104,8 +112,9 @@ def _view(row: dict, settings: Settings, now: datetime | None = None) -> dict:
     if status in OPEN and row["expires_at"] <= now:
         status = "expired"
     return {
-        "id": str(row["id"]), "companyName": row["company_name"], "email": row["email"],
-        "contactName": row["contact_name"], "phone": row["phone"] or "", "status": status,
+        "id": str(row["id"]), "companyName": row["company_name"], "email": row["email"] or "",
+        "contactName": row["contact_name"] or "", "phone": row["phone"] or "", "status": status,
+        "withoutEmail": not row["email"] or bool(row.get("claimed_at")), "acceptedRole": row.get("accepted_role"),
         "expiresAt": row["expires_at"], "openedAt": row["opened_at"], "openCount": row["open_count"],
         "acceptedAt": row["accepted_at"], "cancelledAt": row["cancelled_at"],
         "remindersSent": row["reminders_sent"], "lastSentAt": row["last_sent_at"], "sendCount": row["send_count"],
@@ -158,15 +167,20 @@ async def list_for_company(db: AsyncSession, settings: Settings, org_id: UUID) -
 
 
 async def create(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *, admin_id: UUID,
-                 roles: tuple[str, ...], org_id: UUID, contact_name: str, email: str, phone: str | None) -> dict:
-    """Creates the invitation (and the Clerk account if needed), sends the email. Returns
-    {invitation, link, email}. The link is returned once, for Copy link / WhatsApp."""
+                 roles: tuple[str, ...], org_id: UUID, contact_name: str | None, email: str | None,
+                 phone: str | None) -> dict:
+    """Creates the invitation and returns {invitation, link, email}; the link is returned once,
+    for Copy link / WhatsApp. With an email: the Clerk account is created if needed and the email
+    is sent. Without: nothing is created or sent yet; the person enters their email on the link
+    (email status 'none')."""
     if not set(roles) & set(INVITE_ROLES):
         raise InvitationError("Only administrators and operators can invite manufacturers.", 403, "forbidden")
-    contact_name, email, phone = " ".join(contact_name.split()), email.strip().lower(), (phone or "").strip() or None
-    if not contact_name:
+    contact_name = " ".join((contact_name or "").split()) or None
+    email = (email or "").strip().lower() or None
+    phone = (phone or "").strip() or None
+    if email and not contact_name:
         raise InvitationError("Please enter the contact person's name.", 422, "name_required")
-    if not EMAIL_RE.match(email):
+    if email and not EMAIL_RE.match(email):
         raise InvitationError("Please enter a valid email address.", 422, "email_invalid")
     org = (await db.execute(text("""
         SELECT id, display_name, organization_type, is_archived FROM organizations WHERE id = :o FOR UPDATE
@@ -175,40 +189,21 @@ async def create(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *
         raise InvitationError("Manufacturer not found.", 404, "not_found")
     if org["is_archived"]:
         raise InvitationError("This company is archived. Restore it before inviting.", 409, "archived")
-    if await _active_owner(db, org_id):
-        raise InvitationError("This company already has an owner on XfactorY. Their account manages it.",
-                              409, "has_owner")
-    if await db.scalar(text("""
-        SELECT 1 FROM manufacturer_invitations WHERE organization_id = :o AND email = CAST(:e AS citext)
-          AND status IN ('invited', 'opened') AND expires_at > now()
-    """), {"o": org_id, "e": email}):
-        raise InvitationError("This person already has an open invitation for this company. Use Resend.",
-                              409, "already_invited")
-    # One email = one login. A person who already runs another manufacturer company on XfactorY
-    # cannot be made owner of a second one by invitation (open question for Praveen).
-    other = await db.scalar(text("""
-        SELECT o.display_name FROM users u
-        JOIN memberships m ON m.user_id = u.id AND m.status = 'active'
-        JOIN organizations o ON o.id = m.organization_id AND o.organization_type = 'manufacturer'
-        WHERE u.email = CAST(:e AS citext) AND o.id <> :o
-          AND EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id = o.id
-                      AND mo.personal_information_completed)
-        LIMIT 1
-    """), {"e": email, "o": org_id})
-    if other:
-        raise InvitationError(f"This email already manages another company on XfactorY ({other}). "
-                              "Use a different email for this company.", 409, "email_has_company")
-    # Expired leftovers for the same pair are closed, so the unique index allows a new one.
-    await db.execute(text("""
-        UPDATE manufacturer_invitations SET status = 'expired', updated_at = now()
-        WHERE organization_id = :o AND email = CAST(:e AS citext) AND status IN ('invited', 'opened')
-    """), {"o": org_id, "e": email})
-    first, last = _split_name(contact_name)
-    try:
-        clerk_user_id, created = await clerk.find_or_create_user(email, first, last)
-    except RuntimeError as exc:
-        log.warning("Invitation for %s: %s", org_id, exc)
-        raise InvitationError(f"The sign-in account could not be created: {exc}", 502, "clerk_failed") from exc
+    if email:
+        await _check_email(db, org_id, email)
+        # Expired leftovers for the same pair are closed, so the unique index allows a new one.
+        await db.execute(text("""
+            UPDATE manufacturer_invitations SET status = 'expired', updated_at = now()
+            WHERE organization_id = :o AND email = CAST(:e AS citext) AND status IN ('invited', 'opened')
+        """), {"o": org_id, "e": email})
+        first, last = _split_name(contact_name or "")
+        try:
+            clerk_user_id, created = await clerk.find_or_create_user(email, first, last)
+        except RuntimeError as exc:
+            log.warning("Invitation for %s: %s", org_id, exc)
+            raise InvitationError(f"The sign-in account could not be created: {exc}", 502, "clerk_failed") from exc
+    else:
+        clerk_user_id, created = None, False
     invitation_id = await db.scalar(text("SELECT gen_random_uuid()"))
     code = _code(settings, invitation_id, 1)
     row = (await db.execute(text("""
@@ -221,11 +216,41 @@ async def create(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *
            "a": admin_id})).mappings().one()
     row = dict(row)
     await record_event(db, event="note", action="invitation_sent", role="admin", source="admin_entry", organization_id=org_id,
-                       actor=admin_id, details={"email": email, "clerkAccountCreated": created})
+                       actor=admin_id, details={"email": email, "withoutEmail": not email,
+                                                "clerkAccountCreated": created})
     await db.commit()
-    mail = await _send(db, settings, row, code, reminder=False)
+    mail = await _send(db, settings, row, code, reminder=False) if email else {"status": "none"}
     await db.commit()
     return {"invitation": _view(row, settings), "link": invite_url(settings, code), "email": mail["status"]}
+
+
+async def _check_email(db: AsyncSession, org_id: UUID, email: str, invitation_id: UUID | None = None) -> None:
+    """The person's email: not already invited to this company, not managing another company."""
+    if await db.scalar(text("""
+        SELECT 1 FROM manufacturer_invitations WHERE organization_id = :o AND email = CAST(:e AS citext)
+          AND status IN ('invited', 'opened') AND expires_at > now() AND (CAST(:i AS uuid) IS NULL OR id <> :i)
+    """), {"o": org_id, "e": email, "i": invitation_id}):
+        raise InvitationError("This person already has an open invitation for this company. Use Resend.",
+                              409, "already_invited")
+    if await db.scalar(text("""
+        SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id
+        WHERE m.organization_id = :o AND m.status = 'active' AND u.email = CAST(:e AS citext)
+    """), {"o": org_id, "e": email}):
+        raise InvitationError("This person already has a login for this company.", 409, "already_member")
+    # One email = one login. A person who already runs another manufacturer company on XfactorY
+    # cannot be added to a second one by invitation (open question for Praveen).
+    other = await db.scalar(text("""
+        SELECT o.display_name FROM users u
+        JOIN memberships m ON m.user_id = u.id AND m.status = 'active'
+        JOIN organizations o ON o.id = m.organization_id AND o.organization_type = 'manufacturer'
+        WHERE u.email = CAST(:e AS citext) AND o.id <> :o
+          AND EXISTS (SELECT 1 FROM manufacturer_onboarding mo WHERE mo.organization_id = o.id
+                      AND mo.personal_information_completed)
+        LIMIT 1
+    """), {"e": email, "o": org_id})
+    if other:
+        raise InvitationError(f"This email already manages another company on XfactorY ({other}). "
+                              "Use a different email for this company.", 409, "email_has_company")
 
 
 async def _locked(db: AsyncSession, invitation_id: UUID) -> dict:
@@ -244,8 +269,6 @@ async def resend(db: AsyncSession, settings: Settings, *, admin_id: UUID, roles:
     row = await _locked(db, invitation_id)
     if row["status"] in ("accepted", "cancelled"):
         raise InvitationError("This invitation is already " + row["status"] + ".", 409, row["status"])
-    if await _active_owner(db, row["organization_id"]):
-        raise InvitationError("This company already has an owner on XfactorY.", 409, "has_owner")
     code = _code(settings, invitation_id, row["send_count"] + 1)
     row = dict((await db.execute(text("""
         UPDATE manufacturer_invitations SET code_hash = :h, status = 'invited',
@@ -256,7 +279,7 @@ async def resend(db: AsyncSession, settings: Settings, *, admin_id: UUID, roles:
     await record_event(db, event="note", action="invitation_resent", role="admin", source="admin_entry",
                        organization_id=row["organization_id"], actor=admin_id, details={"email": row["email"]})
     await db.commit()
-    mail = await _send(db, settings, row, code, reminder=False)
+    mail = await _send(db, settings, row, code, reminder=False) if row["email"] else {"status": "none"}
     await db.commit()
     return {"invitation": _view(row, settings), "link": invite_url(settings, code), "email": mail["status"]}
 
@@ -292,7 +315,7 @@ async def open_link(db: AsyncSession, settings: Settings, clerk: ClerkManagement
     row = await _by_code(db, code, lock=True)
     if not row:
         return {"status": "invalid"}
-    base = {"companyName": row["company_name"], "email": row["email"], "contactName": row["contact_name"]}
+    base = {"companyName": row["company_name"], "email": row["email"] or "", "contactName": row["contact_name"] or ""}
     if row["status"] in ("accepted", "cancelled"):
         return {"status": row["status"], **base}
     if row["status"] == "expired" or row["expires_at"] <= datetime.now(timezone.utc):
@@ -302,6 +325,22 @@ async def open_link(db: AsyncSession, settings: Settings, clerk: ClerkManagement
         """), {"i": row["id"]})
         await db.commit()
         return {"status": "expired", **base}
+    if row.get("claimed_at"):
+        # A link made without an email, already claimed: never a ticket; the person signs in with
+        # the code Clerk emails to the address they gave (so a link holder cannot use it for
+        # somebody else's account).
+        return {"status": "verify", **base}
+    if not row["clerk_user_id"]:
+        # A link made without an email: the person enters their email and confirms it (claim).
+        await db.execute(text("""
+            UPDATE manufacturer_invitations SET status = 'opened', opened_at = COALESCE(opened_at, now()),
+              open_count = open_count + 1, updated_at = now()
+            WHERE id = :i
+        """), {"i": row["id"]})
+        await record_event(db, event="note", action="invitation_opened", role="requester", source="web_dashboard",
+                           organization_id=row["organization_id"], details={"openCount": row["open_count"] + 1})
+        await db.commit()
+        return {"status": "claim", **base}
     try:
         ticket = await clerk.sign_in_token(row["clerk_user_id"])
     except RuntimeError as exc:
@@ -319,6 +358,41 @@ async def open_link(db: AsyncSession, settings: Settings, clerk: ClerkManagement
     return {"status": "open", "ticket": ticket, **base}
 
 
+async def claim(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *, code: str, email: str,
+                name: str | None) -> dict:
+    """A link made without an email: the person gives their email (and name). Their Clerk account
+    is found or created and tied to the link; they then confirm the email with a code Clerk sends
+    (on the page), so nobody can use a link to get into somebody else's account."""
+    email, name = (email or "").strip().lower(), " ".join((name or "").split()) or None
+    if not EMAIL_RE.match(email):
+        raise InvitationError("Please enter a valid email address.", 422, "email_invalid")
+    row = await _by_code(db, code, lock=True)
+    if not row:
+        raise InvitationError("This link is not valid. Ask XfactorY to send a new one.", 404, "invalid")
+    if row["status"] in ("accepted", "cancelled") or row["status"] == "expired" \
+            or row["expires_at"] <= datetime.now(timezone.utc):
+        raise InvitationError("This link is no longer active. Ask XfactorY to send a new one.", 410, "not_open")
+    if row["accepted_user_id"] or (row.get("claimed_at") and row["email"] == email):
+        return {"status": "verify", "email": row["email"]}
+    await _check_email(db, row["organization_id"], email, row["id"])
+    first, last = _split_name(name or row["contact_name"] or "")
+    try:
+        clerk_user_id, created = await clerk.find_or_create_user(email, first, last)
+    except RuntimeError as exc:
+        log.warning("Claim for invitation %s: %s", row["id"], exc)
+        raise InvitationError("We couldn't set up your account right now. Please try again in a minute.",
+                              502, "clerk_failed") from exc
+    await db.execute(text("""
+        UPDATE manufacturer_invitations SET email = :e, contact_name = COALESCE(:n, contact_name),
+          clerk_user_id = :cu, claimed_at = now(), updated_at = now() WHERE id = :i
+    """), {"i": row["id"], "e": email, "n": name, "cu": clerk_user_id})
+    await record_event(db, event="note", action="invitation_claimed", role="requester", source="web_dashboard",
+                       organization_id=row["organization_id"], details={"email": email,
+                                                                        "clerkAccountCreated": created})
+    await db.commit()
+    return {"status": "verify", "email": email}
+
+
 async def accept(db: AsyncSession, settings: Settings, *, code: str, clerk_user_id: str,
                  clerk_session_id: str | None, terms_version: str | None, clerk_user: dict) -> dict:
     """The signed-in person accepts the Terms: registered, owner of the company, on the dashboard."""
@@ -332,7 +406,7 @@ async def accept(db: AsyncSession, settings: Settings, *, code: str, clerk_user_
     row = await _by_code(db, code, lock=True)
     if not row:
         raise InvitationError("This link is not valid. Ask XfactorY to send a new one.", 404, "invalid")
-    if row["clerk_user_id"] != clerk_user_id:
+    if not row["clerk_user_id"] or row["clerk_user_id"] != clerk_user_id:
         raise InvitationError("This link belongs to another account. Sign out and open the link again.",
                               403, "other_account")
     if row["status"] == "accepted":
@@ -354,9 +428,9 @@ async def accept(db: AsyncSession, settings: Settings, *, code: str, clerk_user_
     if status != "active":
         raise InvitationError(SUSPENDED_MESSAGE, 403, "suspended")
     owner = await _active_owner(db, org_id)
-    if owner and owner != user_id:
-        raise InvitationError("This company already has an owner on XfactorY. Please contact XfactorY support.",
-                              409, "has_owner")
+    # The first person on a company without an owner becomes its owner; anyone else joins as an
+    # additional login (role 'admin', can manage the company) and the company's approval is not touched.
+    role = "owner" if not owner or owner == user_id else "admin"
     await db.execute(text("""
         UPDATE users SET registration_completed_at = COALESCE(registration_completed_at, now()),
           registration_method = COALESCE(registration_method, 'magic_link'),
@@ -368,10 +442,11 @@ async def accept(db: AsyncSession, settings: Settings, *, code: str, clerk_user_
     """), {"u": user_id, "sid": clerk_session_id, "tv": terms_version, "p": row["phone"]})
     await db.execute(text("""
         INSERT INTO memberships (user_id, organization_id, membership_role, status, accepted_at)
-        VALUES (:u, :o, 'owner', 'active', now())
-        ON CONFLICT (organization_id, user_id) DO UPDATE SET membership_role = 'owner', status = 'active',
-          accepted_at = COALESCE(memberships.accepted_at, now()), version = memberships.version + 1
-    """), {"u": user_id, "o": org_id})
+        VALUES (:u, :o, :r, 'active', now())
+        ON CONFLICT (organization_id, user_id) DO UPDATE SET
+          membership_role = CASE WHEN memberships.membership_role = 'owner' THEN 'owner' ELSE :r END,
+          status = 'active', accepted_at = COALESCE(memberships.accepted_at, now()), version = memberships.version + 1
+    """), {"u": user_id, "o": org_id, "r": role})
     await db.execute(text("""
         INSERT INTO marketplace_role_selections (user_id, role_selected)
         SELECT :u, 'manufacturer' WHERE NOT EXISTS (
@@ -381,30 +456,27 @@ async def accept(db: AsyncSession, settings: Settings, *, code: str, clerk_user_
     # Not approved yet: the owner first checks the details the team entered and presses "Confirm
     # details", which sends them to admin approval (a separate step). Their sections are open
     # meanwhile (app/manufacturer_access.py, invited owner). An already approved company stays approved.
-    await db.execute(text("""
-        INSERT INTO manufacturer_onboarding (organization_id, status, personal_information_completed, current_step)
-        VALUES (:o, 'in_progress', true, 'company_information')
-        ON CONFLICT (organization_id) DO UPDATE SET personal_information_completed = true,
-          status = CASE WHEN manufacturer_onboarding.status IN ('approved', 'submitted', 'under_review')
-                        THEN manufacturer_onboarding.status ELSE 'in_progress' END,
-          version = manufacturer_onboarding.version + 1
-    """), {"o": org_id})
-    await db.execute(text("UPDATE organizations SET status = 'active', updated_at = now() WHERE id = :o"),
-                     {"o": org_id})
+    if role == "owner":
+        await db.execute(text("""
+            INSERT INTO manufacturer_onboarding (organization_id, status, personal_information_completed, current_step)
+            VALUES (:o, 'in_progress', true, 'company_information')
+            ON CONFLICT (organization_id) DO UPDATE SET personal_information_completed = true,
+              status = CASE WHEN manufacturer_onboarding.status IN ('approved', 'submitted', 'under_review')
+                            THEN manufacturer_onboarding.status ELSE 'in_progress' END,
+              version = manufacturer_onboarding.version + 1
+        """), {"o": org_id})
+        await db.execute(text("UPDATE organizations SET status = 'active', updated_at = now() WHERE id = :o"),
+                         {"o": org_id})
+    # Other open invitations stay open: a company can have several logins.
     await db.execute(text("""
         UPDATE manufacturer_invitations SET status = 'accepted', accepted_at = now(), accepted_user_id = :u,
-          updated_at = now() WHERE id = :i
-    """), {"i": row["id"], "u": user_id})
-    # Other open invitations for this company end: it has its owner now.
-    await db.execute(text("""
-        UPDATE manufacturer_invitations SET status = 'cancelled', cancelled_at = now(), updated_at = now()
-        WHERE organization_id = :o AND id <> :i AND status IN ('invited', 'opened')
-    """), {"o": org_id, "i": row["id"]})
+          accepted_role = :r, updated_at = now() WHERE id = :i
+    """), {"i": row["id"], "u": user_id, "r": role})
     await record_event(db, event="note", action="invitation_accepted", role="requester", source="web_dashboard",
-                       organization_id=org_id, actor=user_id, details={"email": row["email"]})
+                       organization_id=org_id, actor=user_id, details={"email": row["email"], "role": role})
     await db.commit()
     return {"accepted": True, "alreadyAccepted": False, "returnPath": "/manufacturer/dashboard",
-            "userId": str(user_id)}
+            "userId": str(user_id), "role": role}
 
 
 # ---------------------------------------------------------------------------- details source
@@ -486,7 +558,7 @@ async def send_reminders(db: AsyncSession, settings: Settings, now: datetime | N
     days = sorted(d for d in settings.manufacturer_invite_reminder_days if d > 0)
     rows = (await db.execute(text("""
         SELECT * FROM manufacturer_invitations WHERE status IN ('invited', 'opened') AND expires_at > :now
-        ORDER BY last_sent_at
+          AND email IS NOT NULL ORDER BY last_sent_at
     """), {"now": now})).mappings().all()
     sent = 0
     for raw in rows:

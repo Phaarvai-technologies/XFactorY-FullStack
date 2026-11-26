@@ -712,6 +712,71 @@ class AdminService:
             await self._run(self.mrepo.set_onboarding_flags(None, profile_flags(after["profileData"]), ctx=ctx))
         return await self.detail(org_id)
 
+    async def edit_fields(self, admin: AdminContext, org_id: str, changes: list[dict], reason: str | None) -> dict:
+        """Several fields at once (the editable company page: type in the boxes, then one Save).
+        All are checked first; nothing is saved if one is invalid. Unchanged fields are skipped.
+        Each change gets its own History row (old/new value, admin, time, reason); the company
+        gets one notification listing them."""
+        reason = (reason or "").strip() or "Updated by the XfactorY team"
+        if not changes:
+            raise HTTPException(422, "Nothing to save.")
+        ctx = await self._ctx(org_id)
+        raw, view = await self._view(ctx)
+        planned, seen = [], set()
+        for item in changes:
+            field = str(item.get("field") or "")
+            if field in seen:
+                continue
+            seen.add(field)
+            label = self._label(field)
+            old = await self._run(self._async(self._current_value, field, raw, view))
+            try:
+                kind, new, delta = await self._run(self._async(self._validate, field, item.get("value")))
+            except HTTPException as exc:
+                detail = str(exc.detail)
+                raise HTTPException(exc.status_code, detail if label in detail else f"{label}: {detail}") from exc
+            if normalize(old) == new or (old in (None, "") and new in (None, "")):
+                continue
+            planned.append((field, label, kind, old, new, delta))
+        if not planned:
+            raise HTTPException(422, "Nothing changed: the values are the same as before.")
+        final = {f: n for f, _, _, _, n, _ in planned}
+        email = final.get("contact.email", raw["profile"].get("contact_email"))
+        phone = final.get("contact.phone", raw["profile"].get("contact_phone"))
+        if not email and not phone:
+            raise HTTPException(422, "Keep an email or a phone number for this manufacturer.")
+
+        async def apply():
+            for field, label, kind, old, new, delta in planned:
+                if kind == "profile":
+                    await self.mrepo.update_profile(None, delta, {}, commit=False, ctx=ctx)
+                elif kind == "account":
+                    code = await self.mrepo._country_code(new) if field == "account.country" else None
+                    await self.repo.update_account_field(ctx, field, new, code)
+                else:
+                    machine_id = UUID(field.split(".", 2)[1])
+                    belongs = await self.repo.row("SELECT 1 AS ok FROM machines WHERE id=:m AND organization_id=:o",
+                                                  {"m": machine_id, "o": ctx["organization_id"]})
+                    if not belongs:
+                        raise LookupError("Machinery listing not found")
+                    await self.mrepo._apply_machinery_changes(machine_id, delta, None)
+                await self.repo.add_history(org_id, label, old, new, admin.user_id, reason)
+            from app import invitations
+            await invitations.mark_entered_by_xfactory(self.db, org_id, admin.user_id)
+            lines = [f"{label}: {self._shown(old)} → {self._shown(new)}" for _, label, _, old, new, _ in planned]
+            await notifications.notify_company(
+                self.db, org_id, "profile_edit", "The XfactorY team updated your profile",
+                "\n".join(lines[:20]) + (f"\n… and {len(lines) - 20} more" if len(lines) > 20 else "")
+                + f"\nReason: {reason}", admin.user_id)
+            await self.db.commit()
+        await self._run(apply())
+
+        row = await self.repo.overview_row(org_id)
+        if row and row.get("onboarding_started_at") and any(k == "profile" for _, _, k, _, _, _ in planned):
+            _, after = await self._view(ctx)
+            await self._run(self.mrepo.set_onboarding_flags(None, profile_flags(after["profileData"]), ctx=ctx))
+        return await self.detail(org_id)
+
     @staticmethod
     async def _async(fn, *args):
         return fn(*args)

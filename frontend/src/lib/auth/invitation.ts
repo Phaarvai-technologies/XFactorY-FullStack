@@ -9,6 +9,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1
 
 export type InvitationOpen =
   | { status: "open"; ticket: string; companyName: string; email: string; contactName: string }
+  /** A link made without an email: the person enters their email first (claimInvitation). */
+  | { status: "claim"; companyName: string; email: string; contactName: string }
+  /** A claimed link: the person signs in with the code Clerk emails to that address. */
+  | { status: "verify"; companyName: string; email: string; contactName: string }
   | { status: "accepted" | "expired" | "cancelled"; companyName: string; email: string; contactName: string }
   | { status: "invalid" };
 
@@ -60,4 +64,29 @@ export async function acceptInvitation(
     throw new Error((body && typeof body.detail === "string" && body.detail) || INVITE_UNAVAILABLE);
   }
   return { returnPath: (body && typeof body.returnPath === "string" && body.returnPath) || "/manufacturer/dashboard" };
+}
+
+/** A link made without an email: the person gives their email (and name); they confirm it with
+ * the code Clerk emails them, then accept as usual. */
+export async function claimInvitation(
+  code: string,
+  email: string,
+  name: string,
+  fetchImpl: Fetch = fetch,
+): Promise<{ status: "verify"; email: string }> {
+  let response: Response;
+  try {
+    response = await backendFetch(fetchImpl, `${API_URL}/invitations/${encodeURIComponent(code)}/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, name: name || null }),
+    });
+  } catch {
+    throw new Error(INVITE_UNAVAILABLE);
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body || body.status !== "verify") {
+    throw new Error((body && typeof body.detail === "string" && body.detail) || INVITE_UNAVAILABLE);
+  }
+  return body as { status: "verify"; email: string };
 }

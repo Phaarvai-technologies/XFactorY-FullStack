@@ -1,7 +1,7 @@
 "use client";
 
 import { RefreshCw, UserRound } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { AccountBadge, ErrorBox, Loading } from "@/components/admin/ui";
 import { useAdminHost, useResource } from "@/lib/admin/api";
 import { MEMBERSHIP_LABELS, fmtDate, fmtDateTime } from "@/lib/admin/format";
@@ -27,7 +27,12 @@ const REQUEST_TONE: Record<string, string> = {
  * onboarding / change requests from users. Requesters are not members and are not counted.
  * Refetches when `refreshKey` changes (an action on this page) and when the admin returns to the tab.
  */
-export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshKey?: unknown }) {
+export function RegisteredUsers({ orgId, refreshKey, children }: {
+  orgId: string;
+  refreshKey?: unknown;
+  /** Shown at the bottom of the Registered Users card (the magic link: add a user). */
+  children?: ReactNode;
+}) {
   const { go } = useAdminHost();
   const { data, error, loading, reload } = useResource<CompanyPeople>(`/manufacturers/${orgId}/people`, {
     refreshOnFocus: true,
@@ -54,6 +59,7 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
           {refresh}
         </div>
         {error ? <ErrorBox message={error.message} onRetry={reload} /> : <Loading label="Loading users…" />}
+        {children}
       </section>
     );
   }
@@ -152,6 +158,7 @@ export function RegisteredUsers({ orgId, refreshKey }: { orgId: string; refreshK
         {others.length === 0 ? (
           <p className="adm-muted">No other users are linked to this company.</p>
         ) : userTable(others, "Other Users")}
+        {children}
       </section>
 
       <section className={`card adm-section${loading ? " adm-stale" : ""}`} aria-labelledby="rq-title">
