@@ -36,6 +36,35 @@ async def test_unreachable_smtp_is_reported_not_raised():
     assert r["status"] == "failed" and r["error"]
 
 
+async def test_brevo_api_is_used_when_key_is_set(monkeypatch):
+    """Render's free plan blocks SMTP ports; BREVO_API_KEY sends over HTTPS instead."""
+    import httpx
+    from app.core import email as email_mod
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"], seen["key"], seen["body"] = str(request.url), request.headers["api-key"], request.read()
+        return httpx.Response(201, json={"messageId": "<abc@smtp-relay.brevo.com>"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(email_mod.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    m = email_mod.Mailer(settings(brevo_api_key="xkeysib-test", email_from="XfactorY <noreply@phaarvai.com>"))
+    assert m.enabled
+    r = await m.send("a@example.com", "test", "Hello", "Body", "<p>Body</p>")
+    assert r == {"status": "sent", "error": None}
+    import json
+    body = json.loads(seen["body"])
+    assert seen["url"] == "https://api.brevo.com/v3/smtp/email" and seen["key"] == "xkeysib-test"
+    assert body["sender"] == {"email": "noreply@phaarvai.com", "name": "XfactorY"}
+    assert body["to"] == [{"email": "a@example.com"}] and body["htmlContent"] == "<p>Body</p>"
+
+    monkeypatch.setattr(email_mod.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(
+                            lambda req: httpx.Response(401, json={"message": "Key not found"})), **kw))
+    r = await m.send("a@example.com", "test", "Hello", "Body")
+    assert r["status"] == "failed" and "401" in r["error"]
+
+
 def test_subject_line_breaks_are_removed():
     from app.core.email import Mailer
     msg = Mailer(settings(smtp_host="x"))._build("a@example.com", "Hello\r\nBcc: evil@z.com", "b", None)

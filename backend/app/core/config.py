@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # Clerk sends its own emails (verification codes) itself; nothing here is needed for those.
     # SMTP_HOST empty = email off (nothing is sent; attempts are logged as "skipped").
     smtp_host: str = ""
+    # Brevo's HTTPS email API (port 443) instead of SMTP. Use it where SMTP ports are blocked,
+    # e.g. Render's free plan (25/465/587 time out). When set, it is used and SMTP_* is ignored.
+    # EMAIL_FROM must then be a sender verified in Brevo.
+    brevo_api_key: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""

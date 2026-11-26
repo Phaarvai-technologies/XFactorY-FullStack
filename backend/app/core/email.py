@@ -1,7 +1,7 @@
-"""Outgoing email over SMTP.
+"""Outgoing email over SMTP, or over Brevo's HTTPS API when BREVO_API_KEY is set.
 
-Off unless SMTP_HOST is set (attempts are then logged as "skipped"). To send, set SMTP_* to
-an email provider. Clerk's own emails (verification codes) are sent by Clerk, not here.
+Off unless SMTP_HOST or BREVO_API_KEY is set (attempts are then logged as "skipped"). To send,
+set SMTP_* to an email provider, or BREVO_API_KEY where SMTP ports are blocked (Render free plan). Clerk's own emails (verification codes) are sent by Clerk, not here.
 
 Every attempt is written to `email_deliveries` (to, template, subject, result) so admins
 can see the delivery status in Users -> troubleshooting. The email body, passwords and
@@ -16,12 +16,14 @@ import ssl
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr
 
+import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 
 log = logging.getLogger("xy.email")
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 EMAIL_RE = re.compile(r"^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$")
 
 
@@ -37,7 +39,7 @@ class Mailer:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.settings.smtp_host)
+        return bool(self.settings.smtp_host or self.settings.brevo_api_key)
 
     def _build(self, to: str, subject: str, text_body: str, html_body: str | None) -> EmailMessage:
         msg = EmailMessage()
@@ -67,6 +69,23 @@ class Mailer:
                 server.login(s.smtp_username, s.smtp_password)
             server.send_message(msg)
 
+    async def _deliver_brevo(self, to: str, subject: str, text_body: str, html_body: str | None) -> str | None:
+        """Send through Brevo's HTTPS API (port 443). Returns Brevo's message id."""
+        name, address = parseaddr(self.settings.email_from)
+        sender = {"email": address, **({"name": name} if name else {})}
+        payload = {"sender": sender, "to": [{"email": to}], "subject": one_line(subject), "textContent": text_body}
+        if html_body:
+            payload["htmlContent"] = html_body
+        async with httpx.AsyncClient(timeout=self.settings.smtp_timeout_seconds + 5) as client:
+            r = await client.post(BREVO_API_URL, json=payload,
+                                  headers={"api-key": self.settings.brevo_api_key, "accept": "application/json"})
+        if r.status_code >= 300:
+            raise RuntimeError(f"Brevo API {r.status_code}: {r.text[:200]}")
+        try:
+            return r.json().get("messageId")
+        except ValueError:
+            return None
+
     async def send(self, to: str, template: str, subject: str, text_body: str, html_body: str | None = None,
                    user_id=None, organization_id=None, log_subject: str | None = None) -> dict:
         """Returns {"status": "sent" | "failed" | "skipped", "error": str | None}.
@@ -77,6 +96,12 @@ class Mailer:
             status, error = "failed", "Invalid recipient address"
         elif not self.enabled:
             status, error = "skipped", "Email is off (SMTP_HOST is not set)"
+        elif self.settings.brevo_api_key:
+            try:
+                message_id = await self._deliver_brevo(to, subject, text_body, html_body)
+            except Exception as exc:  # noqa: BLE001 - reported, never raised to the caller
+                status, error = "failed", f"{type(exc).__name__}: {exc}"[:300]
+                log.warning("Email '%s' to %s failed: %s", template, to, error)
         else:
             try:
                 msg = self._build(to, subject, text_body, html_body)
