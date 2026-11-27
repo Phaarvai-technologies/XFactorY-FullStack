@@ -983,12 +983,27 @@
 }
 
 /* Add manufacturer page (meeting 27 Nov 2026) */
-.adm-root .adm-key-field { border: 2px solid var(--blue-600, #2563eb) !important; background: #f8fbff; font-weight: 600; }
-.adm-root .adm-key-field:focus { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); }
+/* Text boxes without a type attribute (company name, contact person, WhatsApp number, …) get the
+   same rounded style as the other boxes (manufacturer.css only styles input[type="text"] etc.). */
+.adm-root input:not([type]) {
+  width: 100%;
+  border: 1.5px solid var(--slate-200);
+  background: var(--slate-50);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--slate-900);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  box-shadow: none;
+}
+.adm-root input:not([type]):focus { border-color: var(--blue-500); background: #fff; box-shadow: 0 0 0 4px var(--blue-100); }
+.adm-root input.adm-key-field { border: 2px solid var(--blue-500, #3b82f6); background: #fff; font-weight: 600; }
+.adm-root input.adm-key-field:focus { box-shadow: 0 0 0 4px var(--blue-100); }
 .adm-root .adm-form-footer { display: flex; justify-content: flex-end; margin: 8px 0 20px; }
 .adm-root .adm-collapse-head { width: 100%; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
 .adm-root .adm-machine-names { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 46px; }
-.adm-root .adm-machine-names input { flex: 1 1 180px; min-width: 120px; border: 0; outline: 0; padding: 6px; }
+.adm-root .adm-machine-names input:not([type]) { flex: 1 1 180px; min-width: 120px; border: 0; outline: 0; padding: 6px; background: transparent; box-shadow: none; }
 .adm-root .adm-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .adm-root .adm-suggest button {
   border: 1px solid var(--slate-200); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer;
