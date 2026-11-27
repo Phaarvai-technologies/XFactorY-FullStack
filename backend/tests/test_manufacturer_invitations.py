@@ -363,15 +363,18 @@ async def test_new_link_says_14_days_not_13_and_dates_are_indian():
 
 
 async def test_link_without_email_person_enters_their_email(client, clerk_stub):
-    """26 Nov: "generate magic link without email address" (sent by WhatsApp). Whoever opens it
-    gives their email, confirms it with Clerk's email code, then accepts as usual."""
+    """26/27 Nov: a link sent on WhatsApp to someone who gave no email. Whoever opens it gives their
+    email: a new account is signed in straight away (same "no password" step as an emailed link);
+    an email that already has an account needs the code Clerk emails."""
     accounts, tickets = clerk_stub
     t = uuid.uuid4().hex[:6]
     admin = await admin_headers(client)
     org = await imported(client, f"Vaigai Polymers {t}")
-    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin, json={"phone": "+91 98400 11223"})
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin,
+                          json={"phone": "+91 98400 11223", "sendEmail": False})
     assert r.status_code == 201, r.text
     assert r.json()["email"] == "none" and r.json()["invitation"]["withoutEmail"] is True
+    assert r.json()["invitation"]["channel"] == "whatsapp"
     assert accounts == {}                                            # nothing created in Clerk yet
     code = code_of(r.json()["link"])
 
@@ -381,25 +384,103 @@ async def test_link_without_email_person_enters_their_email(client, clerk_stub):
     assert r.status_code == 422
     email = f"selvi.{t}@example.com"
     r = await client.post(f"/invitations/{code}/claim", json={"email": email, "name": "Selvi Arun"})
-    assert r.status_code == 200 and r.json() == {"status": "verify", "email": email}, r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "open" and r.json()["ticket"] and r.json()["email"] == email   # new account
     person = accounts[email]
     client.unregistered.add(person)
-    # a claimed link never hands out a sign-in ticket: the person signs in with Clerk's email code
     again = (await client.post(f"/invitations/{code}/open", headers={"Authorization": ""})).json()
-    assert again["status"] == "verify" and again["email"] == email and "ticket" not in again
-    assert tickets == []
+    assert again["status"] == "open" and again["email"] == email     # same link, same account until set up
     terms = {"termsAccepted": True, "termsVersion": "terms-1.2;privacy-1.4"}
     r = await client.post(f"/invitations/{code}/accept", headers=auth(client, person), json=terms)
     assert r.status_code == 200 and r.json()["role"] == "owner", r.text
     rows = await client.sql("""SELECT contact_name, email, status FROM manufacturer_invitations
                                WHERE organization_id = CAST(:o AS uuid)""", o=org)
     assert rows[0] == ("Selvi Arun", email, "accepted")
-    # no reminders for a link without email (nothing to send to)
-    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin, json={})
-    assert r.status_code == 201
+    # the same email cannot claim another link for this company: they already have a login
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin, json={"sendEmail": False})
     other = code_of(r.json()["link"])
     r = await client.post(f"/invitations/{other}/claim", json={"email": email})
     assert r.status_code == 409 and "already" in r.json()["detail"]
+
+    # an email that already has an account: never signed in by the link alone, only with the code
+    org2 = await imported(client, f"Thamirabarani Mills {t}")
+    existing = f"existing.{t}@example.com"
+    accounts[existing] = f"invitee_existing_{t}"
+    r = await client.post(f"/admin/manufacturers/{org2}/invitations", headers=admin, json={"sendEmail": False})
+    code2 = code_of(r.json()["link"])
+    before = len(tickets)
+    r = await client.post(f"/invitations/{code2}/claim", json={"email": existing})
+    assert r.json() == {"status": "verify", "email": existing}
+    again = (await client.post(f"/invitations/{code2}/open", headers={"Authorization": ""})).json()
+    assert again["status"] == "verify" and "ticket" not in again and len(tickets) == before
+
+
+async def test_send_by_whatsapp_then_by_email_and_list_status(client, clerk_stub):
+    """27 Nov: WhatsApp without an email invitation first; Send by Email later sends the same link;
+    the Manufacturers list shows whether the invite is pending or the account is set up."""
+    accounts, tickets = clerk_stub
+    t = uuid.uuid4().hex[:6]
+    admin = await admin_headers(client)
+    name = f"Noyyal Knits {t}"
+    org = await imported(client, name)
+    email = f"anbu.{t}@example.com"
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin,
+                          json={"contactName": "Anbu Selvan", "email": email, "phone": "+91 98945 11223",
+                                "sendEmail": False})
+    assert r.status_code == 201 and r.json()["email"] == "not_sent", r.text
+    inv = r.json()["invitation"]
+    link = r.json()["link"]
+    assert inv["channel"] == "whatsapp" and inv["withoutEmail"] is False
+    sent = await client.sql("SELECT count(*) FROM email_deliveries WHERE to_email = :e", e=email)
+    assert sent[0][0] == 0                                           # nothing emailed
+    # the link opens with a ticket, exactly like an emailed one
+    assert (await client.post(f"/invitations/{code_of(link)}/open", headers={"Authorization": ""})).json()["status"] == "open"
+    # Send by Email later: the same link
+    r = await client.post(f"/admin/invitations/{inv['id']}/email", headers=admin)
+    assert r.status_code == 200 and r.json()["link"] == link, r.text
+    sent = await client.sql("SELECT count(*) FROM email_deliveries WHERE to_email = :e", e=email)
+    assert sent[0][0] == 1
+    # Manufacturers list: opened, then account set up
+    rows = (await client.get(f"/admin/manufacturers?q={name}", headers=admin)).json()
+    row = next(x for x in rows["rows"] if x["id"] == org)
+    assert row["invite"]["status"] == "opened"
+    client.unregistered.add(accounts[email])
+    r = await client.post(f"/invitations/{code_of(link)}/accept", headers=auth(client, accounts[email]),
+                          json={"termsAccepted": True, "termsVersion": "terms-1.2;privacy-1.4"})
+    assert r.status_code == 200, r.text
+    rows = (await client.get(f"/admin/manufacturers?q={name}", headers=admin)).json()
+    assert next(x for x in rows["rows"] if x["id"] == org)["invite"]["status"] == "accepted"
+
+
+async def test_reminders_over_the_14_days(client, clerk_stub, monkeypatch):
+    """27 Nov: four emails in all: the invitation, then reminders on days 3, 7 and 12 (same link);
+    the link closes after day 14. A link without an email gets no reminders."""
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "invitation_job_secret", "job-secret")
+    t = uuid.uuid4().hex[:6]
+    admin = await admin_headers(client)
+    org = await imported(client, f"Kollidam Castings {t}")
+    email = f"bala.{t}@example.com"
+    r = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin,
+                          json={"contactName": "Bala", "email": email})
+    inv = r.json()["invitation"]["id"]
+    r2 = await client.post(f"/admin/manufacturers/{org}/invitations", headers=admin, json={"sendEmail": False})
+    no_email = r2.json()["invitation"]["id"]
+    seen = []
+    for day in range(1, 16):
+        await client.sql("""UPDATE manufacturer_invitations SET last_sent_at = now() - make_interval(days => :d),
+                              expires_at = now() + make_interval(days => 14 - :d) WHERE id IN (CAST(:i AS uuid), CAST(:j AS uuid))""",
+                         d=day, i=inv, j=no_email)
+        assert (await client.post("/jobs/invitation-reminders", headers={"X-Job-Secret": "job-secret"})).status_code == 200
+        n = (await client.sql("SELECT reminders_sent FROM manufacturer_invitations WHERE id = CAST(:i AS uuid)", i=inv))[0][0]
+        seen.append(n)
+    assert seen[:14] == [0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3]
+    emails = await client.sql("SELECT template FROM email_deliveries WHERE to_email = :e ORDER BY created_at", e=email)
+    assert [e[0] for e in emails] == ["manufacturer_invite"] + ["manufacturer_invite_reminder"] * 3
+    status = await client.sql("SELECT status, reminders_sent FROM manufacturer_invitations WHERE id IN (CAST(:i AS uuid), CAST(:j AS uuid)) ORDER BY email NULLS LAST",
+                              i=inv, j=no_email)
+    assert status == [("expired", 3), ("expired", 0)]
 
 
 async def test_editable_page_saves_several_fields_at_once(client):

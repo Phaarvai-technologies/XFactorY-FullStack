@@ -261,9 +261,18 @@ function EmailStep({
     setBusy(true);
     setError("");
     try {
-      const { email: claimed } = await claimInvitation(code, email.trim(), name.trim());
-      onVerify(claimed);
-      await sendCode(claimed);
+      const claimed = await claimInvitation(code, email.trim(), name.trim());
+      if (claimed.status === "open" && signIn && setActive) {
+        // a new account for this email: signed in with no password, like an emailed link
+        const result = await signIn.create({ strategy: "ticket", ticket: claimed.ticket });
+        if (result.status === "complete" && result.createdSessionId) {
+          await setActive({ session: result.createdSessionId });
+          onSignedIn(claimed.email);
+          return;
+        }
+      }
+      onVerify(claimed.email);
+      await sendCode(claimed.email);
     } catch (caught) {
       setError(clerkMessage(caught, (caught as Error)?.message || INVITE_UNAVAILABLE));
     } finally {
@@ -311,7 +320,7 @@ function EmailStep({
         <h1 className="auth-card-heading">Welcome to XfactorY</h1>
         <p className="auth-description">
           The XfactorY team set up an account for <b>{phase.companyName}</b>. Enter your email: it will be your login.
-          We&apos;ll email you a code to confirm it.
+          No password is needed now; you can set one in the next step.
         </p>
         <div className={`status-box status-error${error ? " show" : ""}`} role="alert">
           <span>{error}</span>
@@ -325,7 +334,7 @@ function EmailStep({
           <input id="claim-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <button className={`primary-cta${busy ? " loading" : ""}`} disabled={busy || !isLoaded}>
-          {busy ? "Sending…" : "Email me a code"}
+          {busy ? "Opening…" : "Continue"}
         </button>
       </form>
     );

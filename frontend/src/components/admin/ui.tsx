@@ -24,6 +24,21 @@ export function RecordBadge({ type, hideReal = false }: { type: RecordType; hide
   return <span className={`badge ${recordTone(type)}`}>{RECORD_LABELS[type] ?? type}</span>;
 }
 
+const INVITE_LABELS: Record<string, [string, string]> = {
+  invited: ["Invite sent · not opened", "badge-pending"],
+  opened: ["Invite opened · not set up", "badge-pending"],
+  accepted: ["Account set up", "badge-verified"],
+  expired: ["Invite expired", "badge-neutral"],
+  cancelled: ["Invite cancelled", "badge-neutral"],
+};
+
+/** Magic link state in lists: whether the invitation is pending or the account is set up. */
+export function InviteBadge({ invite }: { invite: { status: string; at: string | null } | null | undefined }) {
+  if (!invite) return null;
+  const [label, tone] = INVITE_LABELS[invite.status] ?? [invite.status, "badge-neutral"];
+  return <span className={`badge ${tone}`} title="Magic link">{label}</span>;
+}
+
 export function EntryBadge({ source }: { source: EntrySource }) {
   // entry_source: an admin-editable classification, NOT the company's onboarding source
   return (

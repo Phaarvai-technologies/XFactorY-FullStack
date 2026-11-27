@@ -112,6 +112,7 @@ const COMPANY_TYPES = [
   "Chemicals & Plastics",
   "Pharmaceuticals & Healthcare",
   "Packaging & Printing",
+  "Footwear & Leather",
   "Other",
 ];
 

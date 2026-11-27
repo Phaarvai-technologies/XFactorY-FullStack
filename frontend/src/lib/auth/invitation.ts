@@ -66,14 +66,14 @@ export async function acceptInvitation(
   return { returnPath: (body && typeof body.returnPath === "string" && body.returnPath) || "/manufacturer/dashboard" };
 }
 
-/** A link made without an email: the person gives their email (and name); they confirm it with
- * the code Clerk emails them, then accept as usual. */
+/** A link made without an email: the person gives their email (and name). A new account is
+ * signed in straight away; an email that already has an account confirms with Clerk's code. */
 export async function claimInvitation(
   code: string,
   email: string,
   name: string,
   fetchImpl: Fetch = fetch,
-): Promise<{ status: "verify"; email: string }> {
+): Promise<{ status: "verify"; email: string } | { status: "open"; ticket: string; email: string }> {
   let response: Response;
   try {
     response = await backendFetch(fetchImpl, `${API_URL}/invitations/${encodeURIComponent(code)}/claim`, {
@@ -85,8 +85,10 @@ export async function claimInvitation(
     throw new Error(INVITE_UNAVAILABLE);
   }
   const body = await response.json().catch(() => null);
-  if (!response.ok || !body || body.status !== "verify") {
+  if (!response.ok || !body || (body.status !== "verify" && body.status !== "open")) {
     throw new Error((body && typeof body.detail === "string" && body.detail) || INVITE_UNAVAILABLE);
   }
-  return body as { status: "verify"; email: string };
+  // "open": a new account for this email, signed in with the ticket (no code); "verify": the email
+  // already has an account, so the code Clerk emails is needed.
+  return body as { status: "verify"; email: string } | { status: "open"; ticket: string; email: string };
 }

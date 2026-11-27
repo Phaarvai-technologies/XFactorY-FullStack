@@ -22,6 +22,7 @@ const COMPANY_TYPES = [
   "Chemicals & Plastics",
   "Pharmaceuticals & Healthcare",
   "Packaging & Printing",
+  "Footwear & Leather",
   "Other",
 ];
 const ACCOUNT_COUNTRIES = [
@@ -42,6 +43,7 @@ const MACHINE_INDUSTRIES = [
   "Automotive & Machinery",
   "Furniture & Woodwork",
   "Chemicals & Plastics",
+  "Footwear & Leather",
   "Other",
 ];
 const CONDITIONS = ["New", "Excellent", "Good", "Fair"];

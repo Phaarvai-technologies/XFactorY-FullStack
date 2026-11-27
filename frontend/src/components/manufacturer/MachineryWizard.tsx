@@ -21,6 +21,7 @@ const INDUSTRIES = [
   "Automotive & Machinery",
   "Furniture & Woodwork",
   "Chemicals & Plastics",
+  "Footwear & Leather",
   "Other",
 ];
 const CONDITIONS = ["New", "Excellent", "Good", "Fair"];

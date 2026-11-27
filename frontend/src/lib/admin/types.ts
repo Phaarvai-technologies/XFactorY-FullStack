@@ -47,8 +47,13 @@ export type AdminUserRef = { id: string; name: string | null; email: string };
 
 export type SectionState = { name: string; complete: boolean };
 
+/** Magic link state of a company (newest relevant invitation), or null when never invited. */
+export type InviteState = { status: "invited" | "opened" | "accepted" | "expired" | "cancelled"; at: string | null } | null;
+
 export type ManufacturerRow = {
   id: string;
+  /** Meeting 27 Nov: invite pending / opened / account set up, shown in the list. */
+  invite?: InviteState;
   companyName: string | null;
   contactName: string | null;
   contactEmail: string | null;

@@ -31,6 +31,8 @@ type Invitation = {
   withoutEmail?: boolean;
   /** owner, or admin (an additional login on a company that already had an owner). */
   acceptedRole?: string | null;
+  /** How the link was shared first: email, or whatsapp (no email sent). */
+  channel?: "email" | "whatsapp" | null;
 };
 type DetailsState = {
   source: "entered_by_xfactory" | "confirmed_by_manufacturer" | null;
@@ -63,12 +65,13 @@ export function DetailsSourceBadge({ details }: { details: DetailsState | undefi
 }
 
 /**
- * Magic link (in Registered Users on the company page, and on the Add manufacturer page).
- * Daily check-in 26 Nov 2026: any company can get a link, also one that already has an owner or
- * is approved (the person joins as an additional login); a link can be made with an email (the
- * account is created and the link emailed) or without one (sent by WhatsApp / Copy link: the
- * person enters their email when they open it). Several open links are listed, each with Send on
- * WhatsApp, Copy link, Resend and Cancel.
+ * Magic link ("Invited users": in Registered Users on the company page, and on the Add
+ * manufacturer page right after saving).
+ * Meeting 27 Nov 2026: Send by Email and Send by WhatsApp are separate options. WhatsApp does not
+ * need an email invitation first, nor an email at all (they enter one when they open the link).
+ * Both open the same page: Terms, "Open my account" (no password), then set a password.
+ * 26 Nov: any company can get a link, also one with an owner (an additional login). Each open
+ * link has Send on WhatsApp, Send by Email (when there is an email), Copy link, New link, Cancel.
  */
 export function InvitationPanel({
   orgId,
@@ -94,7 +97,7 @@ export function InvitationPanel({
   const call = useAdminApi();
   const toast = useToast();
   const { data, reload } = useResource<InvitationsResponse>(`/manufacturers/${orgId}/invitations`);
-  const [inviteMode, setInviteMode] = useState<"email" | "link" | null>(null);
+  const [inviteMode, setInviteMode] = useState<"email" | "whatsapp" | null>(null);
   const [machineOpen, setMachineOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState("");
@@ -108,13 +111,16 @@ export function InvitationPanel({
   // Closed ones: the latest few, so the team sees who set up an account or which link expired.
   const closed = data.invitations.filter((i) => !isOpen(i)).slice(0, openList.length ? 2 : 3);
   const shownList = [...openList, ...closed];
+  const hasEmail = (i: Invitation) => !!i.email;
 
   async function act(key: string, path: string, done: string) {
     setBusy(key);
     setErr("");
     try {
       const result = await call<{ email?: string; invitation?: { email: string } }>(path, { method: "POST" });
-      if (result?.email && result.invitation) setMailNote(emailNote(result.email, result.invitation.email));
+      if (result?.email && result.invitation && result.email !== "none" && result.email !== "not_sent")
+        setMailNote(emailNote(result.email, result.invitation.email));
+      else setMailNote(null);
       toast(done);
       reload();
       onChanged();
@@ -126,13 +132,15 @@ export function InvitationPanel({
   }
 
   /** WhatsApp's official click-to-chat link: the message is typed, the team presses Send. */
-  function sendOnWhatsApp(invitation: Invitation) {
+  function sendOnWhatsApp(invitation: Invitation, win?: Window | null) {
     if (!invitation.link) return;
     const url = whatsappUrl(
       invitation.phone,
-      invitationMessage(invitation.contactName, invitation.companyName, invitation.link, invitation.respondBy, !!invitation.withoutEmail),
+      invitationMessage(invitation.contactName, invitation.companyName, invitation.link, invitation.respondBy,
+        !invitation.email),
     );
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (win) win.location.href = url;
+    else window.open(url, "_blank", "noopener,noreferrer");
     toast(
       whatsappNumber(invitation.phone)
         ? "WhatsApp opened with the message. Press Send there."
@@ -151,8 +159,8 @@ export function InvitationPanel({
 
   const who = (i: Invitation) => (
     <>
-      <b>{i.contactName || (i.withoutEmail && !i.email ? "Link without email" : i.email)}</b>
-      {i.email ? ` · ${i.email}` : i.withoutEmail ? " · they enter their email when they open it" : ""}
+      <b>{i.contactName || (i.email ? i.email : "No email given")}</b>
+      {i.email ? ` · ${i.email}` : " · they enter their email when they open the link"}
       {i.phone ? ` · ${i.phone}` : ""}
     </>
   );
@@ -162,7 +170,9 @@ export function InvitationPanel({
       <p className={embedded ? "adm-section-hint" : "field-hint"}>
         {hasOwner
           ? "This company already has a login. You can still send a link to add another person (they join as an additional login)."
-          : "After a call, check the details below, then send a link: it opens the manufacturer's account without a password."}
+          : "Send the link by email or WhatsApp (or both). It opens the manufacturer's account without a password."}{" "}
+        If they have a few minutes on the call, help them open the link and sign in now; otherwise share it and tell them
+        whom to contact for help.
       </p>
 
       {shownList.length ? (
@@ -178,16 +188,16 @@ export function InvitationPanel({
                   {who(i)}
                 </p>
                 <p className="adm-cell-sub">
-                  {i.withoutEmail ? "Link made" : "Sent"} {fmtDate(i.lastSentAt)}
-                  {i.sendCount > 1 ? ` (${i.sendCount} times)` : ""}
+                  {i.channel === "whatsapp" ? "Shared on WhatsApp" : "Emailed"} {fmtDate(i.lastSentAt)}
+                  {i.sendCount > 1 ? ` (${i.sendCount} links)` : ""}
                   {i.createdBy ? ` by ${i.createdBy}` : ""}
-                  {i.withoutEmail ? "" : ` · reminders sent: ${i.remindersSent}`}
+                  {hasEmail(i) ? ` · reminder emails: ${i.remindersSent} of 3` : ""}
                   {i.openedAt ? ` · opened ${i.openCount} time${i.openCount === 1 ? "" : "s"}` : ""}
                   {i.status === "accepted" && i.acceptedAt ? ` · set up ${fmtDate(i.acceptedAt)}` : ""}
                   {isOpen(i) && i.respondBy ? ` · asked to confirm by ${fmtDate(i.respondBy)}` : ""}
                   {isOpen(i) ? ` · link works until ${fmtDate(i.expiresAt)}` : ""}
                 </p>
-                {data.canInvite && (live || isOpen(i) || i.status === "expired" || i.status === "cancelled") ? (
+                {data.canInvite && (isOpen(i) || i.status === "expired" || i.status === "cancelled") ? (
                   <div className="adm-btn-row">
                     {live ? (
                       <>
@@ -203,6 +213,12 @@ export function InvitationPanel({
                         >
                           Send on WhatsApp
                         </button>
+                        {hasEmail(i) ? (
+                          <button type="button" className="btn-secondary-full adm-btn-sm" disabled={busy !== null}
+                            onClick={() => void act(`email-${i.id}`, `/invitations/${i.id}/email`, `Link emailed to ${i.email}`)}>
+                            {busy === `email-${i.id}` ? "Sending…" : i.channel === "whatsapp" ? "Send by Email" : "Email again"}
+                          </button>
+                        ) : null}
                         <button type="button" className="btn-secondary-full adm-btn-sm" onClick={() => void copy(i.link!)}>
                           Copy link
                         </button>
@@ -211,9 +227,8 @@ export function InvitationPanel({
                     {isOpen(i) ? (
                       <>
                         <button type="button" className="btn-secondary-full adm-btn-sm" disabled={busy !== null}
-                          onClick={() => void act(`resend-${i.id}`, `/invitations/${i.id}/resend`,
-                            i.email && !i.withoutEmail ? "New link sent. The old link no longer works." : "New link made. The old link no longer works.")}>
-                          {busy === `resend-${i.id}` ? "Sending…" : i.email && !i.withoutEmail ? "Resend" : "New link"}
+                          onClick={() => void act(`resend-${i.id}`, `/invitations/${i.id}/resend`, "New link made. The old link no longer works.")}>
+                          {busy === `resend-${i.id}` ? "Working…" : "New link"}
                         </button>
                         <button type="button" className="btn-secondary-full adm-btn-sm" disabled={busy !== null}
                           onClick={() => void act(`cancel-${i.id}`, `/invitations/${i.id}/cancel`, "Invitation cancelled")}>
@@ -223,7 +238,7 @@ export function InvitationPanel({
                     ) : (
                       <button type="button" className="btn-secondary-full adm-btn-sm" disabled={busy !== null}
                         onClick={() => void act(`resend-${i.id}`, `/invitations/${i.id}/resend`, "New link made")}>
-                        {i.email && !i.withoutEmail ? `Send a new link to ${i.email}` : "Make a new link"}
+                        Make a new link{i.email ? ` for ${i.email}` : ""}
                       </button>
                     )}
                   </div>
@@ -233,7 +248,7 @@ export function InvitationPanel({
           })}
         </div>
       ) : (
-        <p className="adm-muted">No magic link yet.</p>
+        <p className="adm-muted">No one invited yet.</p>
       )}
 
       {data.details.source === "confirmed_by_manufacturer" && data.details.approvalStatus === "submitted" ? (
@@ -252,11 +267,11 @@ export function InvitationPanel({
         <div className="adm-btn-row">
           <button type="button" className="btn-primary adm-btn-sm" disabled={!!blockedReason} title={blockedReason ?? undefined}
             onClick={() => setInviteMode("email")}>
-            {hasOwner ? "Invite another user" : "Invite manufacturer"}
+            Send by Email
           </button>
-          <button type="button" className="btn-secondary-full adm-btn-sm" disabled={!!blockedReason} title={blockedReason ?? undefined}
-            onClick={() => setInviteMode("link")}>
-            Generate link without email
+          <button type="button" className="btn-primary adm-btn-sm" disabled={!!blockedReason} title={blockedReason ?? undefined}
+            onClick={() => setInviteMode("whatsapp")}>
+            Send by WhatsApp
           </button>
           {onEditDetails ? (
             <button type="button" className="btn-secondary-full adm-btn-sm" onClick={onEditDetails}>
@@ -279,12 +294,16 @@ export function InvitationPanel({
           mode={inviteMode}
           defaults={inviteDefaults}
           onClose={() => setInviteMode(null)}
-          onDone={(link, mail, email) => {
+          onDone={(created, win) => {
             setInviteMode(null);
-            setMailNote(mail === "none" ? null : emailNote(mail, email));
             reload();
             onChanged();
-            void copy(link);
+            if (inviteMode === "whatsapp") {
+              setMailNote(null);
+              sendOnWhatsApp({ ...created.invitation, link: created.link } as Invitation, win);
+            } else {
+              setMailNote(emailNote(created.email, created.invitation.email));
+            }
           }}
         />
       ) : null}
@@ -307,7 +326,7 @@ export function InvitationPanel({
     return (
       <div className="adm-invite-embedded">
         <div className="adm-section-head">
-          <h4>Magic link</h4>
+          <h4>Invited users (magic link)</h4>
           <DetailsSourceBadge details={data.details} />
         </div>
         {body}
@@ -317,7 +336,7 @@ export function InvitationPanel({
   return (
     <section className="card adm-section">
       <div className="adm-section-head">
-        <h3>Magic link</h3>
+        <h3>Invite the manufacturer (magic link)</h3>
         <DetailsSourceBadge details={data.details} />
       </div>
       {body}
@@ -333,17 +352,23 @@ function emailNote(status: string, email: string): { tone: "ok" | "warn"; text: 
   return { tone: "warn", text: `The email to ${email} could not be sent (check the SMTP settings or Admin → Support). Use Send on WhatsApp meanwhile.` };
 }
 
+type Created = { link: string; email: string; invitation: Invitation };
+
+/**
+ * Send by Email: name and email needed (the link is emailed; reminders on days 3, 7 and 12).
+ * Send by WhatsApp: confirm the number; the email is optional (without one, the person enters it
+ * when they open the link). No email is sent; WhatsApp opens with the message.
+ */
 function InviteModal({ orgId, mode, defaults, onClose, onDone }: {
   orgId: string;
-  /** email: account created and the link emailed; link: only the link (WhatsApp / Copy link). */
-  mode: "email" | "link";
+  mode: "email" | "whatsapp";
   defaults?: { name: string; email: string; phone: string };
   onClose: () => void;
-  onDone: (link: string, mail: string, email: string) => void;
+  onDone: (created: Created, win: Window | null) => void;
 }) {
   const call = useAdminApi();
   const [name, setName] = useState(defaults?.name ?? "");
-  const [email, setEmail] = useState(mode === "email" ? (defaults?.email ?? "") : "");
+  const [email, setEmail] = useState(defaults?.email ?? "");
   const [phone, setPhone] = useState(defaults?.phone ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -353,48 +378,65 @@ function InviteModal({ orgId, mode, defaults, onClose, onDone }: {
       setErr("Please enter the person's name and email.");
       return;
     }
+    if (mode === "whatsapp" && !whatsappNumber(phone)) {
+      setErr("Please confirm the WhatsApp number (with the country code, e.g. +91 98765 43210).");
+      return;
+    }
+    // WhatsApp: open the window now (browsers block windows opened after waiting for the server).
+    const win = mode === "whatsapp" ? window.open("", "_blank") : null;
+    if (win) win.opener = null;
     setBusy(true);
     setErr("");
     try {
-      const result = await call<{ link: string; email: string; invitation: { email: string } }>(
+      const created = await call<Created>(
         `/manufacturers/${orgId}/invitations`,
-        jsonBody("POST", { contactName: name.trim() || null, email: mode === "email" ? email : null, phone: phone || null }),
+        jsonBody("POST", { contactName: name.trim() || null, email: email.trim() || null, phone: phone.trim() || null,
+                           sendEmail: mode === "email" }),
       );
-      onDone(result.link, result.email, result.invitation.email);
+      onDone(created, win);
     } catch (e) {
+      win?.close();
       setErr(e instanceof Error ? e.message : "Could not create the link.");
       setBusy(false);
     }
   }
 
   return (
-    <Modal title={mode === "email" ? "Invite by email" : "Generate link without email"} onClose={onClose}>
+    <Modal title={mode === "email" ? "Send by Email" : "Send by WhatsApp"} onClose={onClose}>
       <p className="adm-modal-text">
         {mode === "email"
-          ? "Creates the person's account (no password) and emails them a link that opens it. The email asks them to confirm the details within 7 days; the link works for 14 days or until they set up the account. Reminders go out on days 3, 7 and 12."
-          : "Makes a link to send by WhatsApp or copy. When the person opens it, they enter their own email and the code we email them, then set a password or use Google. The link works for 14 days."}
+          ? "Emails a link that opens their account without a password. The email asks them to confirm their details within 7 days; the link works for 14 days. Reminder emails go out on days 3, 7 and 12."
+          : "Confirm their WhatsApp number. WhatsApp opens with the message and link; press Send there. No email is sent. If they gave no email, they enter one when they open the link."}
       </p>
       <div className="adm-add-company-grid">
         <div>
           <label htmlFor="inv-name">Name {mode === "email" ? <span className="adm-req">*</span> : null}</label>
           <input id="inv-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </div>
-        {mode === "email" ? (
+        {mode === "whatsapp" ? (
           <div>
-            <label htmlFor="inv-email">Email (their login) <span className="adm-req">*</span></label>
-            <input id="inv-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <label htmlFor="inv-phone">WhatsApp number <span className="adm-req">*</span></label>
+            <input id="inv-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" />
           </div>
         ) : null}
         <div>
-          <label htmlFor="inv-phone">Phone (WhatsApp)</label>
-          <input id="inv-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+          <label htmlFor="inv-email">
+            Email (their login) {mode === "email" ? <span className="adm-req">*</span> : <span className="adm-muted">optional</span>}
+          </label>
+          <input id="inv-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
+        {mode === "email" ? (
+          <div>
+            <label htmlFor="inv-phone">Phone (WhatsApp)</label>
+            <input id="inv-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+          </div>
+        ) : null}
       </div>
       {err ? <p className="field-error">{err}</p> : null}
       <div className="modal-actions">
         <button type="button" className="btn-secondary-full" onClick={onClose}>Cancel</button>
         <button type="button" className="btn-primary" disabled={busy} onClick={() => void submit()}>
-          {busy ? "Creating…" : mode === "email" ? "Send invitation" : "Generate link"}
+          {busy ? "Working…" : mode === "email" ? "Send email" : "Open WhatsApp"}
         </button>
       </div>
     </Modal>
@@ -403,7 +445,7 @@ function InviteModal({ orgId, mode, defaults, onClose, onDone }: {
 
 const MACHINE_INDUSTRIES = [
   "Textile & Apparel", "Electronics & Hardware", "Food & Beverage", "Automotive & Machinery",
-  "Furniture & Woodwork", "Chemicals & Plastics", "Other",
+  "Furniture & Woodwork", "Chemicals & Plastics", "Footwear & Leather", "Other",
 ];
 
 function MachineModal({ orgId, onClose, onDone }: { orgId: string; onClose: () => void; onDone: () => void }) {

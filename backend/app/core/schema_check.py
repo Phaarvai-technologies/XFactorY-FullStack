@@ -23,6 +23,7 @@ REQUIRED = [
     ("manufacturer_invitations", None, "028_manufacturer_invitations.sql"),
     ("organizations", "details_source", "028_manufacturer_invitations.sql"),
     ("manufacturer_invitations", "accepted_role", "029_magic_link_any_company.sql"),
+    ("manufacturer_invitations", "claim_needs_code", "030_magic_link_whatsapp.sql"),
     ("manufacturer_onboarding", None, "XY_Database_Schema.sql"),
     ("manufacturer_availability_preferences", None, "004_manufacturer_api_support.sql"),
     ("facilities", "sez_status", "004_manufacturer_api_support.sql"),

@@ -1,6 +1,6 @@
 /**
- * Admin "Add manufacturer" page: one form for company, contact person and machines. Save first,
- * then invite (prefilled from the contact person); unsaved changes block the invite.
+ * Admin "Add manufacturer" page (meeting 27 Nov 2026): company name and contact first, machine
+ * names in one field with sector and products, Save at the bottom, then Send by Email / WhatsApp.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,40 +50,62 @@ const INVITES = { invitations: [], details: { source: "entered_by_xfactory", at:
 beforeEach(() => { toasts.length = 0; });
 afterEach(() => vi.unstubAllGlobals());
 
-describe("required fields", () => {
+describe("required fields (27 Nov: only the company name and how to reach the person)", () => {
   it("names what is missing", () => {
-    expect(formProblems(EMPTY_FORM)).toEqual(["Company name", "Category", "City", "Contact person", "Contact email"]);
+    expect(formProblems(EMPTY_FORM)).toEqual(["Company name", "Contact person", "Email or WhatsApp number"]);
+    const onlyPhone = { ...EMPTY_FORM, company: { ...EMPTY_FORM.company, name: "Acme" },
+                        contact: { personName: "Ravi", email: "", phone: "+91 98400 11223" } };
+    expect(formProblems(onlyPhone)).toEqual([]);
+    expect(formProblems({ ...onlyPhone, contact: { ...onlyPhone.contact, email: "not-an-email" } })).toEqual(["A valid email"]);
   });
 });
 
 describe("new manufacturer", () => {
-  it("checks the required fields, then creates it and opens its page to invite", async () => {
-    serve((c) => (c.method === "POST" ? [{ ...SAVED, id: "org-new" }, 201] : [{}, 200]));
+  it("company name outlined; machines as names; Save at the bottom; then the invite options right here", async () => {
+    serve((c) => {
+      if (c.method === "POST") return [{ ...SAVED, id: "org-new", machines: [
+        { id: "m-a", type: "Lace Braiding", industry: "Footwear", subcategory: "Shoe laces", capacity: "", technical: "", status: "Published" },
+        { id: "m-b", type: "CNC Machining", industry: "Footwear", subcategory: "Shoe laces", capacity: "", technical: "", status: "Published" }] }, 201];
+      if (c.url.endsWith("/invitations")) return [INVITES, 200];
+      return [{ ...SAVED, id: "org-new" }, 200];
+    });
     const h = host();
     render(<AdminHostContext.Provider value={h}><OnboardManufacturer /></AdminHostContext.Provider>);
+    expect(screen.getByLabelText(/Company name/)).toHaveClass("adm-key-field");
+    expect(screen.queryByLabelText(/^Category/)).toBeNull();               // optional details are folded away
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save manufacturer" })));
-    expect(screen.getByRole("alert")).toHaveTextContent("Please fill in: Company name, Category, City, Contact person, Contact email.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Please fill in: Company name, Contact person, Email or WhatsApp number.");
     expect(calls).toEqual([]);
 
-    fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Sahyadri Plastics" } });
-    fireEvent.change(screen.getByLabelText(/^Category/), { target: { value: "Chemicals & Plastics" } });
-    fireEvent.change(screen.getByLabelText(/^City/), { target: { value: "Pune" } });
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Rahul Deshmukh" } });
-    fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: "rahul@sahyadri.in" } });
-    fireEvent.click(screen.getByRole("button", { name: /Add machine/ }));
-    fireEvent.change(screen.getByLabelText("Machine name"), { target: { value: "Injection Moulding" } });
+    fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Bharat Laces" } });
+    fireEvent.change(screen.getByLabelText(/^Contact person/), { target: { value: "Ravi Kumar" } });
+    fireEvent.change(screen.getByLabelText(/^WhatsApp number/), { target: { value: "+91 98400 11223" } });
+    // several machine names in one field: one typed (not in the list), one picked from the list
+    const names = screen.getByLabelText("Machine names");
+    fireEvent.change(names, { target: { value: "Lace Braiding" } });
+    fireEvent.keyDown(names, { key: "Enter" });
+    fireEvent.change(names, { target: { value: "cnc mach" } });
+    fireEvent.click(screen.getByRole("option", { name: "CNC Machining" }));
+    expect(screen.getByRole("button", { name: "Remove Lace Braiding" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove CNC Machining" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Industry sector"), { target: { value: "Footwear & Leather" } });
+    fireEvent.change(screen.getByLabelText("Production / products"), { target: { value: "Shoe laces" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save manufacturer" })));
 
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.url).toMatch(/\/admin\/manufacturers\/onboarding$/);
     expect(post.body).toMatchObject({
-      company: { name: "Sahyadri Plastics", category: "Chemicals & Plastics" },
-      location: { city: "Pune", country: "India" },
-      contact: { personName: "Rahul Deshmukh", email: "rahul@sahyadri.in" },
-      machines: [{ id: null, type: "Injection Moulding", remove: false }],
-      record_type: "REAL",
+      company: { name: "Bharat Laces" },
+      contact: { personName: "Ravi Kumar", email: "", phone: "+91 98400 11223" },
+      machines: [
+        { id: null, type: "Lace Braiding", industry: "Footwear & Leather", subcategory: "Shoe laces", remove: false },
+        { id: null, type: "CNC Machining", industry: "Footwear & Leather", subcategory: "Shoe laces", remove: false },
+      ],
     });
-    expect(h.went).toEqual(["/admin/manufacturers/org-new/onboard"]);
+    expect(h.went).toEqual(["/admin/manufacturers/org-new/onboard?invite=1"]);
+    // the invite options show straight away on this page (no reload needed)
+    expect(await screen.findByRole("button", { name: "Send by WhatsApp" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send by Email" })).toBeEnabled();
   });
 
   it("a duplicate offers to open the existing company", async () => {
@@ -91,9 +113,7 @@ describe("new manufacturer", () => {
     const h = host();
     render(<AdminHostContext.Provider value={h}><OnboardManufacturer /></AdminHostContext.Provider>);
     fireEvent.change(screen.getByLabelText(/Company name/), { target: { value: "Sahyadri Plastics" } });
-    fireEvent.change(screen.getByLabelText(/^Category/), { target: { value: "Chemicals & Plastics" } });
-    fireEvent.change(screen.getByLabelText(/^City/), { target: { value: "Pune" } });
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Rahul" } });
+    fireEvent.change(screen.getByLabelText(/^Contact person/), { target: { value: "Rahul" } });
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: "rahul@sahyadri.in" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save manufacturer" })));
     fireEvent.click(await screen.findByRole("button", { name: "Open the existing company" }));
@@ -111,30 +131,32 @@ describe("existing manufacturer", () => {
     });
   }
 
-  it("unsaved changes block the invite; after saving, the invite is prefilled from the contact person", async () => {
+  it("unsaved changes block the link; after saving, Send by Email / WhatsApp are prefilled", async () => {
     serveExisting();
     render(<AdminHostContext.Provider value={host()}><OnboardManufacturer id="org-1" /></AdminHostContext.Provider>);
-    expect(await screen.findByDisplayValue("Containers.")).toBeInTheDocument();
-    const invite = await screen.findByRole("button", { name: "Invite manufacturer" });
-    expect(invite).not.toBeDisabled();
+    expect(await screen.findByDisplayValue("Sahyadri Plastics")).toBeInTheDocument();
+    const byEmail = await screen.findByRole("button", { name: "Send by Email" });
+    expect(byEmail).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
 
+    fireEvent.click(screen.getByRole("button", { name: /More company details/ }));
     fireEvent.change(screen.getByLabelText(/About the company/), { target: { value: "Containers and caps." } });
-    fireEvent.click(screen.getByRole("button", { name: /Remove Injection Moulding/ }));
-    expect(screen.getByRole("button", { name: "Invite manufacturer" })).toBeDisabled();
-    expect(screen.getByText("Save your changes before sending the invite.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Injection Moulding" }));
+    expect(screen.getByRole("button", { name: "Send by Email" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send by WhatsApp" })).toBeDisabled();
+    expect(screen.getByText("Save your changes before sending the link.")).toBeInTheDocument();
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save changes" })));
     const put = calls.find((c) => c.method === "PUT")!;
     expect(put.url).toMatch(/\/admin\/manufacturers\/org-1\/onboarding$/);
     expect(put.body).toMatchObject({ company: { about: "Containers and caps." },
                                      machines: [{ id: "m-1", remove: true }] });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite manufacturer" })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send by Email" })).not.toBeDisabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Invite manufacturer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send by WhatsApp" }));
     const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByLabelText(/^Name/)).toHaveValue("Rahul Deshmukh");
+    expect(dialog.getByLabelText(/WhatsApp number/)).toHaveValue("+91 98220 99001");
     expect(dialog.getByLabelText(/Email \(their login\)/)).toHaveValue("rahul@sahyadri.in");
-    expect(dialog.getByLabelText(/Phone \(WhatsApp\)/)).toHaveValue("+91 98220 99001");
   });
 });

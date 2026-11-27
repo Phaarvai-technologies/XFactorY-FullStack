@@ -179,6 +179,8 @@ class InviteIn(BaseModel):
     contactName: str | None = Field(default=None, max_length=200)
     email: str | None = Field(default=None, max_length=320)
     phone: str | None = Field(default=None, max_length=40)
+    # 27 Nov: Send by Email (default) or Send by WhatsApp (no email sent; the link is shared there)
+    sendEmail: bool = True
 
 
 class MachineIn(BaseModel):
@@ -239,7 +241,7 @@ async def invite_manufacturer(org_id: UUID, body: InviteIn, admin: Admin, svc: S
     try:
         return await invitations.create(svc.db, svc.settings, ClerkManagement(svc.settings), admin_id=admin.user_id,
                                         roles=admin.roles, org_id=org_id, contact_name=body.contactName,
-                                        email=body.email, phone=body.phone)
+                                        email=body.email, phone=body.phone, send_email=body.sendEmail)
     except invitations.InvitationError as exc:
         await svc.db.rollback()
         return _invite_refusal(exc)
@@ -251,6 +253,18 @@ async def resend_invitation(invitation_id: UUID, admin: Admin, svc: Svc):
     try:
         return await invitations.resend(svc.db, svc.settings, admin_id=admin.user_id, roles=admin.roles,
                                         invitation_id=invitation_id)
+    except invitations.InvitationError as exc:
+        await svc.db.rollback()
+        return _invite_refusal(exc)
+
+
+@router.post("/invitations/{invitation_id}/email")
+async def email_invitation(invitation_id: UUID, admin: Admin, svc: Svc):
+    """Send by Email for a link already shared on WhatsApp: the same link, by email."""
+    from app import invitations
+    try:
+        return await invitations.email_link(svc.db, svc.settings, admin_id=admin.user_id, roles=admin.roles,
+                                            invitation_id=invitation_id)
     except invitations.InvitationError as exc:
         await svc.db.rollback()
         return _invite_refusal(exc)

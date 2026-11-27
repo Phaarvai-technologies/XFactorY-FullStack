@@ -81,13 +81,13 @@ describe("Editable company page", () => {
     expect((screen.getByLabelText(/^City/) as HTMLInputElement).value).toBe(original);
   });
 
-  it("the magic link is inside Registered Users, with or without an email", async () => {
+  it("Invited users (magic link) is inside Registered Users: Send by Email / Send by WhatsApp", async () => {
     serve();
     render(<AdminHostContext.Provider value={host()}><ManufacturerDetail id={ORG} /></AdminHostContext.Provider>);
-    await screen.findByText("Magic link");
+    await screen.findByText(/Invited users/);
     const users = screen.getByRole("heading", { name: /Registered Users/ }).closest("section")!;
-    expect(within(users).getByText("Magic link")).toBeInTheDocument();
-    expect(within(users).getByRole("button", { name: /Invite (manufacturer|another user)/ })).toBeInTheDocument();
-    expect(within(users).getByRole("button", { name: "Generate link without email" })).toBeInTheDocument();
+    expect(within(users).getByText(/Invited users/)).toBeInTheDocument();
+    expect(within(users).getByRole("button", { name: "Send by Email" })).toBeInTheDocument();
+    expect(within(users).getByRole("button", { name: "Send by WhatsApp" })).toBeInTheDocument();
   });
 });

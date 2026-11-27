@@ -21,6 +21,11 @@ profile to admin approval as a separate step (review status Submitted; the admin
 corrections or rejects with the usual Review status control). Accepting the invite does not approve:
 the invited owner may edit their sections meanwhile. The 100% rule for Visionaries is unchanged.
 
+Meeting 27 Nov 2026: Send by Email and Send by WhatsApp are separate. A link for a person with an
+email can be shared on WhatsApp only (`send_email=False`), and emailed later (`email_link`, same
+link). On a link made without an email, an email that has no account yet is signed in straight
+away; only an email that already has an account needs the code (`claim_needs_code`).
+
 Daily check-in with Praveen (26 Nov 2026):
 * Any company can get a link, also one that already has an owner or is approved: the person then
   joins as an additional login (membership role 'admin'); the company's approval is not touched.
@@ -114,7 +119,7 @@ def _view(row: dict, settings: Settings, now: datetime | None = None) -> dict:
     return {
         "id": str(row["id"]), "companyName": row["company_name"], "email": row["email"] or "",
         "contactName": row["contact_name"] or "", "phone": row["phone"] or "", "status": status,
-        "withoutEmail": not row["email"] or bool(row.get("claimed_at")), "acceptedRole": row.get("accepted_role"),
+        "withoutEmail": not row["email"] or bool(row.get("claimed_at")), "channel": row.get("channel"), "acceptedRole": row.get("accepted_role"),
         "expiresAt": row["expires_at"], "openedAt": row["opened_at"], "openCount": row["open_count"],
         "acceptedAt": row["accepted_at"], "cancelledAt": row["cancelled_at"],
         "remindersSent": row["reminders_sent"], "lastSentAt": row["last_sent_at"], "sendCount": row["send_count"],
@@ -168,7 +173,7 @@ async def list_for_company(db: AsyncSession, settings: Settings, org_id: UUID) -
 
 async def create(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *, admin_id: UUID,
                  roles: tuple[str, ...], org_id: UUID, contact_name: str | None, email: str | None,
-                 phone: str | None) -> dict:
+                 phone: str | None, send_email: bool = True) -> dict:
     """Creates the invitation and returns {invitation, link, email}; the link is returned once,
     for Copy link / WhatsApp. With an email: the Clerk account is created if needed and the email
     is sent. Without: nothing is created or sent yet; the person enters their email on the link
@@ -208,18 +213,43 @@ async def create(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *
     code = _code(settings, invitation_id, 1)
     row = (await db.execute(text("""
         INSERT INTO manufacturer_invitations (id, organization_id, company_name, email, contact_name, phone,
-                                              code_hash, clerk_user_id, expires_at, created_by_user_id)
-        VALUES (:id, :o, :n, :e, :c, :p, :h, :cu, now() + make_interval(days => :d), :a)
+                                              code_hash, clerk_user_id, expires_at, created_by_user_id, channel)
+        VALUES (:id, :o, :n, :e, :c, :p, :h, :cu, now() + make_interval(days => :d), :a, :ch)
         RETURNING *
     """), {"id": invitation_id, "o": org_id, "n": org["display_name"], "e": email, "c": contact_name, "p": phone,
            "h": _hash(code), "cu": clerk_user_id, "d": settings.manufacturer_invite_days,
-           "a": admin_id})).mappings().one()
+           "a": admin_id, "ch": "email" if email and send_email else "whatsapp"})).mappings().one()
     row = dict(row)
     await record_event(db, event="note", action="invitation_sent", role="admin", source="admin_entry", organization_id=org_id,
                        actor=admin_id, details={"email": email, "withoutEmail": not email,
                                                 "clerkAccountCreated": created})
     await db.commit()
-    mail = await _send(db, settings, row, code, reminder=False) if email else {"status": "none"}
+    if not email:
+        mail = {"status": "none"}
+    elif not send_email:
+        mail = {"status": "not_sent"}                  # shared on WhatsApp; "Send by Email" later
+    else:
+        mail = await _send(db, settings, row, code, reminder=False)
+    await db.commit()
+    return {"invitation": _view(row, settings), "link": invite_url(settings, code), "email": mail["status"]}
+
+
+async def email_link(db: AsyncSession, settings: Settings, *, admin_id: UUID, roles: tuple[str, ...],
+                     invitation_id: UUID) -> dict:
+    """Send by Email for a link that is already open (e.g. shared on WhatsApp first): the same
+    link, nothing else changes."""
+    if not set(roles) & set(INVITE_ROLES):
+        raise InvitationError("Only administrators and operators can invite manufacturers.", 403, "forbidden")
+    row = await _locked(db, invitation_id)
+    if row["status"] not in OPEN or row["expires_at"] <= datetime.now(timezone.utc):
+        raise InvitationError("This link is no longer open. Make a new link.", 409, "not_open")
+    if not row["email"]:
+        raise InvitationError("This link has no email address. Use Send on WhatsApp or Copy link.", 422, "no_email")
+    code = _code(settings, row["id"], row["send_count"])
+    await record_event(db, event="note", action="invitation_emailed", role="admin", source="admin_entry",
+                       organization_id=row["organization_id"], actor=admin_id, details={"email": row["email"]})
+    await db.commit()
+    mail = await _send(db, settings, row, code, reminder=False)
     await db.commit()
     return {"invitation": _view(row, settings), "link": invite_url(settings, code), "email": mail["status"]}
 
@@ -279,7 +309,12 @@ async def resend(db: AsyncSession, settings: Settings, *, admin_id: UUID, roles:
     await record_event(db, event="note", action="invitation_resent", role="admin", source="admin_entry",
                        organization_id=row["organization_id"], actor=admin_id, details={"email": row["email"]})
     await db.commit()
-    mail = await _send(db, settings, row, code, reminder=False) if row["email"] else {"status": "none"}
+    if not row["email"]:
+        mail = {"status": "none"}
+    elif row.get("channel") == "whatsapp":
+        mail = {"status": "not_sent"}                  # shared on WhatsApp: the new link goes there too
+    else:
+        mail = await _send(db, settings, row, code, reminder=False)
     await db.commit()
     return {"invitation": _view(row, settings), "link": invite_url(settings, code), "email": mail["status"]}
 
@@ -325,7 +360,7 @@ async def open_link(db: AsyncSession, settings: Settings, clerk: ClerkManagement
         """), {"i": row["id"]})
         await db.commit()
         return {"status": "expired", **base}
-    if row.get("claimed_at"):
+    if row.get("claimed_at") and row.get("claim_needs_code") is not False:
         # A link made without an email, already claimed: never a ticket; the person signs in with
         # the code Clerk emails to the address they gave (so a link holder cannot use it for
         # somebody else's account).
@@ -372,7 +407,9 @@ async def claim(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *,
     if row["status"] in ("accepted", "cancelled") or row["status"] == "expired" \
             or row["expires_at"] <= datetime.now(timezone.utc):
         raise InvitationError("This link is no longer active. Ask XfactorY to send a new one.", 410, "not_open")
-    if row["accepted_user_id"] or (row.get("claimed_at") and row["email"] == email):
+    if row["accepted_user_id"]:
+        return {"status": "verify", "email": row["email"]}
+    if row.get("claimed_at") and row["email"] == email and row.get("claim_needs_code") is not False:
         return {"status": "verify", "email": row["email"]}
     await _check_email(db, row["organization_id"], email, row["id"])
     first, last = _split_name(name or row["contact_name"] or "")
@@ -384,12 +421,21 @@ async def claim(db: AsyncSession, settings: Settings, clerk: ClerkManagement, *,
                               502, "clerk_failed") from exc
     await db.execute(text("""
         UPDATE manufacturer_invitations SET email = :e, contact_name = COALESCE(:n, contact_name),
-          clerk_user_id = :cu, claimed_at = now(), updated_at = now() WHERE id = :i
-    """), {"i": row["id"], "e": email, "n": name, "cu": clerk_user_id})
+          clerk_user_id = :cu, claimed_at = now(), claim_needs_code = :nc, updated_at = now() WHERE id = :i
+    """), {"i": row["id"], "e": email, "n": name, "cu": clerk_user_id, "nc": not created})
     await record_event(db, event="note", action="invitation_claimed", role="requester", source="web_dashboard",
                        organization_id=row["organization_id"], details={"email": email,
                                                                         "clerkAccountCreated": created})
     await db.commit()
+    if created:
+        # A new account for this email: nobody else can be in it, so sign them in straight away
+        # (the same "no password" step as an emailed link).
+        try:
+            ticket = await clerk.sign_in_token(clerk_user_id)
+        except RuntimeError as exc:
+            log.warning("Sign-in token for claimed invitation %s: %s", row["id"], exc)
+            return {"status": "verify", "email": email}
+        return {"status": "open", "ticket": ticket, "email": email}
     return {"status": "verify", "email": email}
 
 

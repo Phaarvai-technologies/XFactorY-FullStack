@@ -10,7 +10,10 @@ const h = vi.hoisted(() => ({ data: null as unknown, toasts: [] as string[], cal
 vi.mock("@/lib/admin/api", () => ({
   useAdminApi: () => async (path: string, init: unknown) => {
     h.calls.push({ path, init });
-    return { link: "https://x/invite/NEW", email: "none", invitation: { email: "" } };
+    const body = (init as { body?: string } | undefined)?.body ? JSON.parse((init as { body: string }).body) : {};
+    return { link: "https://x/invite/NEW", email: body.email ? "sent" : "none",
+             invitation: { id: "inv-new", email: body.email ?? "", contactName: body.contactName ?? "", phone: body.phone ?? "",
+                           companyName: "Bharat Laces", status: "invited", link: null, respondBy: null } };
   },
   useResource: () => ({ data: h.data, reload: () => undefined }),
   jsonBody: (method: string, body: unknown) => ({ method, body: JSON.stringify(body) }),
@@ -117,28 +120,61 @@ describe("Magic link card", () => {
   it("26 Nov: a company that already has an owner can still get a link (another login)", () => {
     h.data = { invitations: [{ ...invitation("+91 98430 23456"), status: "accepted", link: null, acceptedRole: "owner" }], details, canInvite: true };
     render(<InvitationPanel orgId="org-1" hasOwner={true} onChanged={() => undefined} />);
-    expect(screen.getByRole("button", { name: "Invite another user" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate link without email" })).toBeEnabled();
+    expect(screen.getByText(/You can still send a link to add another person/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send by Email" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send by WhatsApp" })).toBeEnabled();
   });
 
-  it("26 Nov: Generate link without email asks only for name / phone and creates the link", async () => {
+  it("27 Nov: Send by WhatsApp needs no email: confirm the number, WhatsApp opens with the link", async () => {
     h.data = { invitations: [], details, canInvite: true };
-    vi.stubGlobal("navigator", { clipboard: { writeText: async () => undefined } });
-    render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined} />);
-    fireEvent.click(screen.getByRole("button", { name: "Generate link without email" }));
+    const win = { location: { href: "" }, opener: {}, close: vi.fn() };
+    vi.stubGlobal("open", (url: string) => { opened.push(url); return win; });
+    render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined}
+      inviteDefaults={{ name: "Ravi Kumar", email: "", phone: "" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send by WhatsApp" }));
     const dialog = within(screen.getByRole("dialog"));
-    expect(dialog.queryByLabelText(/Email/)).toBeNull();
-    fireEvent.change(dialog.getByLabelText(/Phone/), { target: { value: "+91 98400 11223" } });
-    await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Generate link" })));
+    expect(dialog.getByLabelText(/Email/)).toHaveValue("");
+    await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Open WhatsApp" })));
+    expect(dialog.getByText(/confirm the WhatsApp number/)).toBeInTheDocument();
+    expect(h.calls).toEqual([]);
+    fireEvent.change(dialog.getByLabelText(/WhatsApp number/), { target: { value: "+91 98400 11223" } });
+    await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Open WhatsApp" })));
     expect(h.calls[0].path).toBe("/manufacturers/org-1/invitations");
-    expect(JSON.parse((h.calls[0].init as { body: string }).body)).toEqual({ contactName: null, email: null, phone: "+91 98400 11223" });
+    expect(JSON.parse((h.calls[0].init as { body: string }).body)).toEqual(
+      { contactName: "Ravi Kumar", email: null, phone: "+91 98400 11223", sendEmail: false });
+    // the window opened on the click goes to WhatsApp with the message and the link
+    expect(opened[0]).toBe("");
+    const url = new URL(win.location.href);
+    expect(url.origin + url.pathname).toBe("https://wa.me/919840011223");
+    expect(url.searchParams.get("text")).toContain("https://x/invite/NEW");
+    expect(url.searchParams.get("text")).toContain("enter your email");
   });
 
-  it("a link without email: the WhatsApp message tells them to enter their email and the code", () => {
+  it("27 Nov: Send by Email asks for name and email and sends the email (no WhatsApp)", async () => {
+    h.data = { invitations: [], details, canInvite: true };
+    render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined}
+      inviteDefaults={{ name: "Lakshmi", email: "lakshmi@nilgiri.in", phone: "+91 98430 23456" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send by Email" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Send email" })));
+    expect(JSON.parse((h.calls[0].init as { body: string }).body)).toEqual(
+      { contactName: "Lakshmi", email: "lakshmi@nilgiri.in", phone: "+91 98430 23456", sendEmail: true });
+    expect(opened).toEqual([]);
+  });
+
+  it("a link shared on WhatsApp first can be sent by email later (same link)", async () => {
+    h.data = { invitations: [{ ...invitation("+91 98430 23456"), channel: "whatsapp" }], details, canInvite: true };
+    render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined} />);
+    const [rowButton] = screen.getAllByRole("button", { name: "Send by Email" });   // the row's, before the new-invite one
+    await act(async () => fireEvent.click(rowButton));
+    expect(h.calls.at(-1)?.path).toBe("/invitations/inv-1/email");
+  });
+
+  it("a link without email: the WhatsApp message tells them to enter their email", () => {
     h.data = { invitations: [{ ...invitation("+91 98430 23456"), email: "", contactName: "", withoutEmail: true }], details, canInvite: true };
     render(<InvitationPanel orgId="org-1" hasOwner={false} onChanged={() => undefined} />);
-    expect(screen.getByText("Link without email")).toBeInTheDocument();
+    expect(screen.getByText("No email given")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send on WhatsApp" }));
-    expect(new URL(opened[0]).searchParams.get("text")).toContain("enter your email and the code we email you");
+    expect(new URL(opened[0]).searchParams.get("text")).toContain("enter your email");
   });
 });

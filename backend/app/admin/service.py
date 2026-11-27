@@ -111,6 +111,8 @@ def list_row(r: dict) -> dict:
         "lastSeenAt": r.get("last_seen_at"), "ownerUserId": str(r["user_id"]) if r.get("user_id") else None,
         "attentionReason": r.get("attention_reason"),
         "linkedUsers": int(r.get("linked_users") or 0),
+        # magic link: invite pending / opened / account set up / expired (None = never invited)
+        "invite": _json_obj(r.get("invite")),
         # review queue only: the newest request awaiting a decision on this company
         "request": ({"kind": r["request_kind"], "label": REQUEST_KIND_LABELS.get(r["request_kind"], r["request_kind"]),
                      "requestedBy": r.get("requested_by"), "submittedAt": r.get("request_submitted_at"),

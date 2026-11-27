@@ -64,6 +64,14 @@ LIST_COLUMNS = """
     (SELECT bl.evidence->>'why' FROM onboarding_source_backfill_log bl
       WHERE bl.record_type = 'company' AND bl.record_id = admin_manufacturer_overview.organization_id
         AND bl.field = 'onboarding_source' AND bl.outcome <> 'applied') AS onboarding_source_note,
+    -- magic link (27 Nov): account set up > opened > invited > expired / cancelled, newest first
+    (SELECT json_build_object('status', CASE WHEN i.status IN ('invited', 'opened') AND i.expires_at <= now()
+                                             THEN 'expired' ELSE i.status END,
+                              'at', COALESCE(i.accepted_at, i.opened_at, i.last_sent_at))
+       FROM manufacturer_invitations i WHERE i.organization_id = admin_manufacturer_overview.organization_id
+      ORDER BY CASE WHEN i.status = 'accepted' THEN 0
+                    WHEN i.status IN ('invited', 'opened') AND i.expires_at > now() THEN 1 ELSE 2 END,
+               i.updated_at DESC LIMIT 1) AS invite,
     -- a new company not approved yet: its source is still on the staged submission
     (SELECT json_build_object('source', ss.source, 'status', ss.status) FROM manufacturer_submissions ss
        WHERE ss.target_organization_id = admin_manufacturer_overview.organization_id AND ss.organization_id = ss.target_organization_id

@@ -15,6 +15,7 @@ import {
   PageHeader,
   Pagination,
   PillFilter,
+  InviteBadge,
   RecordBadge,
   ReviewBadge,
   SearchInput,
@@ -489,6 +490,11 @@ function Row({
         </td>
         <td>
           <ReviewBadge status={r.reviewStatus} />
+          {r.invite ? (
+            <div className="adm-cell-sub">
+              <InviteBadge invite={r.invite} />
+            </div>
+          ) : null}
         </td>
         <td>
           <Completeness value={r.completeness} done={r.requiredDone} total={r.requiredTotal} />

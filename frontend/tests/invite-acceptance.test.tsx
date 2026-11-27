@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   updatePassword: undefined as unknown as ReturnType<typeof vi.fn>,
   createExternalAccount: undefined as unknown as ReturnType<typeof vi.fn>,
   assigned: [] as string[],
+  claimNew: false,
 }));
 
 vi.mock("@clerk/nextjs/legacy", () => ({
@@ -60,6 +61,7 @@ beforeEach(() => {
     verification: { externalVerificationRedirectURL: new URL("https://accounts.google.com/o/oauth2/auth?x=1") },
   }));
   h.assigned = [];
+  h.claimNew = false;
   h.signIn = {
     create: vi.fn(async () => {
       h.session = { getToken: async () => "token-meena" };
@@ -73,7 +75,9 @@ beforeEach(() => {
     if (String(input).endsWith("/accept")) return new Response(JSON.stringify(h.accept.json), { status: h.accept.status });
     if (String(input).endsWith("/claim")) {
       const body = JSON.parse(String(init.body)) as { email: string };
-      return new Response(JSON.stringify({ status: "verify", email: body.email.toLowerCase() }), { status: 200 });
+      const email = body.email.toLowerCase();
+      return new Response(JSON.stringify(h.claimNew ? { status: "open", ticket: "ticket-new", email } : { status: "verify", email }),
+                          { status: 200 });
     }
     throw new Error(`unexpected ${input}`);
   });
@@ -213,7 +217,24 @@ describe("Manufacturer magic link page", () => {
     expect(h.setActive).not.toHaveBeenCalled();
   });
 
-  it("link made without an email: they enter their email, confirm the code Clerk sends, then the Terms", async () => {
+  it("link made without an email, new email: signed in straight away (no code), then the Terms", async () => {
+    h.open = { status: "claim", companyName: "Vaigai Polymers", email: "", contactName: "" };
+    h.claimNew = true;
+    const create = vi.fn(async () => {
+      h.session = { getToken: async () => "token-selvi" };
+      return { status: "complete", createdSessionId: "sess_new" };
+    });
+    h.signIn = { create };
+    await openPage();
+    fireEvent.change(await screen.findByLabelText("Your name"), { target: { value: "Selvi Arun" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "selvi@vaigai.in" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+    expect(create).toHaveBeenCalledWith({ strategy: "ticket", ticket: "ticket-new" });
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_new" });
+    expect(await screen.findByText(/You are signed in as selvi@vaigai.in/)).toBeInTheDocument();
+  });
+
+  it("link made without an email, email that already has an account: confirm the code Clerk sends", async () => {
     h.open = { status: "claim", companyName: "Vaigai Polymers", email: "", contactName: "" };
     const create = vi.fn(async () => ({
       supportedFirstFactors: [{ strategy: "email_code", emailAddressId: "idn_selvi" }],
@@ -230,7 +251,7 @@ describe("Manufacturer magic link page", () => {
 
     fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Selvi Arun" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "Selvi@Vaigai.in" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Email me a code" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
     const claim = h.requests.find((r) => r.url.endsWith("/claim"))!;
     expect(claim.body).toEqual({ email: "Selvi@Vaigai.in", name: "Selvi Arun" });
     expect(create).toHaveBeenCalledWith({ identifier: "selvi@vaigai.in" });
